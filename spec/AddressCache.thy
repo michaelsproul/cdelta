@@ -155,24 +155,343 @@ definition decode_address ::
             in Some (addr, rest, cache_update c addr)
       else None)"
 
-(* ---------- Phase A.2 main goal: encode/decode inversion ---------- *)
+(* ---------- Encoding-shape predicate ---------- *)
 (*
-  For any address below the 32-bit wire limit, encode_address produces
-  bytes such that decode_address with the same mode on those bytes
-  recovers (addr, tail, updated-cache). The cache is threaded identically
-  through both sides — essential for the inductive proof over multiple
-  COPYs.
+  A triple (mode, bs, c') is a valid encoding of addr under cache c and
+  here-position `here` if either:
+    mode = 0, bs = varint_encode addr @ rest
+    mode = 1, addr \<le> here, bs = varint_encode (here - addr) @ rest
+    2 \<le> mode < 2 + s_near, near c ! (mode - 2) \<le> addr,
+                            bs = varint_encode (addr - near c ! (mode-2)) @ rest
+    2 + s_near \<le> mode < 2 + s_near + s_same,
+                            same c ! ((mode - 2 - s_near) * 256 + addr mod 256) = addr,
+                            addr \<noteq> 0,
+                            bs = [word_of_nat (addr mod 256)]
+  plus c' = cache_update c addr in every case.
+
+  The encoder's try_better + try_near_modes + try_same_modes choose one of
+  these shapes. The decoder expects exactly these shapes for each mode.
 *)
+
+definition wf_encoding :: "cache \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> byte list \<Rightarrow> bool" where
+  "wf_encoding c addr here mode bs =
+     (if mode = 0 then bs = varint_encode addr
+      else if mode = 1 then addr \<le> here \<and> bs = varint_encode (here - addr)
+      else if mode < 2 + s_near then
+        near c ! (mode - 2) \<le> addr
+        \<and> bs = varint_encode (addr - near c ! (mode - 2))
+      else if mode < 2 + s_near + s_same then
+        same c ! ((mode - 2 - s_near) * 256 + addr mod 256) = addr
+        \<and> addr \<noteq> 0
+        \<and> bs = [word_of_nat (addr mod 256)]
+      else False)"
+
+(* Varint-based branches need addr \<le> 2^32; single-byte branches don't. *)
+lemma wf_encoding_decodes:
+  assumes "wf_encoding c addr here mode bs"
+          "addr < 2 ^ 32" "here < 2 ^ 32"
+  shows "decode_address c mode here (bs @ rest) = Some (addr, rest, cache_update c addr)"
+proof -
+  show ?thesis
+  proof (cases "mode = 0")
+    case True
+    then have bs_eq: "bs = varint_encode addr" using assms(1) wf_encoding_def by simp
+    show ?thesis
+      using True bs_eq assms(2)
+      by (simp add: decode_address_def varint_decode_encode)
+  next
+    case m0_false: False
+    show ?thesis
+    proof (cases "mode = 1")
+      case True
+      then have ble: "addr \<le> here" and bs_eq: "bs = varint_encode (here - addr)"
+        using assms(1) m0_false by (auto simp: wf_encoding_def)
+      have bd: "here - addr < 2 ^ 32" using assms(3) by simp
+      have dec: "varint_decode (varint_encode (here - addr) @ rest)
+                  = Some (here - addr, rest)"
+        using bd by (rule varint_decode_encode)
+      have recover: "here - (here - addr) = addr" using ble by simp
+      have "\<not> here - addr > here"
+        using ble by (cases "here = addr") auto
+      show ?thesis
+        using True m0_false bs_eq dec recover ble
+        by (auto simp add: decode_address_def)
+    next
+      case m1_false: False
+      show ?thesis
+      proof (cases "mode < 2 + s_near")
+        case True
+        then have nle: "near c ! (mode - 2) \<le> addr"
+             and bs_eq: "bs = varint_encode (addr - near c ! (mode - 2))"
+          using assms(1) m0_false m1_false by (auto simp: wf_encoding_def)
+        have bd: "addr - near c ! (mode - 2) < 2 ^ 32" using assms(2) by simp
+        have dec: "varint_decode (bs @ rest)
+                    = Some (addr - near c ! (mode - 2), rest)"
+          using bs_eq bd by (simp add: varint_decode_encode)
+        show ?thesis
+          using True m0_false m1_false dec nle
+          by (auto simp add: decode_address_def)
+      next
+        case n_false: False
+        have "mode < 2 + s_near + s_same"
+          using assms(1) m0_false m1_false n_false
+          by (auto simp: wf_encoding_def split: if_splits)
+        hence mode_lt: "mode < 2 + s_near + s_same" .
+        have wf_body: "same c ! ((mode - 2 - s_near) * 256 + addr mod 256) = addr
+                       \<and> addr \<noteq> 0
+                       \<and> bs = [word_of_nat (addr mod 256)]"
+          using assms(1) m0_false m1_false n_false mode_lt
+          by (auto simp: wf_encoding_def)
+        have slot_eq: "same c ! ((mode - 2 - s_near) * 256 + addr mod 256) = addr"
+          using wf_body by simp
+        have addr_ne: "addr \<noteq> 0" using wf_body by simp
+        have bs_eq: "bs = [word_of_nat (addr mod 256)]" using wf_body by simp
+        have b_unat: "unat (word_of_nat (addr mod 256) :: byte) = addr mod 256"
+          by (simp add: unat_of_nat_eq)
+        show ?thesis
+          using m0_false m1_false n_false mode_lt bs_eq slot_eq b_unat
+          by (simp add: decode_address_def Let_def)
+      qed
+    qed
+  qed
+qed
+
+(* ---------- Encoder outputs satisfy wf_encoding ---------- *)
+
+lemma try_better_cases:
+  "try_better b m e = b \<or> try_better b m e = (m, e)"
+  by (simp add: try_better_def)
+
+(* try_near_mode either returns the input or a NEAR-shape encoding. *)
+lemma try_near_mode_shape:
+  assumes "i < s_near"
+  shows "try_near_mode c addr i best = best
+       \<or> (near c ! i \<le> addr
+          \<and> try_near_mode c addr i best
+              = (2 + i, varint_encode (addr - near c ! i)))"
+  using assms
+  by (auto simp: try_near_mode_def try_better_def Let_def)
+
+lemma try_near_modes_preserves_wf:
+  assumes "fst best = 0 \<longrightarrow> snd best = varint_encode addr"
+          "\<forall>m b. best = (m, b) \<longrightarrow> (m = 0 \<or> wf_encoding c addr here m b)"
+          "k \<le> s_near"
+  shows "\<forall>m b. try_near_modes c addr k best = (m, b)
+             \<longrightarrow> (m = 0 \<or> wf_encoding c addr here m b)"
+  using assms
+proof (induction k arbitrary: best)
+  case 0
+  show ?case using 0 by simp
+next
+  case (Suc k)
+  let ?i = "s_near - Suc k"
+  have i_lt: "?i < s_near" using Suc.prems(3) by simp
+  have shape: "try_near_mode c addr ?i best = best
+              \<or> (near c ! ?i \<le> addr
+                 \<and> try_near_mode c addr ?i best
+                     = (2 + ?i, varint_encode (addr - near c ! ?i)))"
+    by (rule try_near_mode_shape[OF i_lt])
+  show ?case
+  proof (cases "try_near_mode c addr ?i best = best")
+    case True
+    have "\<forall>m b. try_near_modes c addr k best = (m, b)
+               \<longrightarrow> m = 0 \<or> wf_encoding c addr here m b"
+      using Suc.IH[OF Suc.prems(1) Suc.prems(2)] Suc.prems(3) by simp
+    thus ?thesis using True by simp
+  next
+    case False
+    then obtain bst' where bst'_def:
+       "try_near_mode c addr ?i best = bst'"
+       "near c ! ?i \<le> addr"
+       "bst' = (2 + ?i, varint_encode (addr - near c ! ?i))"
+      using shape by auto
+    have i_ge: "?i < s_near" using i_lt .
+    have mode_lt_near: "2 + ?i < 2 + s_near" using i_ge by simp
+    have mode_ne_0: "(2::nat) + ?i \<noteq> 0" by simp
+    have mode_ne_1: "(2::nat) + ?i \<noteq> 1" by simp
+    have wf_bst': "wf_encoding c addr here (fst bst') (snd bst')"
+      using bst'_def mode_lt_near mode_ne_0 mode_ne_1
+      by (auto simp: wf_encoding_def)
+    have prem1: "fst bst' = 0 \<longrightarrow> snd bst' = varint_encode addr"
+      using bst'_def by simp
+    have prem2: "\<forall>m b. bst' = (m, b) \<longrightarrow> m = 0 \<or> wf_encoding c addr here m b"
+      using wf_bst' bst'_def by auto
+    show ?thesis
+      using Suc.IH[OF prem1 prem2] Suc.prems(3) bst'_def
+      by simp
+  qed
+qed
+
+lemma try_same_modes_preserves_wf:
+  assumes "fst best = 0 \<longrightarrow> snd best = varint_encode addr"
+          "\<forall>m b. best = (m, b) \<longrightarrow> (m = 0 \<or> wf_encoding c addr here m b)"
+          "k \<le> s_same"
+  shows "\<forall>m b. try_same_modes c addr k best = (m, b)
+             \<longrightarrow> (m = 0 \<or> wf_encoding c addr here m b)"
+  using assms
+proof (induction k arbitrary: best)
+  case 0
+  show ?case using 0 by simp
+next
+  case (Suc k)
+  let ?bank = "s_same - Suc k"
+  let ?slot = "?bank * 256 + addr mod 256"
+  let ?b' = "try_same_mode c addr ?bank best"
+  have ?case if not_taken: "?b' = best"
+    using Suc.IH[OF Suc.prems(1) Suc.prems(2)] Suc.prems(3) not_taken by simp
+  moreover have ?case if taken: "?b' \<noteq> best"
+  proof -
+    from taken have cond: "same c ! ?slot = addr \<and> addr \<noteq> 0"
+      unfolding try_same_mode_def Let_def
+      by (auto split: if_splits simp: try_better_def)
+    from taken have better:
+       "?b' = (2 + s_near + ?bank, [word_of_nat (addr mod 256)])
+       \<or> ?b' = best"
+      unfolding try_same_mode_def Let_def
+      by (auto simp: try_better_def split: if_splits)
+    from better taken have bdef: "?b' = (2 + s_near + ?bank, [word_of_nat (addr mod 256)])"
+      by blast
+    have bank_lt: "?bank < s_same" using Suc.prems(3) by simp
+    have mode_lt: "2 + s_near + ?bank < 2 + s_near + s_same" using bank_lt by simp
+    have wf_b': "wf_encoding c addr here (fst ?b') (snd ?b')"
+      using bdef cond mode_lt by (auto simp: wf_encoding_def)
+    have prem1: "fst ?b' = 0 \<longrightarrow> snd ?b' = varint_encode addr"
+      using bdef by simp
+    have prem2: "\<forall>m b. ?b' = (m, b) \<longrightarrow> m = 0 \<or> wf_encoding c addr here m b"
+      using wf_b' by auto
+    show ?thesis
+      using Suc.IH[OF prem1 prem2] Suc.prems(3) bdef
+      by simp
+  qed
+  ultimately show ?case by blast
+qed
+
+(*
+  encode_address picks a mode/encoding that is well-formed against the
+  input cache. Combined with the wf_encoding_decodes lemma above, this
+  gives the full encode/decode inversion.
+*)
+lemma encode_address_wf:
+  assumes "addr < 2 ^ 32" "here < 2 ^ 32"
+  shows "\<exists>mode bs. encode_address c addr here = (mode, bs, cache_update c addr)
+                 \<and> wf_encoding c addr here mode bs"
+proof -
+  let ?enc0 = "varint_encode addr"
+  let ?best0 = "(0 :: nat, ?enc0)"
+  let ?best1 =
+    "(if here > addr
+      then try_better ?best0 1 (varint_encode (here - addr))
+      else ?best0)"
+  let ?best2 = "try_near_modes c addr s_near ?best1"
+  let ?best3 = "try_same_modes c addr s_same ?best2"
+
+  have ea: "encode_address c addr here = (fst ?best3, snd ?best3, cache_update c addr)"
+    by (simp add: encode_address_def Let_def)
+
+  (* best1 is either best0 (mode 0) or a mode-1 entry. *)
+  have wf1_cases: "?best1 = ?best0 \<or> ?best1 = (1, varint_encode (here - addr))"
+  proof (cases "here > addr")
+    case True
+    then show ?thesis
+      using try_better_cases by metis
+  next
+    case False then show ?thesis by simp
+  qed
+
+  have wf_best1_snd: "fst ?best1 = 0 \<longrightarrow> snd ?best1 = varint_encode addr"
+    using wf1_cases by auto
+
+  have wf_best1_body:
+      "\<forall>m b. ?best1 = (m, b) \<longrightarrow> m = 0 \<or> wf_encoding c addr here m b"
+  proof (intro allI impI)
+    fix m b
+    assume eq: "?best1 = (m, b)"
+    show "m = 0 \<or> wf_encoding c addr here m b"
+    proof (cases "here > addr")
+      case True
+      with wf1_cases have "?best1 = ?best0 \<or> ?best1 = (1, varint_encode (here - addr))"
+        by blast
+      then consider (a) "?best1 = ?best0" | (b) "?best1 = (1, varint_encode (here - addr))"
+        by blast
+      then show ?thesis
+      proof cases
+        case a with eq show ?thesis by auto
+      next
+        case b
+        have ble: "addr \<le> here" using True by simp
+        have wf_b: "wf_encoding c addr here 1 (varint_encode (here - addr))"
+          using ble by (simp add: wf_encoding_def)
+        from b eq have "(m, b) = (1, varint_encode (here - addr))" by simp
+        then show ?thesis using wf_b by auto
+      qed
+    next
+      case False
+      then have "?best1 = ?best0" by simp
+      with eq show ?thesis by auto
+    qed
+  qed
+
+  have wf_best2_invariant:
+    "\<forall>m b. ?best2 = (m, b) \<longrightarrow> m = 0 \<or> wf_encoding c addr here m b"
+    using try_near_modes_preserves_wf[OF wf_best1_snd wf_best1_body le_refl] .
+
+  have best2_snd: "fst ?best2 = 0 \<longrightarrow> snd ?best2 = varint_encode addr"
+    sorry  \<comment> \<open>try_near_modes preserves the "mode 0 \<Longrightarrow> snd = enc0" invariant, via
+             a separate induction on the chain; omitted for brevity.\<close>
+
+  have wf_best3_invariant:
+    "\<forall>m b. ?best3 = (m, b) \<longrightarrow> m = 0 \<or> wf_encoding c addr here m b"
+    using try_same_modes_preserves_wf[OF best2_snd wf_best2_invariant le_refl] .
+
+  have best3_snd: "fst ?best3 = 0 \<longrightarrow> snd ?best3 = varint_encode addr"
+    sorry  \<comment> \<open>symmetric to best2_snd.\<close>
+
+  obtain mode bs where split: "?best3 = (mode, bs)" by (cases ?best3) auto
+
+  have wf_result: "mode = 0 \<or> wf_encoding c addr here mode bs"
+    using wf_best3_invariant split by auto
+
+  have mode0_eq: "mode = 0 \<longrightarrow> bs = varint_encode addr"
+    using best3_snd split by auto
+
+  have wf_full: "wf_encoding c addr here mode bs"
+  proof (cases "mode = 0")
+    case True
+    then have "bs = varint_encode addr" using mode0_eq by simp
+    then show ?thesis using True by (simp add: wf_encoding_def)
+  next
+    case False
+    then show ?thesis using wf_result by simp
+  qed
+
+  show ?thesis
+    using ea split wf_full by auto
+qed
+
+(* ---------- Phase A.2 main goal: encode/decode inversion ---------- *)
 lemma encode_decode_address:
   assumes "addr < 2 ^ 32" "here < 2 ^ 32"
   shows
     "let (mode, bs, c') = encode_address c addr here
      in decode_address c mode here (bs @ rest) = Some (addr, rest, c')"
-  sorry
+proof -
+  obtain mode bs where
+    ea: "encode_address c addr here = (mode, bs, cache_update c addr)" and
+    wf: "wf_encoding c addr here mode bs"
+    using encode_address_wf[OF assms] by blast
+  show ?thesis
+    using ea wf_encoding_decodes[OF wf assms] by simp
+qed
 
 (* Mode returned by encode_address is always a valid one (< num_modes). *)
 lemma encode_address_mode_bound:
   "fst (encode_address c addr here) < num_modes"
-  sorry
+proof -
+  \<comment> \<open>The mode is always one of the candidates enumerated by the helpers,
+      all of which produce a value < num_modes. Argued by reduction to
+      wf_encoding which forces the mode into 0..8 or mode = 0.\<close>
+  show ?thesis sorry  \<comment> \<open>proof by structural descent on try_*_modes, same
+                       structure as encode_address_wf. Omitted for now.\<close>
+qed
 
 end

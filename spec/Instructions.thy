@@ -108,11 +108,16 @@ definition copy_valid ::
   shape-preserving lemmas, which are cheap.
 *)
 
-lemma exec_inst_list_length_add:
-  assumes "\<forall>i \<in> set is. \<forall>n addr. i = RCopy addr n \<longrightarrow> True"
-  shows "length (exec_inst_list src is tgt)
-       = length tgt + sum_list (map (\<lambda>i. case i of
-            RAdd bs \<Rightarrow> length bs | RCopy _ n \<Rightarrow> n | RRun _ n \<Rightarrow> n) is)"
-  sorry
+lemma exec_inst_length:
+  "length (exec_inst src i tgt)
+     = length tgt + (case i of RAdd bs \<Rightarrow> length bs
+                              | RCopy _ n \<Rightarrow> n | RRun _ n \<Rightarrow> n)"
+  by (cases i) (simp_all add: copy_loop_length)
+
+lemma exec_inst_list_length:
+  "length (exec_inst_list src is tgt)
+     = length tgt + sum_list (map (\<lambda>i. case i of
+          RAdd bs \<Rightarrow> length bs | RCopy _ n \<Rightarrow> n | RRun _ n \<Rightarrow> n) is)"
+  by (induction "is" arbitrary: tgt) (simp_all add: exec_inst_length)
 
 end
