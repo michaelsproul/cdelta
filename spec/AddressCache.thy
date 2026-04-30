@@ -322,6 +322,57 @@ next
   qed
 qed
 
+(*
+  When the `best` has mode 0 and enc-0 as its bytes, iterating try_near_modes
+  either preserves this invariant or switches to a non-mode-0 choice. This
+  lets us carry the "mode 0 \<Longrightarrow> snd = varint_encode addr" invariant along
+  the chain.
+*)
+lemma try_near_modes_preserves_snd0:
+  assumes "fst best = 0 \<longrightarrow> snd best = varint_encode addr"
+          "k \<le> s_near"
+  shows "fst (try_near_modes c addr k best) = 0
+       \<longrightarrow> snd (try_near_modes c addr k best) = varint_encode addr"
+  using assms
+proof (induction k arbitrary: best)
+  case 0 then show ?case by simp
+next
+  case (Suc k)
+  let ?i = "s_near - Suc k"
+  have shape: "try_near_mode c addr ?i best = best
+              \<or> try_near_mode c addr ?i best
+                   = (2 + ?i, varint_encode (addr - near c ! ?i))"
+    unfolding try_near_mode_def Let_def
+    by (auto simp: try_better_def)
+  let ?b' = "try_near_mode c addr ?i best"
+  have prem1: "fst ?b' = 0 \<longrightarrow> snd ?b' = varint_encode addr"
+    using shape Suc.prems(1) by auto
+  show ?case
+    using Suc.IH[OF prem1] Suc.prems(2) by simp
+qed
+
+lemma try_same_modes_preserves_snd0:
+  assumes "fst best = 0 \<longrightarrow> snd best = varint_encode addr"
+          "k \<le> s_same"
+  shows "fst (try_same_modes c addr k best) = 0
+       \<longrightarrow> snd (try_same_modes c addr k best) = varint_encode addr"
+  using assms
+proof (induction k arbitrary: best)
+  case 0 then show ?case by simp
+next
+  case (Suc k)
+  let ?bank = "s_same - Suc k"
+  let ?b' = "try_same_mode c addr ?bank best"
+  have shape: "?b' = best
+              \<or> ?b' = (2 + s_near + ?bank, [word_of_nat (addr mod 256)])"
+    unfolding try_same_mode_def Let_def
+    by (auto simp: try_better_def)
+  have prem1: "fst ?b' = 0 \<longrightarrow> snd ?b' = varint_encode addr"
+    using shape Suc.prems(1) by auto
+  show ?case
+    using Suc.IH[OF prem1] Suc.prems(2) by simp
+qed
+
 lemma try_same_modes_preserves_wf:
   assumes "fst best = 0 \<longrightarrow> snd best = varint_encode addr"
           "\<forall>m b. best = (m, b) \<longrightarrow> (m = 0 \<or> wf_encoding c addr here m b)"
@@ -436,15 +487,14 @@ proof -
     using try_near_modes_preserves_wf[OF wf_best1_snd wf_best1_body le_refl] .
 
   have best2_snd: "fst ?best2 = 0 \<longrightarrow> snd ?best2 = varint_encode addr"
-    sorry  \<comment> \<open>try_near_modes preserves the "mode 0 \<Longrightarrow> snd = enc0" invariant, via
-             a separate induction on the chain; omitted for brevity.\<close>
+    using try_near_modes_preserves_snd0[OF wf_best1_snd le_refl] .
 
   have wf_best3_invariant:
     "\<forall>m b. ?best3 = (m, b) \<longrightarrow> m = 0 \<or> wf_encoding c addr here m b"
     using try_same_modes_preserves_wf[OF best2_snd wf_best2_invariant le_refl] .
 
   have best3_snd: "fst ?best3 = 0 \<longrightarrow> snd ?best3 = varint_encode addr"
-    sorry  \<comment> \<open>symmetric to best2_snd.\<close>
+    using try_same_modes_preserves_snd0[OF best2_snd le_refl] .
 
   obtain mode bs where split: "?best3 = (mode, bs)" by (cases ?best3) auto
 
@@ -483,15 +533,71 @@ proof -
     using ea wf_encoding_decodes[OF wf assms] by simp
 qed
 
+(* Helper: if best's mode < num_modes, try_near_mode preserves that. *)
+lemma try_near_mode_mode_bound:
+  assumes "fst best < num_modes" "i < s_near"
+  shows "fst (try_near_mode c addr i best) < num_modes"
+  using assms
+  unfolding try_near_mode_def Let_def try_better_def
+  by (auto simp: num_modes_def s_near_def s_same_def)
+
+lemma try_near_modes_mode_bound:
+  assumes "fst best < num_modes" "k \<le> s_near"
+  shows "fst (try_near_modes c addr k best) < num_modes"
+  using assms
+proof (induction k arbitrary: best)
+  case 0 then show ?case by simp
+next
+  case (Suc k)
+  let ?i = "s_near - Suc k"
+  have "?i < s_near" using Suc.prems(2) by simp
+  then have "fst (try_near_mode c addr ?i best) < num_modes"
+    using try_near_mode_mode_bound[OF Suc.prems(1)] by simp
+  then show ?case using Suc.IH Suc.prems(2) by simp
+qed
+
+lemma try_same_mode_mode_bound:
+  assumes "fst best < num_modes" "bank < s_same"
+  shows "fst (try_same_mode c addr bank best) < num_modes"
+  using assms
+  unfolding try_same_mode_def Let_def try_better_def
+  by (auto simp: num_modes_def s_near_def s_same_def)
+
+lemma try_same_modes_mode_bound:
+  assumes "fst best < num_modes" "k \<le> s_same"
+  shows "fst (try_same_modes c addr k best) < num_modes"
+  using assms
+proof (induction k arbitrary: best)
+  case 0 then show ?case by simp
+next
+  case (Suc k)
+  let ?bank = "s_same - Suc k"
+  have "?bank < s_same" using Suc.prems(2) by simp
+  then have "fst (try_same_mode c addr ?bank best) < num_modes"
+    using try_same_mode_mode_bound[OF Suc.prems(1)] by simp
+  then show ?case using Suc.IH Suc.prems(2) by simp
+qed
+
 (* Mode returned by encode_address is always a valid one (< num_modes). *)
 lemma encode_address_mode_bound:
   "fst (encode_address c addr here) < num_modes"
 proof -
-  \<comment> \<open>The mode is always one of the candidates enumerated by the helpers,
-      all of which produce a value < num_modes. Argued by reduction to
-      wf_encoding which forces the mode into 0..8 or mode = 0.\<close>
-  show ?thesis sorry  \<comment> \<open>proof by structural descent on try_*_modes, same
-                       structure as encode_address_wf. Omitted for now.\<close>
+  let ?best1 =
+    "(if here > addr
+      then try_better (0 :: nat, varint_encode addr) 1 (varint_encode (here - addr))
+      else (0, varint_encode addr))"
+  have b0: "fst ((0 :: nat, varint_encode addr)) < num_modes"
+    by (simp add: num_modes_def)
+  have b1: "fst ?best1 < num_modes"
+    unfolding try_better_def by (auto simp: num_modes_def)
+  let ?best2 = "try_near_modes c addr s_near ?best1"
+  have b2: "fst ?best2 < num_modes"
+    using try_near_modes_mode_bound[OF b1 le_refl] .
+  let ?best3 = "try_same_modes c addr s_same ?best2"
+  have b3: "fst ?best3 < num_modes"
+    using try_same_modes_mode_bound[OF b2 le_refl] .
+  show ?thesis
+    using b3 by (simp add: encode_address_def Let_def)
 qed
 
 end
