@@ -160,16 +160,42 @@ qed
   regime where the encoder emits a single small ADD. That's sufficient
   to exercise the header / window / instruction / data layers end-to-end.
 *)
+(*
+  The encoder, with the degenerate single-RAdd matcher, produces a
+  concrete serialized byte list. Here we state and prove the shape of
+  the output for the small (1..17) target, empty-source case.
+
+  NB: for this lemma we only need the list-shape equation; the varint
+  roundtrip is exercised transitively by parse_window.
+*)
+lemma encode_spec_small_empty_shape:
+  assumes "1 \<le> length tgt" "length tgt \<le> 17"
+  shows "encode_spec [] tgt =
+           magic_bytes @ [0x00, 0x00]
+         @ varint_encode (1 + varint_size (length tgt) + varint_size (length tgt)
+                         + varint_size 1 + varint_size 0
+                         + length tgt + 1)
+         @ varint_encode (length tgt)
+         @ [0x00]
+         @ varint_encode (length tgt)
+         @ varint_encode 1
+         @ varint_encode 0
+         @ tgt
+         @ [word_of_nat (1 + length tgt) :: byte]"
+  using encode_window_small_empty_src[OF assms]
+  by (simp add: encode_spec_def generate_instructions_def serialize_def Let_def
+                split_def magic_bytes_def add.commute add.left_commute)
+
 theorem spec_roundtrip_small:
   assumes "1 \<le> length tgt" "length tgt \<le> 17"
           "length tgt < 2 ^ 32"
   shows   "decode_spec (encode_spec [] tgt) [] = Inl tgt"
-  sorry  \<comment> \<open>Structural composition of parse_header_of_magic,
-            decode_one_add_small, and the decode_spec definition.
-            Deferred: the serialize output structure doesn't line up
-            verbatim with parse_window's consumption order without
-            further bookkeeping lemmas. See planning/proof-strategy.md
-            §Phase A.6.\<close>
+  sorry  \<comment> \<open>Remaining gap: parse_window on the serialized output is the
+            one big missing step. Proof is mechanical (repeated
+            varint_decode_encode) but each step requires unfolding a
+            deeply nested case-expression, and the total length of the
+            explicit proof script exceeds what's useful overnight. See
+            planning/spec-progress.md.\<close>
 
 theorem spec_roundtrip:
   assumes "length src < 2 ^ 32"
