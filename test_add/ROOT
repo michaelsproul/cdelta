@@ -1,0 +1,4 @@
+session TestAdd = AutoCorres2 +
+  options [timeout = 600]
+  theories
+    Add
