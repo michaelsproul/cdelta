@@ -1,0 +1,28 @@
+[package]
+name = "cdelta-harness"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Benchmark and correctness harness for cdelta. Compares against xdelta3-rs as an oracle."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xdelta3 = "0.1.5"
+
+[build-dependencies]
+cc = "1"
+
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+tempfile = "3"
+
+[[bench]]
+name = "case01"
+harness = false
+
+[profile.bench]
+lto = "thin"
+codegen-units = 1
+debug = 1
