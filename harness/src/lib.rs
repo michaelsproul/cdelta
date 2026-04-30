@@ -54,31 +54,44 @@ pub mod xdelta3_oracle {
 }
 
 pub mod cdelta {
+    use std::sync::Mutex;
+
     use super::*;
+
+    /// Encoder + decoder both use file-scope static state (required for
+    /// AutoCorres2 heap-lift tractability — see feedback_autocorres_c_subset.md).
+    /// That means concurrent calls from Rust would race. Serialise them.
+    static LOCK: Mutex<()> = Mutex::new(());
 
     pub struct Cdelta;
 
     impl VcdiffImpl for Cdelta {
         const NAME: &'static str = "cdelta";
 
-        /// Our encoder is the no-source single-ADD encoder. `source` is
-        /// ignored; the result round-trips via any VCDIFF decoder but is
-        /// not a compressed delta against `source`. This exists so the
-        /// benchmark bar chart is comparable-shaped, not because it's a
-        /// fair encode comparison.
-        fn encode(target: &[u8], _source: &[u8]) -> Result<Bytes, Error> {
-            // Upper bound: 5-byte header + 1-byte win indicator + up to 5
-            // bytes for each of {dlen, tgt_len, data_len, inst_len, addr_len}
-            // + 1-byte delta indicator + 1-byte ADD opcode + 5-byte size
-            // varint + target bytes. Pad to 64 to be safe.
-            let cap = target.len() + 64;
-            let mut out = vec![0u8; cap];
+        fn encode(target: &[u8], source: &[u8]) -> Result<Bytes, Error> {
+            let _g = LOCK.lock().unwrap();
+            let margin: usize = 64;
+            let section_cap = target.len() + margin;
+            let out_cap = target.len() + source.len() / 8 + 1024;
+            let mut next_arr = vec![0u32; source.len().max(4)];
+            let mut pending = vec![0u8; target.len().max(1)];
+            let mut data_sec = vec![0u8; section_cap];
+            let mut inst_sec = vec![0u8; section_cap];
+            let mut addr_sec = vec![0u8; section_cap];
+            let mut out = vec![0u8; out_cap];
             let n = unsafe {
-                ffi::vcdiff_encode_add(
+                ffi::vcdiff_encode(
                     out.as_mut_ptr(),
-                    cap as u32,
+                    out_cap as u32,
+                    source.as_ptr() as *mut u8,
+                    source.len() as u32,
                     target.as_ptr() as *mut u8,
                     target.len() as u32,
+                    next_arr.as_mut_ptr(),
+                    pending.as_mut_ptr(), pending.len() as u32,
+                    data_sec.as_mut_ptr(), section_cap as u32,
+                    inst_sec.as_mut_ptr(), section_cap as u32,
+                    addr_sec.as_mut_ptr(), section_cap as u32,
                 )
             };
             if n == 0 {
@@ -89,6 +102,7 @@ pub mod cdelta {
         }
 
         fn decode(delta: &[u8], source: &[u8]) -> Result<Bytes, Error> {
+            let _g = LOCK.lock().unwrap();
             // Target window length is stored in the delta header; we don't
             // peek it here, so over-provision. Any real target is ≤ a
             // small multiple of source+delta for normal use.
@@ -116,11 +130,15 @@ pub mod cdelta {
 
     pub mod ffi {
         extern "C" {
-            pub fn vcdiff_encode_add(
-                out: *mut u8,
-                out_cap: u32,
-                target: *mut u8,
-                target_len: u32,
+            pub fn vcdiff_encode(
+                out: *mut u8, out_cap: u32,
+                src: *mut u8, src_len: u32,
+                tgt: *mut u8, tgt_len: u32,
+                next_arr: *mut u32,
+                pending: *mut u8, pending_cap: u32,
+                data_sec: *mut u8, data_cap: u32,
+                inst_sec: *mut u8, inst_cap: u32,
+                addr_sec: *mut u8, addr_cap: u32,
             ) -> u32;
 
             pub fn vcdiff_decode(

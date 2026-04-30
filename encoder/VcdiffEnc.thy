@@ -8,8 +8,7 @@ autocorres "vcdiff_enc.c"
 
 context vcdiff_enc_global_addresses begin
 
-thm vcdiff_varint_size'_def
-thm vcdiff_varint_write'_def
+thm vcdiff_encode'_def
 thm vcdiff_encode_add'_def
 
 end

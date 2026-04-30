@@ -112,3 +112,70 @@ fn case01_roundtrip() {
     assert_eq!(got.len(), target.len(), "length mismatch");
     assert_eq!(got, target, "content mismatch");
 }
+
+/// Encode with cdelta, decode with both cdelta and xdelta3 — exercises our
+/// encoder end-to-end. Also reports compression ratio vs xdelta3 -S none
+/// so regressions in matcher quality are visible in test output.
+use cdelta_harness::Xdelta3;
+
+fn xdelta3_decode_via_cli(delta: &[u8], source: &[u8]) -> Vec<u8> {
+    let dir = tempfile::tempdir().unwrap();
+    let sp = dir.path().join("s");
+    let dp = dir.path().join("d");
+    let op = dir.path().join("o");
+    std::fs::write(&sp, source).unwrap();
+    std::fs::write(&dp, delta).unwrap();
+    let status = Command::new("xdelta3")
+        .args(["-d", "-f", "-s"])
+        .arg(&sp).arg(&dp).arg(&op)
+        .status()
+        .expect("run xdelta3 -d");
+    assert!(status.success(), "xdelta3 -d failed");
+    std::fs::read(&op).unwrap()
+}
+
+#[test]
+fn cdelta_encode_roundtrip() {
+    let sizes = [1 << 10, 1 << 14, 1 << 17, 1 << 19, 1 << 20, 1 << 22, 1 << 23];
+    for &n in &sizes {
+        let (src, tgt) = synth_pair(n);
+
+        let ours = Cdelta::encode(&tgt, &src).expect("cdelta encode");
+        let got1 = Cdelta::decode(&ours, &src).expect("cdelta decode");
+        assert_eq!(got1, tgt, "cdelta-roundtrip mismatch at size {n}");
+
+        // Sanity: xdelta3's decoder also accepts our output.
+        let got2 = xdelta3_decode_via_cli(&ours, &src);
+        assert_eq!(got2, tgt, "xdelta3 decoded our delta differently at size {n}");
+
+        let xd3 = Xdelta3::encode(&tgt, &src).expect("xdelta3 encode");
+        eprintln!(
+            "size {n}: cdelta={} xdelta3={} ratio={:.2}",
+            ours.len(),
+            xd3.len(),
+            ours.len() as f64 / xd3.len() as f64
+        );
+    }
+}
+
+#[test]
+fn cdelta_encode_case01() {
+    let source = std::fs::read(case01::source()).expect("read source");
+    let target = std::fs::read(case01::target()).expect("read target");
+
+    let ours = Cdelta::encode(&target, &source).expect("cdelta encode");
+    let got = Cdelta::decode(&ours, &source).expect("cdelta decode");
+    assert_eq!(got.len(), target.len());
+    assert_eq!(got, target);
+
+    let got2 = xdelta3_decode_via_cli(&ours, &source);
+    assert_eq!(got2, target, "xdelta3 disagreed with our decoder");
+
+    let xd3 = Xdelta3::encode(&target, &source).expect("xdelta3 encode");
+    eprintln!(
+        "case01 encode: cdelta={} xdelta3(w/lzma)={} ratio={:.2}",
+        ours.len(),
+        xd3.len(),
+        ours.len() as f64 / xd3.len() as f64
+    );
+}
