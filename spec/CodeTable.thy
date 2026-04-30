@@ -138,13 +138,36 @@ lemma default_entry_add_small:
 lemma default_entry_copy_varint:
   assumes "mode \<le> 8"
   shows   "default_entry (19 + mode * 16) = (copy_hi 0 mode, noop_hi)"
-  sorry
+proof -
+  have op_ub: "19 + mode * 16 \<le> 162" using assms by simp
+  have div_eq: "(mode * 16) div 16 = mode" by simp
+  have mod_eq: "(mode * 16) mod 16 = 0" by simp
+  show ?thesis
+    using op_ub div_eq mod_eq
+    by (simp add: default_entry_def Let_def)
+qed
 
 lemma default_entry_copy_small:
   assumes "mode \<le> 8" "4 \<le> sz" "sz \<le> 18"
   shows   "default_entry (19 + mode * 16 + sz - 3)
          = (copy_hi sz mode, noop_hi)"
-  sorry
+proof -
+  let ?op = "19 + mode * 16 + sz - 3"
+  have sz_bds: "1 \<le> sz - 3" "sz - 3 \<le> 15" using assms by simp_all
+  have key: "?op - 19 = mode * 16 + (sz - 3)" using assms(2) by simp
+  have ub162: "?op \<le> 162" using assms by simp
+  have op_gt_18: "?op > 18" using assms(2) by simp
+  have slot_lt_16: "sz - 3 < 16" using sz_bds by linarith
+  have div_eq: "(mode * 16 + (sz - 3)) div 16 = mode"
+    using slot_lt_16 by simp
+  have mod_eq: "(mode * 16 + (sz - 3)) mod 16 = sz - 3"
+    using slot_lt_16 by simp
+  have slot_ne_0: "sz - 3 \<noteq> 0" using sz_bds by simp
+  have slot_plus_3: "(sz - 3) + 3 = sz" using assms(2) by simp
+  show ?thesis
+    using ub162 op_gt_18 div_eq mod_eq slot_ne_0 slot_plus_3 key
+    by (simp add: default_entry_def Let_def)
+qed
 
 lemma default_entry_add_copy:
   assumes "1 \<le> add_sz" "add_sz \<le> 4"
@@ -152,12 +175,73 @@ lemma default_entry_add_copy:
           \<or> (6 \<le> mode \<and> mode \<le> 8 \<and> copy_sz = 4))"
   shows "\<exists>op. find_add_copy_opcode add_sz copy_sz mode = Some op
            \<and> default_entry op = (add_hi add_sz, copy_hi copy_sz mode)"
-  sorry
+proof (cases "mode \<le> 5 \<and> 4 \<le> copy_sz \<and> copy_sz \<le> 6")
+  case True
+  let ?op = "163 + mode * 12 + (add_sz - 1) * 3 + (copy_sz - 4)"
+  have opcode: "find_add_copy_opcode add_sz copy_sz mode = Some ?op"
+    using assms(1,2) True by (simp add: find_add_copy_opcode_def)
+  have a_bd: "add_sz - 1 \<le> 3" using assms(2) by simp
+  from True have c_bd: "copy_sz - 4 \<le> 2" by linarith
+  have inner: "(add_sz - 1) * 3 + (copy_sz - 4) < 12"
+    using a_bd c_bd by linarith
+  have mode_bd: "mode \<le> 5" using True by simp
+  have op_inner: "mode * 12 + ((add_sz - 1) * 3 + (copy_sz - 4)) \<le> 71"
+    using mode_bd inner by linarith
+  have ub234: "?op \<le> 234" using op_inner by simp
+  have gt_162: "?op > 162" by simp
+  have div_eq: "(mode * 12 + ((add_sz - 1) * 3 + (copy_sz - 4))) div 12 = mode"
+    using inner by simp
+  have mod_eq: "(mode * 12 + ((add_sz - 1) * 3 + (copy_sz - 4))) mod 12
+                 = (add_sz - 1) * 3 + (copy_sz - 4)"
+    using inner by simp
+  have inner_div: "((add_sz - 1) * 3 + (copy_sz - 4)) div 3 = add_sz - 1"
+    using c_bd by simp
+  have inner_mod: "((add_sz - 1) * 3 + (copy_sz - 4)) mod 3 = copy_sz - 4"
+    using c_bd by simp
+  have add_sz_eq: "add_sz - 1 + 1 = add_sz" using assms(1) by simp
+  have copy_sz_eq: "copy_sz - 4 + 4 = copy_sz" using True by simp
+  have key: "?op - 163 = mode * 12 + ((add_sz - 1) * 3 + (copy_sz - 4))"
+    by simp
+  have entry: "default_entry ?op = (add_hi add_sz, copy_hi copy_sz mode)"
+    using ub234 gt_162 div_eq mod_eq inner_div inner_mod add_sz_eq copy_sz_eq
+    by (auto simp: default_entry_def Let_def key)
+  show ?thesis using opcode entry by blast
+next
+  case False
+  hence hi_mode: "6 \<le> mode \<and> mode \<le> 8 \<and> copy_sz = 4" using assms(3) by auto
+  let ?op = "235 + (mode - 6) * 4 + (add_sz - 1)"
+  have opcode: "find_add_copy_opcode add_sz copy_sz mode = Some ?op"
+    using assms(1,2) hi_mode False
+    by (auto simp: find_add_copy_opcode_def)
+  have mode_minus: "mode - 6 \<le> 2" using hi_mode by linarith
+  have a_bd: "add_sz - 1 \<le> 3" using assms(2) by linarith
+  have lb: "?op \<ge> 235" by simp
+  have ub: "?op \<le> 235 + 2 * 4 + 3" using mode_minus a_bd by linarith
+  hence ub246: "?op \<le> 246" by simp
+  have gt_234: "?op > 234" by simp
+  have rel_eq: "?op - 235 = (mode - 6) * 4 + (add_sz - 1)" by simp
+  have inner: "add_sz - 1 < 4" using a_bd by simp
+  have div_eq: "((mode - 6) * 4 + (add_sz - 1)) div 4 = mode - 6"
+    using inner by simp
+  have mod_eq: "((mode - 6) * 4 + (add_sz - 1)) mod 4 = add_sz - 1"
+    using inner by simp
+  have mode_eq: "mode - 6 + 6 = mode" using hi_mode by simp
+  have add_sz_eq: "add_sz - 1 + 1 = add_sz" using assms(1) by simp
+  have entry: "default_entry ?op = (add_hi add_sz, copy_hi copy_sz mode)"
+    using ub246 gt_234 div_eq mod_eq mode_eq add_sz_eq hi_mode
+    by (auto simp: default_entry_def Let_def rel_eq)
+  show ?thesis using opcode entry by blast
+qed
 
 lemma default_entry_copy_add:
   assumes "mode \<le> 8"
   shows "default_entry (247 + mode) = (copy_hi 4 mode, add_hi 1)"
-  sorry
+proof -
+  have lb: "247 + mode \<ge> 247" by simp
+  have ub: "247 + mode \<le> 255" using assms by simp
+  show ?thesis
+    using lb ub by (simp add: default_entry_def)
+qed
 
 (* The encoder's find_single_add_opcode is a left inverse of default_entry
    on ADDs of size 1..17. *)
