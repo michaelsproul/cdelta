@@ -1,0 +1,4 @@
+session CdeltaEncoder = AutoCorres2 +
+  options [timeout = 600]
+  theories
+    VcdiffEnc
