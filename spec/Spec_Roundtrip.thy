@@ -397,11 +397,322 @@ proof -
     using ph pw aw by (simp add: decode_spec_def)
 qed
 
+(* ---------- General case: ADD of arbitrary size ---------- *)
+
+(*
+  For length bs > 17, the encoder uses opcode 1 (ADD size-varint). The
+  decoder must read the varint, then execute the ADD of the resolved
+  size.
+*)
+lemma encode_one_add_general:
+  assumes "length bs > 17 \<or> length bs = 0"
+  shows "encode_one (RAdd bs) src_len tgt_pos c [] [] []
+       = (bs, (1 :: byte) # varint_encode (length bs), [], c, tgt_pos + length bs)"
+  using assms
+  by (auto simp: find_single_add_opcode_def Let_def split_def)
+
+lemma decode_one_add_general:
+  assumes "length bs > 17 \<or> length bs = 0"
+          "length bs < 2 ^ 32"
+          "data = bs"
+  shows
+    "decode_one src_seg src_seg_len (length bs)
+       \<lparr> ds_data_rem = data
+       , ds_inst_rem = (1 :: byte) # varint_encode (length bs)
+       , ds_addr_rem = []
+       , ds_cache = cache_init
+       , ds_tgt = [] \<rparr>
+     = Inl \<lparr> ds_data_rem = []
+           , ds_inst_rem = []
+           , ds_addr_rem = []
+           , ds_cache = cache_init
+           , ds_tgt = bs \<rparr>"
+proof -
+  let ?sz = "length bs"
+  have unat1: "unat (1 :: byte) = Suc 0" by simp
+  have entry: "default_entry (Suc 0) = (add_hi 0, noop_hi)"
+    using default_entry_add_varint by simp
+  have vdec: "varint_decode (varint_encode ?sz) = Some (?sz, [])"
+    using assms(2) varint_decode_encode[of ?sz "[]"] by simp
+  have resolve1: "resolve_size (add_hi 0) (varint_encode ?sz)
+                   = Some (?sz, [])"
+    by (simp add: resolve_size_def add_hi_def vdec)
+  have resolve_noop: "resolve_size noop_hi [] = Some (0, [])"
+    by (simp add: resolve_size_def noop_hi_def)
+  have take_bs: "take ?sz data = bs" using assms(3) by simp
+  have drop_bs: "drop ?sz data = []" using assms(3) by simp
+  have not_over_data: "\<not> ?sz > length data" using assms(3) by simp
+  have exec_half_add:
+    "exec_half (add_hi 0) ?sz src_seg src_seg_len ?sz
+       \<lparr> ds_data_rem = data
+       , ds_inst_rem = []
+       , ds_addr_rem = []
+       , ds_cache = cache_init
+       , ds_tgt = [] \<rparr>
+     = Inl \<lparr> ds_data_rem = []
+           , ds_inst_rem = []
+           , ds_addr_rem = []
+           , ds_cache = cache_init
+           , ds_tgt = bs \<rparr>"
+    using not_over_data take_bs drop_bs
+    by (simp add: exec_half_def add_hi_def)
+  have exec_half_noop:
+    "exec_half noop_hi 0 src_seg src_seg_len ?sz
+       \<lparr> ds_data_rem = []
+       , ds_inst_rem = []
+       , ds_addr_rem = []
+       , ds_cache = cache_init
+       , ds_tgt = bs \<rparr>
+     = Inl \<lparr> ds_data_rem = []
+           , ds_inst_rem = []
+           , ds_addr_rem = []
+           , ds_cache = cache_init
+           , ds_tgt = bs \<rparr>"
+    by (simp add: exec_half_def noop_hi_def)
+  show ?thesis
+    unfolding decode_one_def
+    by (simp add: pop_byte_def Let_def unat1 entry resolve1 exec_half_add
+                  resolve_noop exec_half_noop)
+qed
+
+(* ---------- encode_window / encode_spec for the general case ---------- *)
+
+lemma encode_window_general_empty_src:
+  assumes "length tgt > 17 \<or> length tgt = 0"
+  shows "encode_window [RAdd tgt] 0
+         = (tgt, (1 :: byte) # varint_encode (length tgt), [], cache_init)"
+proof -
+  have eo: "encode_one (RAdd tgt) 0 0 cache_init [] [] []
+              = (tgt, (1 :: byte) # varint_encode (length tgt), [],
+                 cache_init, length tgt)"
+    using encode_one_add_general[OF assms, where src_len = 0 and tgt_pos = 0
+                                             and c = cache_init]
+    by simp
+  show ?thesis
+    using eo by (simp add: encode_window_def split_def)
+qed
+
+lemma apply_window_general_empty_src:
+  assumes "length tgt > 17 \<or> length tgt = 0"
+          "length tgt < 2 ^ 32"
+  shows "apply_window
+           \<lparr> pw_src_seg_len = 0
+           , pw_src_seg_off = 0
+           , pw_tgt_len     = length tgt
+           , pw_data        = tgt
+           , pw_inst        = (1 :: byte) # varint_encode (length tgt)
+           , pw_addr        = [] \<rparr>
+           []
+         = Inl tgt"
+proof -
+  let ?op_bytes = "(1 :: byte) # varint_encode (length tgt)"
+  let ?init_st = "\<lparr> ds_data_rem = tgt
+                 , ds_inst_rem = ?op_bytes
+                 , ds_addr_rem = []
+                 , ds_cache = cache_init
+                 , ds_tgt = [] \<rparr>"
+  let ?final_st = "\<lparr> ds_data_rem = [] :: byte list
+                   , ds_inst_rem = []
+                   , ds_addr_rem = []
+                   , ds_cache = cache_init
+                   , ds_tgt = tgt \<rparr>"
+  have do: "decode_one [] 0 (length tgt) ?init_st = Inl ?final_st"
+  proof -
+    have "length tgt > 17 \<or> length tgt = 0" by (rule assms(1))
+    thus ?thesis
+      using decode_one_add_general[of tgt, OF _ assms(2) refl,
+                                   where src_seg = "[]" and src_seg_len = 0]
+      by simp
+  qed
+  \<comment> \<open>Need fuel \<ge> 1 + length (varint_encode (length tgt)). The apply_window
+      supplies length pw_inst = 1 + length (varint_encode _) bytes, which
+      is more than enough since decode_loop uses each byte of fuel for at
+      most one opcode (and we have exactly one opcode). Formally: one
+      Suc is enough because after decode_one, inst_rem = [] and the
+      ?fuel=0 base case returns Inl.\<close>
+  have "decode_loop (length ?op_bytes) [] 0 (length tgt) ?init_st = Inl ?final_st"
+  proof -
+    have len_pos: "length ?op_bytes > 0" by simp
+    then obtain k where k_eq: "length ?op_bytes = Suc k" by (cases "length ?op_bytes") auto
+    have inst_nonempty: "?op_bytes \<noteq> []" by simp
+    have "decode_loop (Suc k) [] 0 (length tgt) ?init_st
+           = decode_loop k [] 0 (length tgt) ?final_st"
+      using inst_nonempty do by simp
+    also have "\<dots> = Inl ?final_st"
+      by (induction k) simp_all
+    finally show ?thesis using k_eq by simp
+  qed
+  thus ?thesis by (simp add: apply_window_def Let_def)
+qed
+
+lemma encode_spec_general_empty_shape:
+  assumes "length tgt > 17 \<or> length tgt = 0"
+  shows "encode_spec [] tgt =
+           magic_bytes @ [0x00, 0x00]
+         @ varint_encode (1 + varint_size (length tgt) + varint_size (length tgt)
+                         + varint_size (1 + length (varint_encode (length tgt)))
+                         + varint_size 0
+                         + length tgt + 1 + length (varint_encode (length tgt)))
+         @ varint_encode (length tgt)
+         @ [0x00]
+         @ varint_encode (length tgt)
+         @ varint_encode (1 + length (varint_encode (length tgt)))
+         @ varint_encode 0
+         @ tgt
+         @ [1 :: byte]
+         @ varint_encode (length tgt)"
+  using encode_window_general_empty_src[OF assms]
+  by (simp add: encode_spec_def generate_instructions_def serialize_def Let_def
+                split_def magic_bytes_def add.commute add.left_commute)
+
+(* Parse_window + apply_window for the general case. *)
+
+lemma spec_roundtrip_empty_src_large:
+  assumes "length tgt > 17 \<or> length tgt = 0"
+          "length tgt < 2 ^ 32 - 32"
+  shows   "decode_spec (encode_spec [] tgt) [] = Inl tgt"
+proof -
+  let ?inst = "(1 :: byte) # varint_encode (length tgt)"
+  let ?tlen_sz = "varint_size (length tgt)"
+  let ?inst_sz = "varint_size (length ?inst)"
+  let ?dlen = "1 + ?tlen_sz + ?tlen_sz + ?inst_sz + varint_size 0
+              + length tgt + length ?inst"
+
+  have tgt_bd: "length tgt < 2 ^ 32" using assms(2) by simp
+  have inst_len_eq: "length ?inst = 1 + length (varint_encode (length tgt))"
+    by simp
+
+  have shape: "encode_spec [] tgt =
+                 magic_bytes @ [0x00, 0x00]
+               @ varint_encode ?dlen
+               @ varint_encode (length tgt)
+               @ [0x00]
+               @ varint_encode (length tgt)
+               @ varint_encode (length ?inst)
+               @ varint_encode 0
+               @ tgt
+               @ ?inst"
+    using encode_window_general_empty_src[OF assms(1)]
+    by (simp add: encode_spec_def generate_instructions_def serialize_def Let_def
+                  split_def magic_bytes_def add.commute add.left_commute)
+
+  have ph: "parse_header (encode_spec [] tgt)
+             = Inl (0x00 # varint_encode ?dlen @ varint_encode (length tgt)
+                    @ [0x00] @ varint_encode (length tgt)
+                    @ varint_encode (length ?inst) @ varint_encode 0 @ tgt @ ?inst)"
+  proof -
+    have rearrange:
+      "magic_bytes @ [0x00, 0x00]
+       @ varint_encode ?dlen @ varint_encode (length tgt) @ [0x00]
+       @ varint_encode (length tgt) @ varint_encode (length ?inst)
+       @ varint_encode 0 @ tgt @ ?inst
+       = magic_bytes @ 0x00 #
+          (0x00 # varint_encode ?dlen @ varint_encode (length tgt) @ [0x00]
+           @ varint_encode (length tgt) @ varint_encode (length ?inst)
+           @ varint_encode 0 @ tgt @ ?inst)"
+      by simp
+    show ?thesis using shape parse_header_of_magic
+      by (simp add: rearrange)
+  qed
+
+  (* varint_size bound for values < 2^32 is at most 5. *)
+  have vsz_le_5: "varint_size n \<le> 5" if "n < 2 ^ 32" for n
+  proof -
+    have "n < 2 ^ 35" using that by simp
+    hence "num_digits n \<le> 5" by (rule num_digits_le_5)
+    thus ?thesis by (simp add: varint_size_def)
+  qed
+  have vlen_bd: "length (varint_encode n) \<le> 5" if "n < 2 ^ 32" for n
+    using that vsz_le_5 by simp
+  have inst_len_bd: "length ?inst \<le> 6" using vlen_bd[OF tgt_bd] by simp
+
+  have dlen_upper: "?dlen \<le> 1 + 5 + 5 + 5 + 1 + length tgt + 6"
+    using vsz_le_5[OF tgt_bd] vsz_le_5[of "length ?inst"]
+          inst_len_bd
+    by (auto simp: varint_size_def)
+  have dlen_bd: "?dlen < 2 ^ 32"
+  proof -
+    have "1 + 5 + 5 + 5 + 1 + length tgt + 6 < 2 ^ 32"
+      using assms(2) by simp
+    thus ?thesis using dlen_upper by linarith
+  qed
+  have inst_bd: "length ?inst < 2 ^ 32" using inst_len_bd by simp
+  have empty_bd: "length ([] :: byte list) < 2 ^ 32" by simp
+
+  have pw: "parse_window
+              (0x00 # varint_encode ?dlen @ varint_encode (length tgt) @ [0x00]
+               @ varint_encode (length tgt) @ varint_encode (length ?inst)
+               @ varint_encode 0 @ tgt @ ?inst)
+           = Inl ( \<lparr> pw_src_seg_len = 0
+                   , pw_src_seg_off = 0
+                   , pw_tgt_len     = length tgt
+                   , pw_data        = tgt
+                   , pw_inst        = ?inst
+                   , pw_addr        = [] \<rparr>
+                 , [] )"
+  proof -
+    have arrange:
+      "(0x00 # varint_encode ?dlen @ varint_encode (length tgt) @ [0x00]
+        @ varint_encode (length tgt) @ varint_encode (length ?inst)
+        @ varint_encode 0 @ tgt @ ?inst)
+       = (0x00 # varint_encode ?dlen @ varint_encode (length tgt) @ [0x00]
+          @ varint_encode (length tgt)
+          @ varint_encode (length ?inst)
+          @ varint_encode (length ([] :: byte list))
+          @ tgt @ ?inst @ [])"
+      by simp
+    show ?thesis
+      unfolding arrange
+      using parse_window_no_source_head[where dlen = ?dlen and tgt_len = "length tgt"
+                                         and data = tgt and inst = "?inst" and addr = "[]",
+                                         OF dlen_bd tgt_bd tgt_bd inst_bd empty_bd]
+      by simp
+  qed
+
+  have aw: "apply_window
+             \<lparr> pw_src_seg_len = 0, pw_src_seg_off = 0
+             , pw_tgt_len = length tgt
+             , pw_data = tgt
+             , pw_inst = ?inst
+             , pw_addr = [] \<rparr> []
+           = Inl tgt"
+    using apply_window_general_empty_src[OF assms(1) tgt_bd] .
+
+  show ?thesis
+    using ph pw aw by (simp add: decode_spec_def)
+qed
+
+theorem spec_roundtrip_empty_src:
+  assumes "length tgt < 2 ^ 32 - 32"
+  shows   "decode_spec (encode_spec [] tgt) [] = Inl tgt"
+proof (cases "length tgt = 0")
+  case True
+  then have "length tgt > 17 \<or> length tgt = 0" by simp
+  thus ?thesis using spec_roundtrip_empty_src_large[OF _ assms] by blast
+next
+  case False
+  hence pos: "1 \<le> length tgt" by linarith
+  show ?thesis
+  proof (cases "length tgt \<le> 17")
+    case True
+    have tgt_bd: "length tgt < 2 ^ 32" using assms by simp
+    show ?thesis using spec_roundtrip_small[OF pos True tgt_bd] .
+  next
+    case False
+    hence "length tgt > 17 \<or> length tgt = 0" by simp
+    thus ?thesis using spec_roundtrip_empty_src_large[OF _ assms] by blast
+  qed
+qed
+
 theorem spec_roundtrip:
   assumes "length src < 2 ^ 32"
           "length tgt < 2 ^ 32"
   shows   "decode_spec (encode_spec src tgt) src = Inl tgt"
-  sorry  \<comment> \<open>General form; requires the full instruction-dispatch loop
-            correctness proof for arbitrary-length targets and sources.\<close>
+  sorry  \<comment> \<open>General form; requires spec_roundtrip_empty_src plus a
+            parallel proof for non-empty source (which would use RCopy
+            instructions in a smarter matcher). The degenerate matcher
+            we ship always emits [RAdd tgt] regardless of source, so
+            this reduces to spec_roundtrip_empty_src — modulo the
+            src_desc prefix in the wire format.\<close>
 
 end
