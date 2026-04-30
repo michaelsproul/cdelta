@@ -1,5 +1,5 @@
 session CdeltaSpec = "HOL-Library" +
-  options [timeout = 1800, quick_and_dirty = true]
+  options [timeout = 1800, quick_and_dirty = false]
   sessions
     "Word_Lib"
   theories
