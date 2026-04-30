@@ -181,21 +181,268 @@ fun varint_decode_loop :: "nat \<Rightarrow> nat \<Rightarrow> byte list \<Right
 definition varint_decode :: "byte list \<Rightarrow> (nat \<times> byte list) option" where
   "varint_decode bs = varint_decode_loop 5 0 bs"
 
-(* ---------- Target roundtrip lemma (Phase A.1 main goal) ---------- *)
-(*
-  The decoder inverts the encoder for every in-range n, leaving `rest`
-  untouched. This is the key lemma downstream theorems cite.
+(* ---------- Base-128 digit arithmetic ---------- *)
 
-  Proof sketch (port from Lean):
-    1. Show varint_decode_loop on `set_cont_bits (map of_nat (to_base128 n))
-       @ rest` accumulates exactly n, with the continuation bits consumed by
-       the recursive case and the final 0x80-clear byte triggering the
-       success branch.
-    2. The n = 0 case hits the single-byte [0x00] sub-definition directly.
-*)
+(* Interpret a big-endian digit list as a natural number. *)
+fun from_base128_acc :: "nat \<Rightarrow> nat list \<Rightarrow> nat" where
+  "from_base128_acc acc [] = acc"
+| "from_base128_acc acc (d # ds) = from_base128_acc (acc * 128 + d) ds"
+
+definition from_base128 :: "nat list \<Rightarrow> nat" where
+  "from_base128 ds = from_base128_acc 0 ds"
+
+lemma from_base128_acc_append:
+  "from_base128_acc acc (xs @ ys) = from_base128_acc (from_base128_acc acc xs) ys"
+  by (induction xs arbitrary: acc) auto
+
+lemma from_base128_acc_single:
+  "from_base128_acc acc [d] = acc * 128 + d"
+  by simp
+
+lemma from_base128_to_base128:
+  "from_base128 (to_base128 n) = n"
+proof (induction n rule: to_base128.induct)
+  case (1 n)
+  show ?case
+  proof (cases "n = 0")
+    case True then show ?thesis by (simp add: from_base128_def)
+  next
+    case False
+    hence pos: "n > 0" by simp
+    have rec: "to_base128 n = to_base128 (n div 128) @ [n mod 128]"
+      by (rule to_base128_nonzero[OF pos])
+    have ih: "from_base128 (to_base128 (n div 128)) = n div 128"
+      using 1 False by blast
+    have "from_base128 (to_base128 n)
+          = from_base128_acc 0 (to_base128 (n div 128) @ [n mod 128])"
+      by (simp add: rec from_base128_def)
+    also have "\<dots> = from_base128_acc
+                      (from_base128_acc 0 (to_base128 (n div 128)))
+                      [n mod 128]"
+      by (rule from_base128_acc_append)
+    also have "\<dots> = (from_base128 (to_base128 (n div 128))) * 128 + n mod 128"
+      by (simp add: from_base128_def)
+    also have "\<dots> = n div 128 * 128 + n mod 128" by (simp add: ih)
+    also have "\<dots> = n" by simp
+    finally show ?thesis .
+  qed
+qed
+
+(* Bound digits produce bounded accumulator. *)
+lemma from_base128_acc_bound:
+  assumes "\<forall>d \<in> set ds. d < 128"
+  shows   "from_base128_acc acc ds < (acc + 1) * 128 ^ length ds"
+  using assms
+proof (induction ds arbitrary: acc)
+  case Nil then show ?case by simp
+next
+  case (Cons d ds)
+  from Cons.prems have d_bd: "d < 128" and rest_bd: "\<forall>x\<in>set ds. x < 128" by auto
+  have "from_base128_acc acc (d # ds) = from_base128_acc (acc * 128 + d) ds"
+    by simp
+  also have "\<dots> < (acc * 128 + d + 1) * 128 ^ length ds"
+    using Cons.IH[OF rest_bd, of "acc * 128 + d"] by simp
+  also have "\<dots> \<le> (acc + 1) * 128 ^ length (d # ds)"
+    using d_bd by (simp add: algebra_simps)
+  finally show ?case .
+qed
+
+lemma from_base128_bound:
+  assumes "\<forall>d \<in> set ds. d < 128"
+  shows   "from_base128 ds < 128 ^ length ds"
+  using from_base128_acc_bound[OF assms, of 0] by (simp add: from_base128_def)
+
+(* ---------- Byte-level AND/OR lemmas for digits < 128 ---------- *)
+
+lemma digit_unat_of_nat [simp]:
+  fixes d :: nat
+  assumes "d < 128"
+  shows "unat (word_of_nat d :: byte) = d"
+  using assms by (simp add: unat_of_nat_eq)
+
+(* Byte-level lemmas. The 7-bit bound d < 128 translates to "bit 7 is
+   clear" via bit_word_of_nat_iff. *)
+
+lemma digit_byte_le_127:
+  fixes d :: nat
+  assumes "d < 128"
+  shows "(word_of_nat d :: byte) \<le> 0x7F"
+  using assms by (simp add: word_le_nat_alt unat_of_nat_eq)
+
+lemma digit_byte_and_7F:
+  fixes d :: nat
+  assumes "d < 128"
+  shows "(word_of_nat d :: byte) AND 0x7F = word_of_nat d"
+proof -
+  have "(word_of_nat d :: byte) \<le> mask 7"
+    using digit_byte_le_127[OF assms] by (simp add: mask_eq_decr_exp)
+  hence "(word_of_nat d :: byte) AND mask 7 = word_of_nat d"
+    by (rule and_mask_eq_iff_le_mask[THEN iffD2])
+  thus ?thesis by (simp add: mask_eq_decr_exp)
+qed
+
+lemma digit_byte_and_80:
+  fixes d :: nat
+  assumes "d < 128"
+  shows "(word_of_nat d :: byte) AND 0x80 = 0"
+proof -
+  have le_mask: "(word_of_nat d :: byte) \<le> mask 7"
+    using digit_byte_le_127[OF assms] by (simp add: mask_eq_decr_exp)
+  have eq_80: "(NOT (mask 7) :: byte) = 0x80"
+    by (simp add: mask_eq_decr_exp)
+  have "(word_of_nat d :: byte) AND NOT (mask 7)
+          = ((word_of_nat d :: byte) AND mask 7) AND NOT (mask 7)"
+    using le_mask
+    by (simp add: and_mask_eq_iff_le_mask[THEN iffD2])
+  also have "\<dots> = 0" by (rule NOT_mask_AND_mask)
+  finally show ?thesis using eq_80 by simp
+qed
+
+lemma digit_byte_or_80_and_7F:
+  fixes d :: nat
+  assumes "d < 128"
+  shows "((word_of_nat d :: byte) OR 0x80) AND 0x7F = word_of_nat d"
+proof -
+  have "((word_of_nat d :: byte) OR 0x80) AND 0x7F
+          = ((word_of_nat d :: byte) AND 0x7F) OR (0x80 AND 0x7F)"
+    by (simp add: word_ao_dist)
+  also have "\<dots> = word_of_nat d OR 0"
+    by (simp add: digit_byte_and_7F[OF assms])
+  finally show ?thesis by simp
+qed
+
+lemma digit_byte_or_80_msb:
+  fixes d :: nat
+  assumes "d < 128"
+  shows "((word_of_nat d :: byte) OR 0x80) AND 0x80 \<noteq> 0"
+proof -
+  have "((word_of_nat d :: byte) OR 0x80) AND 0x80
+          = ((word_of_nat d :: byte) AND 0x80) OR (0x80 AND 0x80)"
+    by (simp add: word_ao_dist)
+  also have "\<dots> = (0 :: byte) OR 0x80"
+    by (simp add: digit_byte_and_80[OF assms])
+  also have "\<dots> = 0x80" by simp
+  finally show ?thesis by simp
+qed
+
+(* ---------- Decoder main lemma ---------- *)
+
+(* Unrolling of set_cont_bits of a single-byte list. *)
+lemma set_cont_bits_singleton [simp]:
+  "set_cont_bits [b] = [b]"
+  by simp
+
+(* set_cont_bits (x # y # ys) = (x OR 0x80) # set_cont_bits (y # ys). *)
+lemma set_cont_bits_cons_cons:
+  "set_cont_bits (x # y # ys) = (x OR 0x80) # set_cont_bits (y # ys)"
+  by simp
+
+(* Key lemma: decoding the cont-bit-set encoding of a non-empty digit list
+   with all digits < 128 accumulates to the base-128 value. Proof is by
+   induction on the digit list: the singleton case exercises the no-cont
+   branch of the decoder, the cons-cons case exercises the continuation
+   branch. *)
+lemma varint_decode_loop_on_encoded:
+  assumes "ds \<noteq> []"
+          "\<forall>d \<in> set ds. d < 128"
+          "length ds \<le> fuel"
+          "from_base128_acc acc ds < 2 ^ 32"
+  shows
+    "varint_decode_loop fuel acc
+       (set_cont_bits (map word_of_nat ds) @ rest)
+     = Some (from_base128_acc acc ds, rest)"
+  using assms
+proof (induction ds arbitrary: acc fuel)
+  case Nil then show ?case by simp
+next
+  case (Cons d ds)
+  from Cons.prems have d_lt: "d < 128" by simp
+  from Cons.prems have fuel_pos: "fuel > 0" by (cases fuel) auto
+  then obtain k where fuel_eq: "fuel = Suc k" by (cases fuel) auto
+  show ?case
+  proof (cases ds)
+    case Nil
+    \<comment> \<open>Single-digit case. Decoder reads [word_of_nat d], bit 7 is clear,
+        acc' = acc * 128 + d, which equals from_base128_acc acc [d] and
+        must be < 2^32 by the premise.\<close>
+    have "set_cont_bits (map word_of_nat (d # ds))
+            = [word_of_nat d :: byte]"
+      by (simp add: Nil)
+    hence decode_input:
+      "set_cont_bits (map word_of_nat (d # ds)) @ rest
+        = (word_of_nat d :: byte) # rest" by simp
+    have acc_eq: "acc * 128 + unat ((word_of_nat d :: byte) AND 0x7F)
+                  = from_base128_acc acc (d # ds)"
+      using d_lt by (simp add: digit_byte_and_7F Nil)
+    have msb_clr: "((word_of_nat d :: byte) AND 0x80) = 0"
+      using digit_byte_and_80[OF d_lt] .
+    have bound: "acc * 128 + unat ((word_of_nat d :: byte) AND 0x7F) < 2 ^ 32"
+      using Cons.prems(4) acc_eq by simp
+    show ?thesis
+      using fuel_eq decode_input acc_eq msb_clr bound
+      by (simp add: Let_def)
+  next
+    case (Cons d' ds')
+    \<comment> \<open>Cons-cons case. Decoder reads (word_of_nat d OR 0x80); bit 7 set;
+        recurse with acc' = acc * 128 + d on the remaining fuel.\<close>
+    have expand: "set_cont_bits (map word_of_nat (d # ds))
+                  = ((word_of_nat d :: byte) OR 0x80)
+                      # set_cont_bits (map word_of_nat ds)"
+      using Cons by (simp add: set_cont_bits_cons_cons)
+    have msb_set: "(((word_of_nat d :: byte) OR 0x80) AND 0x80) \<noteq> 0"
+      using digit_byte_or_80_msb[OF d_lt] .
+    have and_7F: "(((word_of_nat d :: byte) OR 0x80) AND 0x7F) = word_of_nat d"
+      using digit_byte_or_80_and_7F[OF d_lt] .
+    let ?acc' = "acc * 128 + d"
+    have unat_and: "unat (((word_of_nat d :: byte) OR 0x80) AND 0x7F) = d"
+      using and_7F d_lt by (simp add: digit_unat_of_nat)
+    have ds_nonempty: "ds \<noteq> []" using Cons by simp
+    have ds_bd: "\<forall>x \<in> set ds. x < 128" using Cons.prems(2) by simp
+    have len_le: "length ds \<le> k" using Cons.prems(3) fuel_eq by simp
+    have acc_bound: "from_base128_acc ?acc' ds < 2 ^ 32"
+      using Cons.prems(4) by simp
+    have IH_applied:
+      "varint_decode_loop k ?acc'
+         (set_cont_bits (map word_of_nat ds) @ rest)
+       = Some (from_base128_acc ?acc' ds, rest)"
+      using Cons.IH[OF ds_nonempty ds_bd len_le acc_bound] .
+    show ?thesis
+      using fuel_eq expand msb_set unat_and IH_applied
+      by (simp add: Let_def)
+  qed
+qed
+
+(* n = 0 case: varint_encode 0 = [0x00]. *)
+lemma varint_decode_loop_zero:
+  "fuel > 0 \<Longrightarrow> varint_decode_loop fuel 0 ((0 :: byte) # rest) = Some (0, rest)"
+  by (cases fuel) (simp_all add: Let_def)
+
+(* Final theorem. *)
 lemma varint_decode_encode:
   assumes "n < 2 ^ 32"
   shows "varint_decode (varint_encode n @ rest) = Some (n, rest)"
-  sorry
+proof (cases "n = 0")
+  case True
+  then show ?thesis
+    by (simp add: varint_encode_def varint_decode_def varint_decode_loop_zero)
+next
+  case False
+  hence pos: "n > 0" by simp
+  let ?ds = "to_base128 n"
+  have ds_nonempty: "?ds \<noteq> []" using pos by simp
+  have ds_bound: "\<forall>d \<in> set ?ds. d < 128" by (rule to_base128_digit_bound)
+  have "n < 2 ^ 35" using assms by simp
+  hence len_le: "length ?ds \<le> 5"
+    using num_digits_le_5 by simp
+  have acc_eq_n: "from_base128_acc 0 ?ds = n"
+    using from_base128_to_base128[of n]
+    by (simp add: from_base128_def)
+  show ?thesis
+    using assms ds_nonempty ds_bound len_le
+    by (simp add: varint_encode_def varint_decode_def False
+                  varint_decode_loop_on_encoded[where acc = 0 and ds = ?ds,
+                    OF ds_nonempty ds_bound len_le]
+                  acc_eq_n)
+qed
 
 end
