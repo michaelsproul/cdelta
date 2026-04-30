@@ -5,3 +5,9 @@ session CdeltaSpec = "HOL-Library" +
   theories
     Bytes
     Varint
+    AddressCache
+    CodeTable
+    Instructions
+    Encoder_Spec
+    Decoder_Spec
+    Spec_Roundtrip
