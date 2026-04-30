@@ -170,8 +170,8 @@ static void build_code_table(void)
     }
 
     for (mode = 0U; mode < 6U; mode = mode + 1U) {
-        for (copy_size = 4U; copy_size < 7U; copy_size = copy_size + 1U) {
-            for (add_size = 1U; add_size < 5U; add_size = add_size + 1U) {
+        for (add_size = 1U; add_size < 5U; add_size = add_size + 1U) {
+            for (copy_size = 4U; copy_size < 7U; copy_size = copy_size + 1U) {
                 code_tbl[idx][0] = (unsigned char)OP_ADD;
                 code_tbl[idx][1] = (unsigned char)add_size;
                 code_tbl[idx][2] = (unsigned char)0U;
@@ -487,7 +487,7 @@ int vcdiff_decode(unsigned char *patch, unsigned int patch_len,
                         byte = src[src_seg_off + a];
                     } else {
                         unsigned int tgt_rel = a - src_seg_len;
-                        if (tgt_rel >= tgt_pos) return VCD_ERR_SRC;
+                        if (tgt_rel >= tgt_pos + j) return VCD_ERR_SRC;
                         byte = out[tgt_rel];
                     }
                     out[tgt_pos + j] = byte;
