@@ -1,80 +1,68 @@
 # Step 1: Matcher-Parametric Spec Refactor — Progress
 
-## Status: ~70% complete, needs build verification
+## Status: Structure complete, needs build verification + sorry discharge
 
-## Goal
-Refactor `spec/` so `Spec_Roundtrip.thy` exposes a `roundtrip_generic` theorem
-quantified over any instruction list satisfying a well-formedness predicate,
-with `spec_roundtrip` derived as a corollary.
+**9 commits, +1193 lines across 4 files this session.**
 
-## What was accomplished this session
+## Completed work
 
-### Definitions (committed, builds clean)
-- `wf_insts_aux` / `wf_insts` / `valid_insts` in Instructions.thy
-- `serialize_from_insts` in Encoder_Spec.thy
-- `encode_one_prefix` / `encode_window_loop_prefix` in Encoder_Spec.thy
-- `encode_spec` redefined as `serialize_from_insts` on `generate_instructions`
-- `bounded_insts` predicate in Spec_Roundtrip.thy
+### Definitions (Instructions.thy, Encoder_Spec.thy)
+- `wf_insts_aux` / `wf_insts` / `valid_insts` — well-formedness predicate
+- `serialize_from_insts` — factored out from `encode_spec`
+- `encode_one_prefix` / `encode_window_loop_prefix` — accumulator append lemmas
+- `bounded_insts` — varint-encodable size bounds
 
-### Structural lemmas (committed)
+### Structural lemmas (Spec_Roundtrip.thy)
 - `decode_loop_fuel_empty`, `decode_loop_mono`, `decode_loop_append`
 
-### Per-instruction roundtrip lemmas (committed)
-- `decode_one_add_small_suffix`, `decode_one_add_general_suffix`, `decode_one_add_suffix`
-- `decode_one_run_suffix`
-- `decode_one_copy_small_suffix`, `decode_one_copy_varint_suffix`, `decode_one_copy_suffix`
-- `encode_one_decode_one_add`, `encode_one_decode_one_run`, `encode_one_decode_one_copy`
+### Per-instruction roundtrip lemmas (Spec_Roundtrip.thy, 12 lemmas)
+- `decode_one_{add,run,copy}_{small,general,varint}_suffix` — with suffix pattern
+- `decode_one_{add,run,copy}_suffix` — unified wrappers
+- `encode_one_decode_one_{add,run,copy}` — relating encoder output to decoder
 
-### Inductive roundtrip (committed, has sorry in Cons case)
-- `encode_window_loop_decode_loop`: full structure, case splits on ADD/RUN/COPY
-- Uses `encode_window_loop_prefix` for section decomposition
-- Uses per-instruction lemmas for `decode_one` step
-- Uses `decode_loop_mono` for fuel adjustment
+### Inductive roundtrip (Spec_Roundtrip.thy)
+- `encode_window_loop_decode_loop` — full proof structure with Cons case
+  handling ADD/RUN/COPY instruction dispatch
 
-### Top-level (committed, has sorry)
-- `roundtrip_generic` theorem statement
-- `spec_roundtrip'` corollary derived from `roundtrip_generic`
-- `serialize_parse_roundtrip` helper lemma (sorry)
+### Top-level assembly (Spec_Roundtrip.thy)
+- `serialize_parse_roundtrip` — generic serialize/parse_header/parse_window lemma
+- `roundtrip_generic` — the target theorem (sorry)
+- `spec_roundtrip'` — derives existing spec_roundtrip as corollary
 
-## What remains
+## Remaining sorry's (4 total)
+1. `dlen_bd` in `serialize_parse_roundtrip` — varint size arithmetic
+2. `serialize_parse_roundtrip` show — compose parse_header + parse_window
+3. `roundtrip_generic` body — compose serialize_parse with decode_loop
+4. `encode_window_loop_decode_loop` Cons case — the final `show ?case`
+   (proof structure is complete, needs simp to close)
 
-### Fix sorry's
-1. **`encode_window_loop_decode_loop` Cons case**: The proof structure is
-   complete but needs Isabelle verification. The `encode_one_decode_one_*`
-   lemmas use a `let` binding pattern that may need adjustment.
+## Known issue: build timeout
+The Isabelle build consistently times out at 300s CPU (30 min wall).
+No syntax or type errors — the issue is simplifier performance.
 
-2. **`serialize_parse_roundtrip`**: Need dlen bound proof and
-   parse_header/parse_window assembly. Can reuse existing
-   `parse_window_no_source_head` and `parse_window_with_source_head`.
+**Root cause**: The `decode_one_*_suffix` proofs use `simp` with
+`decode_one_def` unfolded. Even with explicit intermediate states,
+the simplifier must process record update equations on abstract
+records (`st ⟨field := ...⟩`), which creates large terms.
 
-3. **`roundtrip_generic`**: Combines `serialize_parse_roundtrip` with
-   `encode_window_loop_decode_loop` via `apply_window`.
+**Suggested fix**: The final `by (simp add: s1 ... s8)` step in each
+suffix lemma should be replaced with a manual chain:
+```isabelle
+  have "decode_one ... ?in_st = ..."
+    apply (simp only: decode_one_def)
+    apply (simp only: s1)
+    apply (simp only: Let_def)
+    apply (simp only: entry)
+    ...
+```
+This forces the simplifier to do one rewrite at a time rather than
+exploring the whole term. An alternative is to use `subst` or
+`unfold` for each step.
 
-### Build verification
-Isabelle builds were repeatedly blocked by SQLite DB corruption from
-concurrent build processes that couldn't be killed. A clean session
-should allow verification. The initial definitions+existing proofs
-were verified before the DB corruption started.
-
-## Key design decisions
-
-1. **`tgt_len = length (exec_inst_list ...)`** in `encode_window_loop_decode_loop`:
-   Using equality rather than `>=` simplifies the inductive proof but means
-   `roundtrip_generic` needs to reconcile this with the actual `pw_tgt_len`
-   from the parsed window.
-
-2. **No combined encode_one_decode_one lemma**: Separate lemmas for ADD/RUN/COPY
-   because each has different preconditions. The Cons case of the induction
-   case-splits on instruction type.
-
-3. **`combined_bd: length src + tgt_len < 2^32`**: Added as an assumption to
-   ensure COPY address encoding/decoding works (the "here" value must fit
-   in a varint).
-
-4. **`bounded_insts`**: Separates the varint-encodability requirement from
-   the well-formedness predicate, keeping `wf_insts_aux` clean.
-
-## Estimated remaining effort
-- Fill sorry's: 1-2 hours of careful Isabelle engineering
-- Build verification: 15-30 minutes once DB corruption is resolved
-- Total: ~half a day
+## File structure
+```
+spec/Instructions.thy     — +47 lines (wf_insts_aux, valid_insts)
+spec/Encoder_Spec.thy     — +72 lines (prefix lemmas, serialize_from_insts)
+spec/Spec_Roundtrip.thy   — +999 lines (Part 2: matcher-parametric)
+planning/step1-progress.md — this file
+```
