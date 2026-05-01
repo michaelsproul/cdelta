@@ -101,6 +101,65 @@ definition encode_window ::
   "encode_window insts src_len =
      encode_window_loop insts src_len 0 cache_init [] [] []"
 
+(* ---------- Accumulator-prefix properties ---------- *)
+
+lemma encode_one_prefix:
+  obtains d ib ab c' tp'
+  where "encode_one i sl tp c data inst addr = (data @ d, inst @ ib, addr @ ab, c', tp')"
+    and "encode_one i sl tp c [] [] [] = (d, ib, ab, c', tp')"
+proof (cases i)
+  case (RAdd bs)
+  obtain op needs_sz where fop: "find_single_add_opcode (length bs) = (op, needs_sz)"
+    by (cases "find_single_add_opcode (length bs)") auto
+  let ?ib = "[word_of_nat op] @ (if needs_sz then varint_encode (length bs) else [])"
+  show ?thesis
+    using that[of bs ?ib "[]" c "tp + length bs"]
+    by (simp add: RAdd fop split_def Let_def)
+next
+  case (RCopy a n)
+  obtain mode abytes c' where ea: "encode_address c a (sl + tp) = (mode, abytes, c')"
+    by (cases "encode_address c a (sl + tp)") auto
+  obtain op needs_sz where fop: "find_single_copy_opcode n mode = (op, needs_sz)"
+    by (cases "find_single_copy_opcode n mode") auto
+  let ?ib = "[word_of_nat op] @ (if needs_sz then varint_encode n else [])"
+  show ?thesis
+    using that[of "[]" ?ib abytes c' "tp + n"]
+    by (simp add: RCopy ea fop split_def Let_def)
+next
+  case (RRun b n)
+  obtain op needs_sz where fop: "find_single_run_opcode n = (op, needs_sz)"
+    by (cases "find_single_run_opcode n") auto
+  let ?ib = "[word_of_nat op] @ (if needs_sz then varint_encode n else [])"
+  show ?thesis
+    using that[of "[b]" ?ib "[]" c "tp + n"]
+    by (simp add: RRun fop split_def Let_def)
+qed
+
+lemma encode_window_loop_prefix:
+  "\<exists>d ib ab c'.
+     encode_window_loop insts sl tp c data inst addr = (data @ d, inst @ ib, addr @ ab, c')
+   \<and> encode_window_loop insts sl tp c [] [] [] = (d, ib, ab, c')"
+proof (induction insts arbitrary: tp c data inst addr)
+  case Nil
+  then show ?case by auto
+next
+  case (Cons i is)
+  obtain d0 ib0 ab0 c0 tp0 where
+    eo: "encode_one i sl tp c data inst addr = (data @ d0, inst @ ib0, addr @ ab0, c0, tp0)" and
+    eo0: "encode_one i sl tp c [] [] [] = (d0, ib0, ab0, c0, tp0)"
+    by (rule encode_one_prefix)
+  obtain d1 ib1 ab1 c1 where
+    ih: "encode_window_loop is sl tp0 c0 (data @ d0) (inst @ ib0) (addr @ ab0) =
+           ((data @ d0) @ d1, (inst @ ib0) @ ib1, (addr @ ab0) @ ab1, c1)" and
+    ih0: "encode_window_loop is sl tp0 c0 [] [] [] = (d1, ib1, ab1, c1)"
+    using Cons.IH[of tp0 c0 "data @ d0" "inst @ ib0" "addr @ ab0"] by auto
+  have ih0': "encode_window_loop is sl tp0 c0 d0 ib0 ab0 =
+                (d0 @ d1, ib0 @ ib1, ab0 @ ab1, c1)"
+    using Cons.IH[of tp0 c0 d0 ib0 ab0] ih0 by auto
+  show ?case
+    using eo eo0 ih ih0' by (auto simp: split_def Let_def)
+qed
+
 (* ---------- Wire format ---------- *)
 
 definition magic_bytes :: "byte list" where
