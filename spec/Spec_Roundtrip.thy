@@ -236,7 +236,7 @@ lemma encode_spec_small_empty_shape:
          @ tgt
          @ [word_of_nat (1 + length tgt) :: byte]"
   using encode_window_small_empty_src[OF assms]
-  by (simp add: encode_spec_def generate_instructions_def serialize_def Let_def
+  by (simp add: encode_spec_def serialize_from_insts_def generate_instructions_def serialize_def Let_def
                 split_def magic_bytes_def add.commute add.left_commute)
 
 (* apply_window on the parsed_window for a small-ADD + empty source. *)
@@ -562,7 +562,7 @@ lemma encode_spec_general_empty_shape:
          @ [1 :: byte]
          @ varint_encode (length tgt)"
   using encode_window_general_empty_src[OF assms]
-  by (simp add: encode_spec_def generate_instructions_def serialize_def Let_def
+  by (simp add: encode_spec_def serialize_from_insts_def generate_instructions_def serialize_def Let_def
                 split_def magic_bytes_def add.commute add.left_commute)
 
 (* Parse_window + apply_window for the general case. *)
@@ -593,7 +593,7 @@ proof -
                @ tgt
                @ ?inst"
     using encode_window_general_empty_src[OF assms(1)]
-    by (simp add: encode_spec_def generate_instructions_def serialize_def Let_def
+    by (simp add: encode_spec_def serialize_from_insts_def generate_instructions_def serialize_def Let_def
                   split_def magic_bytes_def add.commute add.left_commute)
 
   have ph: "parse_header (encode_spec [] tgt)
@@ -767,7 +767,7 @@ lemma encode_spec_nonempty_src_shape_small:
          @ tgt
          @ [word_of_nat (1 + length tgt) :: byte]"
   using encode_window_small_empty_src[OF assms(1,2)] assms(3)
-  by (simp add: encode_spec_def generate_instructions_def serialize_def Let_def
+  by (simp add: encode_spec_def serialize_from_insts_def generate_instructions_def serialize_def Let_def
                 split_def magic_bytes_def add.commute add.left_commute)
 
 lemma encode_spec_nonempty_src_shape_large:
@@ -790,7 +790,7 @@ lemma encode_spec_nonempty_src_shape_large:
          @ [1 :: byte]
          @ varint_encode (length tgt)"
   using encode_window_general_empty_src[OF assms(1)] assms(2)
-  by (simp add: encode_spec_def generate_instructions_def serialize_def Let_def
+  by (simp add: encode_spec_def serialize_from_insts_def generate_instructions_def serialize_def Let_def
                 split_def magic_bytes_def add.commute add.left_commute)
 
 (* apply_window when the source segment is non-empty but the instruction

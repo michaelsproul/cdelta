@@ -144,7 +144,19 @@ definition serialize ::
 
 (* ---------- Top-level ---------- *)
 
+definition serialize_from_insts ::
+    "byte list \<Rightarrow> byte list \<Rightarrow> raw_inst list \<Rightarrow> byte list" where
+  "serialize_from_insts src tgt insts =
+     (let result = encode_window insts (length src);
+          data = fst result;
+          inst = fst (snd result);
+          addr = fst (snd (snd result))
+      in serialize src tgt data inst addr)"
+
 definition encode_spec :: "byte list \<Rightarrow> byte list \<Rightarrow> byte list" where
+  "encode_spec src tgt = serialize_from_insts src tgt (generate_instructions src tgt)"
+
+lemma encode_spec_alt:
   "encode_spec src tgt =
      (let insts = generate_instructions src tgt;
           result = encode_window insts (length src);
@@ -152,5 +164,6 @@ definition encode_spec :: "byte list \<Rightarrow> byte list \<Rightarrow> byte 
           inst = fst (snd result);
           addr = fst (snd (snd result))
       in serialize src tgt data inst addr)"
+  by (simp add: encode_spec_def serialize_from_insts_def)
 
 end

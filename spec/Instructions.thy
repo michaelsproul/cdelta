@@ -99,6 +99,53 @@ definition copy_valid ::
      (addr < length src + length tgt
     \<and> (\<forall>i < n. addr + i < length src + length tgt + i))"
 
+(* ---------- Well-formedness of instruction lists ---------- *)
+(*
+  An instruction list is well-formed w.r.t. a source if every instruction is
+  sensible at the point of emission:
+    - ADD: non-empty payload
+    - RUN: positive count
+    - COPY: positive count, address < combined window at that point
+  The partial target is threaded through because COPY validity depends on
+  how much target has been built so far.
+*)
+fun wf_insts_aux :: "byte list \<Rightarrow> raw_inst list \<Rightarrow> byte list \<Rightarrow> bool" where
+  "wf_insts_aux src [] tgt = True"
+| "wf_insts_aux src (RAdd bs # is) tgt =
+     (length bs > 0 \<and> wf_insts_aux src is (tgt @ bs))"
+| "wf_insts_aux src (RRun b n # is) tgt =
+     (n > 0 \<and> wf_insts_aux src is (tgt @ replicate n b))"
+| "wf_insts_aux src (RCopy a n # is) tgt =
+     (n > 0 \<and> a < length src + length tgt
+    \<and> wf_insts_aux src is (copy_loop src tgt a n))"
+
+definition wf_insts :: "byte list \<Rightarrow> raw_inst list \<Rightarrow> bool" where
+  "wf_insts src insts = wf_insts_aux src insts []"
+
+(*
+  Combined validity: instructions are well-formed AND executing them on
+  an empty target produces exactly tgt.
+*)
+definition valid_insts :: "byte list \<Rightarrow> byte list \<Rightarrow> raw_inst list \<Rightarrow> bool" where
+  "valid_insts src tgt insts =
+     (exec_inst_list src insts [] = tgt
+    \<and> wf_insts src insts)"
+
+(* The degenerate matcher [RAdd tgt] is always valid when tgt is non-empty
+   (or even when it's empty, since length [] > 0 is False but the empty
+   list case would need special handling). Actually for the general theorem
+   we allow empty tgt via the empty instruction list. For [RAdd tgt] we
+   need length tgt > 0. *)
+lemma valid_insts_radd:
+  assumes "length tgt > 0"
+  shows "valid_insts src tgt [RAdd tgt]"
+  using assms
+  by (simp add: valid_insts_def wf_insts_def)
+
+lemma valid_insts_nil:
+  "valid_insts src [] []"
+  by (simp add: valid_insts_def wf_insts_def)
+
 (* ---------- Phase A.4 goal: exec preserves length and prefix invariance ---------- *)
 
 (*
