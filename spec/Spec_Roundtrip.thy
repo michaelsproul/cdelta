@@ -1983,7 +1983,40 @@ theorem roundtrip_generic:
       and tgt_bd: "length tgt < 2 ^ 32 - 32"
       and combined_bd: "length src + length tgt < 2 ^ 32"
   shows "decode_spec (serialize_from_insts src tgt insts) src = Inl tgt"
-  sorry
+proof -
+  obtain data inst_bytes addr_bytes enc_cache where
+    ew: "encode_window insts (length src)
+         = (data, inst_bytes, addr_bytes, enc_cache)"
+    by (cases "encode_window insts (length src)") auto
+
+  have serialized: "serialize_from_insts src tgt insts
+    = serialize src tgt data inst_bytes addr_bytes"
+    using ew by (simp add: serialize_from_insts_def)
+
+  have ewl: "encode_window_loop insts (length src) 0 cache_init [] [] []
+             = (data, inst_bytes, addr_bytes, enc_cache)"
+    using ew by (simp add: encode_window_def)
+
+  have exec_eq: "exec_inst_list src insts [] = tgt"
+    using vi by (simp add: valid_insts_def)
+  have wf: "wf_insts_aux src insts []"
+    using vi by (simp add: valid_insts_def wf_insts_def)
+
+  have tgt_len_eq: "length tgt = length (exec_inst_list src insts [])"
+    using exec_eq by simp
+
+  have decode_ok: "decode_loop (length inst_bytes) src (length src) (length tgt)
+      \<lparr> ds_data_rem = data, ds_inst_rem = inst_bytes, ds_addr_rem = addr_bytes
+      , ds_cache = cache_init, ds_tgt = [] \<rparr>
+    = Inl \<lparr> ds_data_rem = [], ds_inst_rem = [], ds_addr_rem = []
+          , ds_cache = enc_cache, ds_tgt = tgt \<rparr>"
+    using encode_window_loop_decode_loop[OF ewl wf bi refl refl src_bd tgt_len_eq combined_bd]
+    exec_eq tgt_bd combined_bd
+    sorry
+
+  show ?thesis
+    sorry
+qed
 
 (* The existing spec_roundtrip follows as a corollary. *)
 corollary spec_roundtrip':
