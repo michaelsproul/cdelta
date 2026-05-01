@@ -1974,6 +1974,71 @@ next
     using do_step ih_mono fuel_eq by simp
 qed
 
+(* ---------- Generic serialize / parse roundtrip ---------- *)
+
+lemma serialize_parse_roundtrip:
+  assumes "length src < 2 ^ 32"
+          "length tgt < 2 ^ 32 - 32"
+          "length data < 2 ^ 32"
+          "length inst < 2 ^ 32"
+          "length addr < 2 ^ 32"
+  shows "decode_spec (serialize src tgt data inst addr) src
+       = (let src_seg_len = (if length src > 0 then length src else 0);
+              src_seg_off = 0;
+              src_seg = (if src_seg_len = 0 then []
+                         else take src_seg_len (drop src_seg_off src))
+          in apply_window
+               \<lparr> pw_src_seg_len = src_seg_len, pw_src_seg_off = src_seg_off
+               , pw_tgt_len = length tgt
+               , pw_data = data, pw_inst = inst, pw_addr = addr \<rparr>
+               src)"
+proof -
+  let ?has_src = "length src > 0"
+  let ?win_ind = "if ?has_src then 0x01 else 0x00 :: byte"
+  let ?src_desc = "if ?has_src then varint_encode (length src) @ varint_encode 0 else []"
+  let ?dlen = "varint_size (length tgt) + 1 + varint_size (length data)
+             + varint_size (length inst) + varint_size (length addr)
+             + length data + length inst + length addr"
+
+  have vsz_le_5: "varint_size n \<le> 5" if "n < 2 ^ 32" for n
+  proof -
+    have "n < 2 ^ 35" using that by simp
+    hence "num_digits n \<le> 5" by (rule num_digits_le_5)
+    thus ?thesis by (simp add: varint_size_def)
+  qed
+
+  have dlen_bd: "?dlen < 2 ^ 32"
+  proof -
+    have "?dlen \<le> 5 + 1 + 5 + 5 + 5 + length data + length inst + length addr"
+      using vsz_le_5[OF assms(2)[THEN order.strict_implies_order[THEN order_less_le_trans]]]
+            vsz_le_5
+      sorry
+    also have "\<dots> < 2 ^ 32" using assms by sorry
+    finally show ?thesis .
+  qed
+
+  have shape: "serialize src tgt data inst addr =
+    magic_bytes @ [0x00, ?win_ind] @ ?src_desc
+    @ varint_encode ?dlen
+    @ varint_encode (length tgt)
+    @ [0x00]
+    @ varint_encode (length data)
+    @ varint_encode (length inst)
+    @ varint_encode (length addr)
+    @ data @ inst @ addr"
+    by (simp add: serialize_def Let_def)
+
+  have ph: "parse_header (serialize src tgt data inst addr)
+    = Inl (?win_ind # ?src_desc
+           @ varint_encode ?dlen @ varint_encode (length tgt) @ [0x00]
+           @ varint_encode (length data) @ varint_encode (length inst)
+           @ varint_encode (length addr) @ data @ inst @ addr)"
+    using shape parse_header_of_magic
+    by (simp add: magic_bytes_def)
+
+  show ?thesis sorry
+qed
+
 (* ---------- Top-level generic roundtrip theorem ---------- *)
 
 theorem roundtrip_generic:
