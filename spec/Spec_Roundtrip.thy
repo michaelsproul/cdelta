@@ -1800,6 +1800,7 @@ lemma encode_window_loop_decode_loop:
       and src_len_eq: "src_len = length src_seg"
       and src_bd: "length src_seg < 2 ^ 32"
       and tgt_len_eq: "tgt_len = length (exec_inst_list src_seg insts tgt_so_far)"
+      and combined_bd: "length src_seg + tgt_len < 2 ^ 32"
   shows "decode_loop (length inst) src_seg (length src_seg) tgt_len
            \<lparr> ds_data_rem = data
            , ds_inst_rem = inst
@@ -1837,7 +1838,140 @@ next
     data_eq: "data = d0 @ dr" and inst_eq: "inst = ib0 @ ir" and
     addr_eq: "addr = ab0 @ ar" and c'_eq: "c' = cr"
     by simp_all
-  show ?case sorry
+
+  let ?tgt1 = "exec_inst src_seg i tgt_so_far"
+
+  have tp0_eq: "tp0 = length ?tgt1"
+    using eo0 Cons.prems(4,5)
+    by (cases i) (auto simp: Let_def split_def copy_loop_length
+                        find_single_add_opcode_def find_single_run_opcode_def
+                        find_single_copy_opcode_def exec_inst_length)
+
+  have bi_hd: "case i of RAdd bs \<Rightarrow> length bs < 2 ^ 32 | RRun _ n \<Rightarrow> n < 2 ^ 32
+               | RCopy a n \<Rightarrow> n < 2 ^ 32 \<and> a < 2 ^ 32"
+    using Cons.prems(3) by (simp add: bounded_insts_def)
+  have bi_tl: "bounded_insts is"
+    using Cons.prems(3) by (simp add: bounded_insts_def)
+
+  have tgt_len_ge: "length tgt_so_far + (case i of RAdd bs \<Rightarrow> length bs
+                     | RRun _ n \<Rightarrow> n | RCopy _ n \<Rightarrow> n) \<le> tgt_len"
+  proof -
+    have "tgt_len = length (exec_inst_list src_seg (i # is) tgt_so_far)"
+      using Cons.prems(7) .
+    also have "\<dots> = length (exec_inst_list src_seg is ?tgt1)" by simp
+    also have "\<dots> \<ge> length ?tgt1"
+      by (simp add: exec_inst_list_length)
+    finally have "tgt_len \<ge> length ?tgt1" .
+    thus ?thesis by (simp add: exec_inst_length)
+  qed
+
+  have ib0_ne: "ib0 \<noteq> []"
+    using eo0 by (cases i) (auto simp: Let_def split_def
+                   find_single_add_opcode_def find_single_run_opcode_def
+                   find_single_copy_opcode_def)
+
+  have do_step: "decode_one src_seg (length src_seg) tgt_len
+      \<lparr> ds_data_rem = d0 @ dr, ds_inst_rem = ib0 @ ir
+      , ds_addr_rem = ab0 @ ar, ds_cache = c, ds_tgt = tgt_so_far \<rparr>
+    = Inl \<lparr> ds_data_rem = dr, ds_inst_rem = ir
+          , ds_addr_rem = ar, ds_cache = c0, ds_tgt = ?tgt1 \<rparr>"
+  proof (cases i)
+    case (RAdd bs)
+    from Cons.prems(2) RAdd have wf_i: "length bs > 0" by simp
+    from bi_hd RAdd have bd_i: "length bs < 2 ^ 32" by simp
+    from tgt_len_ge RAdd have tgt_ge: "length tgt_so_far + length bs \<le> tgt_len" by simp
+    have "let (d, ib, ab, c'', tp') = encode_one (RAdd bs) src_len (length tgt_so_far) c [] [] []
+       in decode_one src_seg (length src_seg) tgt_len
+             \<lparr> ds_data_rem = d @ dr, ds_inst_rem = ib @ ir
+             , ds_addr_rem = ab @ ar, ds_cache = c, ds_tgt = tgt_so_far \<rparr>
+          = Inl \<lparr> ds_data_rem = dr, ds_inst_rem = ir
+                , ds_addr_rem = ar, ds_cache = c'', ds_tgt = tgt_so_far @ bs \<rparr>"
+      using encode_one_decode_one_add[OF wf_i bd_i tgt_ge,
+        where data_rest = dr and inst_rest = ir and addr_rest = ar
+          and src_seg = src_seg and src_seg_len = "length src_seg"
+          and c = c and src_len = src_len]
+      by simp
+    thus ?thesis using eo0 RAdd by (simp add: split_def)
+  next
+    case (RRun b n)
+    from Cons.prems(2) RRun have wf_i: "n > 0" by simp
+    from bi_hd RRun have bd_i: "n < 2 ^ 32" by simp
+    from tgt_len_ge RRun have tgt_ge: "length tgt_so_far + n \<le> tgt_len" by simp
+    have "let (d, ib, ab, c'', tp') = encode_one (RRun b n) src_len (length tgt_so_far) c [] [] []
+       in decode_one src_seg (length src_seg) tgt_len
+             \<lparr> ds_data_rem = d @ dr, ds_inst_rem = ib @ ir
+             , ds_addr_rem = ab @ ar, ds_cache = c, ds_tgt = tgt_so_far \<rparr>
+          = Inl \<lparr> ds_data_rem = dr, ds_inst_rem = ir
+                , ds_addr_rem = ar, ds_cache = c'', ds_tgt = tgt_so_far @ replicate n b \<rparr>"
+      using encode_one_decode_one_run[OF wf_i bd_i tgt_ge,
+        where data_rest = dr and inst_rest = ir and addr_rest = ar
+          and src_seg = src_seg and src_seg_len = "length src_seg"
+          and c = c and src_len = src_len]
+      by simp
+    thus ?thesis using eo0 RRun by (simp add: split_def)
+  next
+    case (RCopy a n)
+    from Cons.prems(2) RCopy have wf_i: "n > 0" "a < length src_seg + length tgt_so_far"
+      by simp_all
+    from bi_hd RCopy have bd_i: "n < 2 ^ 32" "a < 2 ^ 32" by simp_all
+    from tgt_len_ge RCopy have tgt_ge: "length tgt_so_far + n \<le> tgt_len" by simp
+    have here_bd: "length src_seg + length tgt_so_far < 2 ^ 32"
+    proof -
+      have "length tgt_so_far \<le> tgt_len"
+      proof -
+        have "tgt_len = length (exec_inst_list src_seg (i # is) tgt_so_far)"
+          using Cons.prems(7) .
+        also have "\<dots> \<ge> length tgt_so_far"
+          by (simp add: exec_inst_list_length)
+        finally show ?thesis .
+      qed
+      thus ?thesis using Cons.prems(8) by linarith
+    qed
+    have "let (d, ib, ab, c'', tp') = encode_one (RCopy a n) src_len (length tgt_so_far) c [] [] []
+       in decode_one src_seg (length src_seg) tgt_len
+             \<lparr> ds_data_rem = d @ dr, ds_inst_rem = ib @ ir
+             , ds_addr_rem = ab @ ar, ds_cache = c, ds_tgt = tgt_so_far \<rparr>
+          = Inl \<lparr> ds_data_rem = dr, ds_inst_rem = ir
+                , ds_addr_rem = ar, ds_cache = c'', ds_tgt = copy_loop src_seg tgt_so_far a n \<rparr>"
+      using encode_one_decode_one_copy[OF wf_i(1) bd_i(1) bd_i(2) wf_i(2) here_bd tgt_ge
+              Cons.prems(5),
+        where data_rest = dr and inst_rest = ir and addr_rest = ar
+          and src_seg = src_seg and c = c]
+      by simp
+    thus ?thesis using eo0 RCopy by (simp add: split_def)
+  qed
+
+  have wf_tl: "wf_insts_aux src_seg is ?tgt1"
+    using Cons.prems(2) by (cases i) simp_all
+  have tgt_len_tl: "tgt_len = length (exec_inst_list src_seg is ?tgt1)"
+    using Cons.prems(7) by simp
+  have combined_tl: "length src_seg + tgt_len < 2 ^ 32"
+    using Cons.prems(8) .
+
+  have ih: "decode_loop (length ir) src_seg (length src_seg) tgt_len
+      \<lparr> ds_data_rem = dr, ds_inst_rem = ir
+      , ds_addr_rem = ar, ds_cache = c0, ds_tgt = ?tgt1 \<rparr>
+    = Inl \<lparr> ds_data_rem = [], ds_inst_rem = [], ds_addr_rem = []
+          , ds_cache = cr, ds_tgt = exec_inst_list src_seg is ?tgt1 \<rparr>"
+    using Cons.IH[OF ewr wf_tl bi_tl tp0_eq Cons.prems(5,6) tgt_len_tl combined_tl]
+    by simp
+
+  have fuel_ge: "length (ib0 @ ir) - 1 \<ge> length ir"
+    using ib0_ne by simp
+  have ih_mono: "decode_loop (length (ib0 @ ir) - 1) src_seg (length src_seg) tgt_len
+      \<lparr> ds_data_rem = dr, ds_inst_rem = ir
+      , ds_addr_rem = ar, ds_cache = c0, ds_tgt = ?tgt1 \<rparr>
+    = Inl \<lparr> ds_data_rem = [], ds_inst_rem = [], ds_addr_rem = []
+          , ds_cache = cr, ds_tgt = exec_inst_list src_seg is ?tgt1 \<rparr>"
+    using decode_loop_mono[OF ih fuel_ge] .
+
+  have inst_ne: "ib0 @ ir \<noteq> []" using ib0_ne by simp
+  obtain fuel where fuel_eq: "length (ib0 @ ir) = Suc fuel"
+    using inst_ne by (cases "length (ib0 @ ir)") auto
+
+  show ?case
+    unfolding data_eq inst_eq addr_eq c'_eq
+    using do_step ih_mono fuel_eq by simp
 qed
 
 end
