@@ -1974,4 +1974,38 @@ next
     using do_step ih_mono fuel_eq by simp
 qed
 
+(* ---------- Top-level generic roundtrip theorem ---------- *)
+
+theorem roundtrip_generic:
+  assumes vi: "valid_insts src tgt insts"
+      and bi: "bounded_insts insts"
+      and src_bd: "length src < 2 ^ 32"
+      and tgt_bd: "length tgt < 2 ^ 32 - 32"
+      and combined_bd: "length src + length tgt < 2 ^ 32"
+  shows "decode_spec (serialize_from_insts src tgt insts) src = Inl tgt"
+  sorry
+
+(* The existing spec_roundtrip follows as a corollary. *)
+corollary spec_roundtrip':
+  assumes "length src < 2 ^ 32"
+          "length tgt < 2 ^ 32 - 32"
+          "length src + length tgt < 2 ^ 32"
+  shows   "decode_spec (encode_spec src tgt) src = Inl tgt"
+proof -
+  have vi: "valid_insts src tgt (generate_instructions src tgt)"
+  proof (cases "length tgt = 0")
+    case True then show ?thesis
+      by (simp add: valid_insts_def wf_insts_def generate_instructions_def)
+  next
+    case False then show ?thesis
+      using valid_insts_radd[of tgt src]
+      by (simp add: generate_instructions_def)
+  qed
+  have bi: "bounded_insts (generate_instructions src tgt)"
+    using assms(2) by (simp add: bounded_insts_def generate_instructions_def)
+  show ?thesis
+    unfolding encode_spec_def
+    using roundtrip_generic[OF vi bi assms] .
+qed
+
 end
