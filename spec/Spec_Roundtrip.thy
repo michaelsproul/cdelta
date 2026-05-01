@@ -1198,9 +1198,9 @@ lemma decode_loop_mono:
   using assms
 proof (induction n arbitrary: st m)
   case 0
-  then have "ds_inst_rem st = []" by (simp split: if_splits)
+  then have empty: "ds_inst_rem st = []" by (simp split: if_splits)
   then have "st' = st" using 0(1) by simp
-  thus ?case using decode_loop_fuel_empty by simp
+  thus ?case using decode_loop_fuel_empty[OF empty] by simp
 next
   case (Suc n)
   show ?case
@@ -1301,10 +1301,36 @@ proof -
                , ds_addr_rem := addr_rest
                , ds_tgt := ds_tgt st @ bs \<rparr>)"
     by (simp add: exec_half_def noop_hi_def)
+  let ?in_st = "st \<lparr> ds_data_rem := bs @ data_rest
+                   , ds_inst_rem := ?op # inst_rest
+                   , ds_addr_rem := addr_rest \<rparr>"
+  let ?st1 = "st \<lparr> ds_data_rem := bs @ data_rest
+                 , ds_inst_rem := inst_rest
+                 , ds_addr_rem := addr_rest \<rparr>"
+  let ?out_st = "st \<lparr> ds_data_rem := data_rest
+                    , ds_inst_rem := inst_rest
+                    , ds_addr_rem := addr_rest
+                    , ds_tgt := ds_tgt st @ bs \<rparr>"
+  have step1: "pop_byte (ds_inst_rem ?in_st) = Some (?op, inst_rest)"
+    by (simp add: pop_byte_def)
+  have step2: "?in_st \<lparr> ds_inst_rem := inst_rest \<rparr> = ?st1" by simp
+  have step3: "ds_inst_rem ?st1 = inst_rest" by simp
+  have step4: "resolve_size (add_hi ?sz) inst_rest = Some (?sz, inst_rest)"
+    using sz_pos by (simp add: resolve_size_def add_hi_def)
+  have step5: "?st1 \<lparr> ds_inst_rem := inst_rest \<rparr> = ?st1" by simp
+  have step6: "exec_half (add_hi ?sz) ?sz src_seg src_seg_len tgt_len ?st1
+     = Inl ?out_st"
+    using assms(3)
+    by (simp add: exec_half_def add_hi_def)
+  have step7: "resolve_size noop_hi (ds_inst_rem ?out_st) = Some (0, inst_rest)"
+    by (simp add: resolve_size_def noop_hi_def)
+  have step8: "?out_st \<lparr> ds_inst_rem := inst_rest \<rparr> = ?out_st" by simp
+  have step9: "exec_half noop_hi 0 src_seg src_seg_len tgt_len ?out_st = Inl ?out_st"
+    by (simp add: exec_half_def noop_hi_def)
   show ?thesis
     unfolding decode_one_def
-    by (simp add: pop_byte_def Let_def unat_op entry resolve_add exec_add
-                  resolve_noop exec_noop)
+    by (simp add: step1 Let_def unat_op entry step2 step3 step4 step5 step6
+                  step7 step8 step9)
 qed
 
 (* ADD with size 0 or > 17: opcode 1, size as varint. *)
@@ -1328,36 +1354,35 @@ proof -
     using default_entry_add_varint by simp
   have vdec: "varint_decode (varint_encode ?sz @ inst_rest) = Some (?sz, inst_rest)"
     using assms(2) varint_decode_encode by simp
-  have resolve1: "resolve_size (add_hi 0) (varint_encode ?sz @ inst_rest)
-                   = Some (?sz, inst_rest)"
+  let ?in_st = "st \<lparr> ds_data_rem := bs @ data_rest
+                   , ds_inst_rem := (1 :: byte) # varint_encode ?sz @ inst_rest
+                   , ds_addr_rem := addr_rest \<rparr>"
+  let ?st1 = "st \<lparr> ds_data_rem := bs @ data_rest
+                 , ds_inst_rem := varint_encode ?sz @ inst_rest
+                 , ds_addr_rem := addr_rest \<rparr>"
+  let ?st2 = "st \<lparr> ds_data_rem := bs @ data_rest
+                 , ds_inst_rem := inst_rest
+                 , ds_addr_rem := addr_rest \<rparr>"
+  let ?out_st = "st \<lparr> ds_data_rem := data_rest
+                    , ds_inst_rem := inst_rest
+                    , ds_addr_rem := addr_rest
+                    , ds_tgt := ds_tgt st @ bs \<rparr>"
+  have s1: "pop_byte (ds_inst_rem ?in_st) = Some (1 :: byte, varint_encode ?sz @ inst_rest)"
+    by (simp add: pop_byte_def)
+  have s2: "?in_st \<lparr> ds_inst_rem := varint_encode ?sz @ inst_rest \<rparr> = ?st1" by simp
+  have s3: "resolve_size (add_hi 0) (ds_inst_rem ?st1) = Some (?sz, inst_rest)"
     by (simp add: resolve_size_def add_hi_def vdec)
-  have resolve_noop: "resolve_size noop_hi inst_rest = Some (0, inst_rest)"
-    by (simp add: resolve_size_def noop_hi_def)
-  have exec_add:
-    "exec_half (add_hi 0) ?sz src_seg src_seg_len tgt_len
-       (st \<lparr> ds_data_rem := bs @ data_rest
-           , ds_inst_rem := inst_rest
-           , ds_addr_rem := addr_rest \<rparr>)
-     = Inl (st \<lparr> ds_data_rem := data_rest
-               , ds_inst_rem := inst_rest
-               , ds_addr_rem := addr_rest
-               , ds_tgt := ds_tgt st @ bs \<rparr>)"
+  have s4: "?st1 \<lparr> ds_inst_rem := inst_rest \<rparr> = ?st2" by simp
+  have s5: "exec_half (add_hi 0) ?sz src_seg src_seg_len tgt_len ?st2 = Inl ?out_st"
     using assms(3) by (simp add: exec_half_def add_hi_def)
-  have exec_noop:
-    "exec_half noop_hi 0 src_seg src_seg_len tgt_len
-       (st \<lparr> ds_data_rem := data_rest
-           , ds_inst_rem := inst_rest
-           , ds_addr_rem := addr_rest
-           , ds_tgt := ds_tgt st @ bs \<rparr>)
-     = Inl (st \<lparr> ds_data_rem := data_rest
-               , ds_inst_rem := inst_rest
-               , ds_addr_rem := addr_rest
-               , ds_tgt := ds_tgt st @ bs \<rparr>)"
+  have s6: "resolve_size noop_hi (ds_inst_rem ?out_st) = Some (0, inst_rest)"
+    by (simp add: resolve_size_def noop_hi_def)
+  have s7: "?out_st \<lparr> ds_inst_rem := inst_rest \<rparr> = ?out_st" by simp
+  have s8: "exec_half noop_hi 0 src_seg src_seg_len tgt_len ?out_st = Inl ?out_st"
     by (simp add: exec_half_def noop_hi_def)
   show ?thesis
     unfolding decode_one_def
-    by (simp add: pop_byte_def Let_def unat1 entry resolve1 exec_add
-                  resolve_noop exec_noop)
+    by (simp add: s1 Let_def unat1 entry s2 s3 s4 s5 s6 s7 s8)
 qed
 
 (* Unified ADD: any size. *)
@@ -1378,24 +1403,19 @@ lemma decode_one_add_suffix:
                   , ds_tgt := ds_tgt st @ bs \<rparr>)"
 proof (cases "1 \<le> length bs \<and> length bs \<le> 17")
   case True
-  then have op_eq: "find_single_add_opcode (length bs) = (1 + length bs, False)"
-    by (simp add: find_single_add_opcode_def)
+  then have lb: "1 \<le> length bs" and ub: "length bs \<le> 17" by auto
+  have op_eq: "find_single_add_opcode (length bs) = (1 + length bs, False)"
+    using True by (simp add: find_single_add_opcode_def)
   show ?thesis
-    using True decode_one_add_small_suffix[OF _ _ assms(2),
-            where bs = bs and data_rest = data_rest and inst_rest = inst_rest
-              and addr_rest = addr_rest and st = st
-              and src_seg = src_seg and src_seg_len = src_seg_len]
+    using decode_one_add_small_suffix[OF lb ub assms(2)]
     by (simp add: op_eq)
 next
   case False
   then have disj: "length bs > 17 \<or> length bs = 0" by linarith
-  then have op_eq: "find_single_add_opcode (length bs) = (1, True)"
-    by (auto simp: find_single_add_opcode_def)
+  have op_eq: "find_single_add_opcode (length bs) = (1, True)"
+    using disj by (auto simp: find_single_add_opcode_def)
   show ?thesis
-    using decode_one_add_general_suffix[OF disj assms(1,2),
-            where data_rest = data_rest and inst_rest = inst_rest
-              and addr_rest = addr_rest and st = st
-              and src_seg = src_seg and src_seg_len = src_seg_len]
+    using decode_one_add_general_suffix[OF disj assms(1,2)]
     by (simp add: op_eq)
 qed
 
@@ -1418,36 +1438,35 @@ proof -
     by (simp add: default_entry_def run_hi_def noop_hi_def)
   have vdec: "varint_decode (varint_encode n @ inst_rest) = Some (n, inst_rest)"
     using assms(2) varint_decode_encode by simp
-  have resolve_run: "resolve_size (run_hi 0) (varint_encode n @ inst_rest)
-                      = Some (n, inst_rest)"
+  let ?in_st = "st \<lparr> ds_data_rem := b # data_rest
+                   , ds_inst_rem := (0 :: byte) # varint_encode n @ inst_rest
+                   , ds_addr_rem := addr_rest \<rparr>"
+  let ?st1 = "st \<lparr> ds_data_rem := b # data_rest
+                 , ds_inst_rem := varint_encode n @ inst_rest
+                 , ds_addr_rem := addr_rest \<rparr>"
+  let ?st2 = "st \<lparr> ds_data_rem := b # data_rest
+                 , ds_inst_rem := inst_rest
+                 , ds_addr_rem := addr_rest \<rparr>"
+  let ?out_st = "st \<lparr> ds_data_rem := data_rest
+                    , ds_inst_rem := inst_rest
+                    , ds_addr_rem := addr_rest
+                    , ds_tgt := ds_tgt st @ replicate n b \<rparr>"
+  have s1: "pop_byte (ds_inst_rem ?in_st) = Some (0 :: byte, varint_encode n @ inst_rest)"
+    by (simp add: pop_byte_def)
+  have s2: "?in_st \<lparr> ds_inst_rem := varint_encode n @ inst_rest \<rparr> = ?st1" by simp
+  have s3: "resolve_size (run_hi 0) (ds_inst_rem ?st1) = Some (n, inst_rest)"
     by (simp add: resolve_size_def run_hi_def vdec)
-  have resolve_noop: "resolve_size noop_hi inst_rest = Some (0, inst_rest)"
-    by (simp add: resolve_size_def noop_hi_def)
-  have exec_run:
-    "exec_half (run_hi 0) n src_seg src_seg_len tgt_len
-       (st \<lparr> ds_data_rem := b # data_rest
-           , ds_inst_rem := inst_rest
-           , ds_addr_rem := addr_rest \<rparr>)
-     = Inl (st \<lparr> ds_data_rem := data_rest
-               , ds_inst_rem := inst_rest
-               , ds_addr_rem := addr_rest
-               , ds_tgt := ds_tgt st @ replicate n b \<rparr>)"
+  have s4: "?st1 \<lparr> ds_inst_rem := inst_rest \<rparr> = ?st2" by simp
+  have s5: "exec_half (run_hi 0) n src_seg src_seg_len tgt_len ?st2 = Inl ?out_st"
     using assms(3) by (simp add: exec_half_def run_hi_def pop_byte_def)
-  have exec_noop:
-    "exec_half noop_hi 0 src_seg src_seg_len tgt_len
-       (st \<lparr> ds_data_rem := data_rest
-           , ds_inst_rem := inst_rest
-           , ds_addr_rem := addr_rest
-           , ds_tgt := ds_tgt st @ replicate n b \<rparr>)
-     = Inl (st \<lparr> ds_data_rem := data_rest
-               , ds_inst_rem := inst_rest
-               , ds_addr_rem := addr_rest
-               , ds_tgt := ds_tgt st @ replicate n b \<rparr>)"
+  have s6: "resolve_size noop_hi (ds_inst_rem ?out_st) = Some (0, inst_rest)"
+    by (simp add: resolve_size_def noop_hi_def)
+  have s7: "?out_st \<lparr> ds_inst_rem := inst_rest \<rparr> = ?out_st" by simp
+  have s8: "exec_half noop_hi 0 src_seg src_seg_len tgt_len ?out_st = Inl ?out_st"
     by (simp add: exec_half_def noop_hi_def)
   show ?thesis
     unfolding decode_one_def
-    by (simp add: pop_byte_def Let_def unat0 entry resolve_run exec_run
-                  resolve_noop exec_noop)
+    by (simp add: s1 Let_def unat0 entry s2 s3 s4 s5 s6 s7 s8)
 qed
 
 (* COPY with size in 4..18: opcode encodes size directly. *)
@@ -1515,10 +1534,34 @@ proof -
                , ds_cache := cache_update (ds_cache st) a
                , ds_tgt := copy_loop src_seg (ds_tgt st) a n \<rparr>)"
     by (simp add: exec_half_def noop_hi_def)
+  let ?in_st = "st \<lparr> ds_data_rem := data_rest
+                   , ds_inst_rem := ?op # inst_rest
+                   , ds_addr_rem := abytes @ addr_rest \<rparr>"
+  let ?st1 = "st \<lparr> ds_data_rem := data_rest
+                 , ds_inst_rem := inst_rest
+                 , ds_addr_rem := abytes @ addr_rest \<rparr>"
+  let ?out_st = "st \<lparr> ds_data_rem := data_rest
+                    , ds_inst_rem := inst_rest
+                    , ds_addr_rem := addr_rest
+                    , ds_cache := cache_update (ds_cache st) a
+                    , ds_tgt := copy_loop src_seg (ds_tgt st) a n \<rparr>"
+  have s1: "pop_byte (ds_inst_rem ?in_st) = Some (?op, inst_rest)"
+    by (simp add: pop_byte_def)
+  have s2: "?in_st \<lparr> ds_inst_rem := inst_rest \<rparr> = ?st1" by simp
+  have s3: "resolve_size (copy_hi n mode) (ds_inst_rem ?st1) = Some (n, inst_rest)"
+    using resolve_copy by simp
+  have s4: "?st1 \<lparr> ds_inst_rem := inst_rest \<rparr> = ?st1" by simp
+  have s5: "exec_half (copy_hi n mode) n src_seg src_seg_len tgt_len ?st1
+            = Inl ?out_st"
+    using exec_copy by simp
+  have s6: "resolve_size noop_hi (ds_inst_rem ?out_st) = Some (0, inst_rest)"
+    using resolve_noop by simp
+  have s7: "?out_st \<lparr> ds_inst_rem := inst_rest \<rparr> = ?out_st" by simp
+  have s8: "exec_half noop_hi 0 src_seg src_seg_len tgt_len ?out_st = Inl ?out_st"
+    using exec_noop by simp
   show ?thesis
     unfolding decode_one_def
-    by (simp add: pop_byte_def Let_def unat_op entry resolve_copy exec_copy
-                  resolve_noop exec_noop)
+    by (simp add: s1 Let_def unat_op entry s2 s3 s4 s5 s6 s7 s8)
 qed
 
 (* COPY with size 0 or > 18: varint-size opcode. *)
@@ -1587,10 +1630,37 @@ proof -
                , ds_cache := cache_update (ds_cache st) a
                , ds_tgt := copy_loop src_seg (ds_tgt st) a n \<rparr>)"
     by (simp add: exec_half_def noop_hi_def)
+  let ?in_st = "st \<lparr> ds_data_rem := data_rest
+                   , ds_inst_rem := ?op # varint_encode n @ inst_rest
+                   , ds_addr_rem := abytes @ addr_rest \<rparr>"
+  let ?st1 = "st \<lparr> ds_data_rem := data_rest
+                 , ds_inst_rem := varint_encode n @ inst_rest
+                 , ds_addr_rem := abytes @ addr_rest \<rparr>"
+  let ?st2 = "st \<lparr> ds_data_rem := data_rest
+                 , ds_inst_rem := inst_rest
+                 , ds_addr_rem := abytes @ addr_rest \<rparr>"
+  let ?out_st = "st \<lparr> ds_data_rem := data_rest
+                    , ds_inst_rem := inst_rest
+                    , ds_addr_rem := addr_rest
+                    , ds_cache := cache_update (ds_cache st) a
+                    , ds_tgt := copy_loop src_seg (ds_tgt st) a n \<rparr>"
+  have s1: "pop_byte (ds_inst_rem ?in_st) = Some (?op, varint_encode n @ inst_rest)"
+    by (simp add: pop_byte_def)
+  have s2: "?in_st \<lparr> ds_inst_rem := varint_encode n @ inst_rest \<rparr> = ?st1" by simp
+  have s3: "resolve_size (copy_hi 0 mode) (ds_inst_rem ?st1) = Some (n, inst_rest)"
+    using resolve_copy by simp
+  have s4: "?st1 \<lparr> ds_inst_rem := inst_rest \<rparr> = ?st2" by simp
+  have s5: "exec_half (copy_hi 0 mode) n src_seg src_seg_len tgt_len ?st2
+            = Inl ?out_st"
+    using exec_copy by simp
+  have s6: "resolve_size noop_hi (ds_inst_rem ?out_st) = Some (0, inst_rest)"
+    using resolve_noop by simp
+  have s7: "?out_st \<lparr> ds_inst_rem := inst_rest \<rparr> = ?out_st" by simp
+  have s8: "exec_half noop_hi 0 src_seg src_seg_len tgt_len ?out_st = Inl ?out_st"
+    using exec_noop by simp
   show ?thesis
     unfolding decode_one_def
-    by (simp add: pop_byte_def Let_def unat_op entry resolve_copy exec_copy
-                  resolve_noop exec_noop)
+    by (simp add: s1 Let_def unat_op entry s2 s3 s4 s5 s6 s7 s8)
 qed
 
 (* Unified COPY: any size. *)
@@ -1616,15 +1686,16 @@ lemma decode_one_copy_suffix:
                   , ds_tgt := copy_loop src_seg (ds_tgt st) a n \<rparr>)"
 proof (cases "4 \<le> n \<and> n \<le> 18")
   case True
-  then have op_eq: "find_single_copy_opcode n mode = (19 + mode * 16 + n - 3, False)"
-    by (simp add: find_single_copy_opcode_def Let_def)
+  then have lb: "4 \<le> n" and ub: "n \<le> 18" by auto
+  have op_eq: "find_single_copy_opcode n mode = (19 + mode * 16 + n - 3, False)"
+    using True by (simp add: find_single_copy_opcode_def Let_def)
   show ?thesis
-    using True decode_one_copy_small_suffix[OF _ _ assms(1,4,5,6,7,8)]
+    using decode_one_copy_small_suffix[OF lb ub assms(1,4,5,6,7,8)]
     by (simp add: op_eq)
 next
   case False
-  then have op_eq: "find_single_copy_opcode n mode = (19 + mode * 16, True)"
-    by (auto simp: find_single_copy_opcode_def Let_def)
+  have op_eq: "find_single_copy_opcode n mode = (19 + mode * 16, True)"
+    using False by (auto simp: find_single_copy_opcode_def Let_def)
   show ?thesis
     using decode_one_copy_varint_suffix[OF assms]
     by (simp add: op_eq)
@@ -2008,14 +2079,7 @@ proof -
   qed
 
   have dlen_bd: "?dlen < 2 ^ 32"
-  proof -
-    have "?dlen \<le> 5 + 1 + 5 + 5 + 5 + length data + length inst + length addr"
-      using vsz_le_5[OF assms(2)[THEN order.strict_implies_order[THEN order_less_le_trans]]]
-            vsz_le_5
-      sorry
-    also have "\<dots> < 2 ^ 32" using assms by sorry
-    finally show ?thesis .
-  qed
+    sorry
 
   have shape: "serialize src tgt data inst addr =
     magic_bytes @ [0x00, ?win_ind] @ ?src_desc

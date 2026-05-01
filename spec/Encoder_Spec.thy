@@ -143,17 +143,17 @@ proof (induction insts arbitrary: tp c data inst addr)
   case Nil
   then show ?case by auto
 next
-  case (Cons i is)
+  case (Cons i rest)
   obtain d0 ib0 ab0 c0 tp0 where
     eo: "encode_one i sl tp c data inst addr = (data @ d0, inst @ ib0, addr @ ab0, c0, tp0)" and
     eo0: "encode_one i sl tp c [] [] [] = (d0, ib0, ab0, c0, tp0)"
     by (rule encode_one_prefix)
   obtain d1 ib1 ab1 c1 where
-    ih: "encode_window_loop is sl tp0 c0 (data @ d0) (inst @ ib0) (addr @ ab0) =
+    ih: "encode_window_loop rest sl tp0 c0 (data @ d0) (inst @ ib0) (addr @ ab0) =
            ((data @ d0) @ d1, (inst @ ib0) @ ib1, (addr @ ab0) @ ab1, c1)" and
-    ih0: "encode_window_loop is sl tp0 c0 [] [] [] = (d1, ib1, ab1, c1)"
+    ih0: "encode_window_loop rest sl tp0 c0 [] [] [] = (d1, ib1, ab1, c1)"
     using Cons.IH[of tp0 c0 "data @ d0" "inst @ ib0" "addr @ ab0"] by auto
-  have ih0': "encode_window_loop is sl tp0 c0 d0 ib0 ab0 =
+  have ih0': "encode_window_loop rest sl tp0 c0 d0 ib0 ab0 =
                 (d0 @ d1, ib0 @ ib1, ab0 @ ab1, c1)"
     using Cons.IH[of tp0 c0 d0 ib0 ab0] ih0 by auto
   show ?case
