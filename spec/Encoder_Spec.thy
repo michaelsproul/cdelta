@@ -149,13 +149,14 @@ next
     eo0: "encode_one i sl tp c [] [] [] = (d0, ib0, ab0, c0, tp0)"
     by (rule encode_one_prefix)
   obtain d1 ib1 ab1 c1 where
-    ih: "encode_window_loop rest sl tp0 c0 (data @ d0) (inst @ ib0) (addr @ ab0) =
-           ((data @ d0) @ d1, (inst @ ib0) @ ib1, (addr @ ab0) @ ab1, c1)" and
     ih0: "encode_window_loop rest sl tp0 c0 [] [] [] = (d1, ib1, ab1, c1)"
-    using Cons.IH[of tp0 c0 "data @ d0" "inst @ ib0" "addr @ ab0"] by blast
+    using Cons.IH[of tp0 c0 "[]" "[]" "[]"] by auto
+  have ih: "encode_window_loop rest sl tp0 c0 (data @ d0) (inst @ ib0) (addr @ ab0) =
+           ((data @ d0) @ d1, (inst @ ib0) @ ib1, (addr @ ab0) @ ab1, c1)"
+    using Cons.IH[of tp0 c0 "data @ d0" "inst @ ib0" "addr @ ab0"] ih0 by auto
   have ih0': "encode_window_loop rest sl tp0 c0 d0 ib0 ab0 =
                 (d0 @ d1, ib0 @ ib1, ab0 @ ab1, c1)"
-    using Cons.IH[of tp0 c0 d0 ib0 ab0] ih0 by blast
+    using Cons.IH[of tp0 c0 d0 ib0 ab0] ih0 by auto
   show ?case
     using eo eo0 ih ih0' by (simp add: split_def Let_def)
 qed
