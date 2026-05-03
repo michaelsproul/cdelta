@@ -74,63 +74,121 @@ lemma read_byte'_spec:
   by (auto simp add: ocondition_def oreturn_def oguard_def ogets_def obind_def K_def)
 
 (*
-  TODO (read_varint'_spec): Hoare triple
-    {{ buffer valid for [pos, len) ∧ len < 2^32 }}
-       read_varint' buf len pos
+  Relating the C's byte read to the pure spec. The C indexes by word pos;
+  spec uses nat-valued drop/take. Bridge via heap_bytes_nth.
+*)
+lemma read_byte'_list_spec:
+  assumes "unat pos < unat len"
+      and "unat len \<le> length (heap_bytes s buf (unat len))"
+      and "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+  shows "read_byte' buf len pos s =
+           Some (pr_t_C (pos + 1)
+                        (UCAST(8 \<rightarrow> 32)
+                          (heap_bytes s buf (unat len) ! unat pos))
+                        VCD_OK)"
+proof -
+  have "pos < len" using assms(1) by (simp add: word_less_nat_alt)
+  moreover have "heap_w8 s (buf +\<^sub>p uint pos) =
+                 heap_bytes s buf (unat len) ! unat pos"
+  proof -
+    have "int (unat pos) = uint pos" by simp
+    thus ?thesis using assms(1)
+      by (simp add: heap_bytes_nth)
+  qed
+  ultimately show ?thesis
+    using read_byte'_spec[OF impI[OF assms(3)]] assms(3)
+    by (simp add: read_byte'_spec)
+qed
+
+(* ---------- read_varint refinement (TODO) ---------- *)
+
+(*
+  Hoare-triple contract for read_varint'. Sketch:
+
+    {{ ∀i<unat len. ptr_valid (heap_typing s) (buf +ₚ int i);
+       pos ≤ len;
+       unat len ≤ length (heap_bytes s buf (unat len)) }}
+      read_varint' buf len pos
     {{ λrv s'.
-        case varint_decode (drop (unat pos) (heap_bytes s buf (unat len))) of
-          Some (v, rest) ⇒
-            rv = Result (pr_t_C (len - of_nat (length rest)) (of_nat v) 0)
-        | None ⇒ error case }}
+        s' = s \<and>
+        (case varint_decode (drop (unat pos) (heap_bytes s buf (unat len))) of
+           Some (v, rest) ⇒
+             v < 2^32 ∧
+             rv = Result (pr_t_C (len - of_nat (length rest)) (of_nat v) VCD_OK)
+         | None ⇒ ∃cur e. rv = Result (pr_t_C cur 0 e) ∧ e ≠ VCD_OK) }}
 
-  Proof via whileLoop invariant relating (cur, i, v) to
-  varint_decode_loop (5 - i) (unat v) (drop (unat cur - unat pos)
-                                             (take (unat len) bytes)).
+  Proof plan: apply runs_to_vcg, use a whileLoop invariant I(cur, i, v)
+  = "(cur = pos + of_nat i) ∧
+     (i ≤ 5) ∧
+     (unat v < 2 ^ (7*i)) ∧
+     (after processing bytes [pos..cur), varint_decode_loop (5 - i) (unat v)
+        (drop (unat cur) (heap_bytes s buf (unat len)))
+      = varint_decode (drop (unat pos) (heap_bytes s buf (unat len))))"
+  with measure R = "λ((cur, i, v), _). 5 - i".
 
-  Key challenge: the v bound ensures no 32-bit overflow; threading this
-  through the invariant matches varint_decode_loop's "acc' < 2^32" check.
-  Effort: ~1 week.
+  Significant effort (~1 week). Left as a target pending bit-arithmetic
+  infrastructure (the `v ← (v << 7) | UCAST(…) (b && 0x7F)` step requires
+  showing unat (v << 7) = unat v * 128 when v < 2^25).
 *)
 
-(* ---------- decode_address refinement ---------- *)
+(* ---------- decode_address refinement (TODO) ---------- *)
 
 (*
-  TODO (decode_address'_spec): Hoare triple relating decode_address'
-  (uses near_arr, same_arr file-scope caches) to the pure decode_address
-  in AddressCache.thy. Requires invariant:
-    cache_abstraction near_arr same_arr near_ptr = ⦇near = ..., same = ..., near_ptr = ...⦈
+  Hoare-triple contract for decode_address'. Mirrors the pure
+  decode_address in AddressCache.thy.
+
+  Requires cache_abstraction predicate relating near_arr + same_arr +
+  near_ptr to ⦇near = ..., same = ..., near_ptr = ...⦈. The cache is
+  UPDATED in-place for non-mode-8 branches, so the postcondition
+  describes a modified state. Builds on read_varint'_spec and
+  read_byte'_spec.
 *)
 
-(* ---------- build_code_table refinement ---------- *)
+(* ---------- build_code_table refinement (TODO) ---------- *)
 
 (*
-  TODO (build_code_table'_spec): After build_code_table', the file-scope
-  code_tbl matches default_entry pointwise. Small Hoare triple; the
-  bookkeeping is all in translating the 256×6 byte array to default_entry
-  values.
+  {{ code_tbl_built = 0 }}
+    build_code_table' ()
+  {{ λ_ s'. code_tbl_built s' = 1 \<and>
+            (∀i<256. default_entry i matches code_tbl_C s' ! i) }}
+
+  After build, a relation code_table_abstraction. Used by vcdiff_decode'
+  via a precondition that either code_tbl_built = 1 already or we
+  call build_code_table' first.
 *)
 
-(* ---------- vcdiff_decode' main refinement ---------- *)
+(* ---------- vcdiff_decode main refinement (TODO) ---------- *)
 
 (*
-  TODO (vcdiff_decode'_spec): top-level refinement. Under the preconds
-  of decode_c_refines_spec (see planning), prove:
+  The big one. Top-level Hoare triple:
 
-    vcdiff_decode' patch patch_len src src_len out out_cap out_len_ptr \<bullet> s
-      \<lbrace>\<lambda>rv s'.
+    {{ ptr_valid patch_len; ptr_valid src_len; ptr_valid out_cap;
+       ptr_valid out_len; buffer preconds; disjoint_buffers;
+       src_len, patch_len, out_cap < 2^32 }}
+      vcdiff_decode' patch patch_len src src_len out out_cap out_len
+    {{ λrv s'.
         case decode_spec (heap_bytes s patch (unat patch_len))
                          (heap_bytes s src (unat src_len)) of
-          Inl tgt ⇒ rv = Result VCD_OK
-                   ∧ unat out_cap \<ge> length tgt
-                   ∧ heap_bytes s' out (length tgt) = tgt
-                   ∧ heap_w32 s' out_len_ptr = of_nat (length tgt)
-                   ∧ (heap elsewhere unchanged)
-        | Inr _ ⇒ rv \<noteq> Result VCD_OK \<rbrace>
+          Inl tgt ⇒
+            rv = Result VCD_OK \<and>
+            heap_bytes s' out (length tgt) = tgt \<and>
+            heap_w32 s' out_len = of_nat (length tgt) \<and>
+            (pointers outside [out..length tgt), out_len, near_arr, same_arr
+              unchanged)
+        | Inr _ ⇒ rv ≠ Result VCD_OK }}
 
-  Proof structure: header parse, window header, then main while loop with
-  invariant. The invariant is the largest piece: ties cursor positions
-  to decode_loop state via encode_window_loop_decode_loop from the pure
-  spec.
+  Proof structure (top-down):
+    1. Header parse (magic, 0x00, Hdr_Indicator): 30 lines, mechanical.
+    2. Adler-32 skip and window header: another 30 lines, calls read_varint'.
+    3. Main while loop over inst_cursor < inst_end.
+    4. Cache re-init + code_tbl build precondition.
+    5. Size-consistency post-checks (tgt_pos = tgt_len etc).
+
+  The main loop invariant ties the C's (data_cursor, inst_cursor,
+  addr_cursor, tgt_pos, near_ptr, near_arr, same_arr) to the spec's
+  decode_loop state via encode_window_loop_decode_loop.
+
+  Effort: ~2 weeks, dominated by the main-loop invariant.
 *)
 
 end
