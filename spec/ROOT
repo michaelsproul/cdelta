@@ -1,4 +1,4 @@
-session CdeltaSpec = "HOL-Library" +
+session CdeltaSpecBase = "HOL-Library" +
   options [timeout = 1800, quick_and_dirty = false]
   sessions
     "Word_Lib"
@@ -10,4 +10,3 @@ session CdeltaSpec = "HOL-Library" +
     Instructions
     Encoder_Spec
     Decoder_Spec
-    Spec_Roundtrip

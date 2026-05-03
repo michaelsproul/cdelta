@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "isabelle": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/home/michael/Programming/isabelle-lsp-mcp",
+        "run",
+        "isabelle-mcp",
+        "-l",
+        "CdeltaSpecBase",
+        "-d",
+        "/home/michael/Programming/cdelta/spec",
+        "-v"
+      ]
+    }
+  }
+}
