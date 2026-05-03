@@ -496,4 +496,52 @@ proof -
     using sum_eq shift_eq ucast_eq by simp
 qed
 
+(*
+  varint_decode_loop with no fuel returns None.
+*)
+lemma varint_decode_loop_no_fuel:
+  "varint_decode_loop 0 acc bs = None"
+  by simp
+
+(*
+  varint_decode_loop is monotone in fuel in the sense that if the decode
+  succeeds with fuel n, it succeeds with any fuel >= n giving the same
+  result. Useful for the invariant: at iteration i in the C, the loop
+  has fuel (5 - i) remaining, and at iteration 0, fuel = 5, but the
+  accumulator state matches fuel = (5 - i) starting from accumulator v.
+*)
+lemma varint_decode_loop_fuel_mono:
+  assumes "varint_decode_loop n acc bs = Some (v, rest)"
+      and "n \<le> m"
+  shows "varint_decode_loop m acc bs = Some (v, rest)"
+  using assms
+proof (induction n arbitrary: acc bs m)
+  case 0
+  then show ?case by simp
+next
+  case (Suc n)
+  obtain m' where m_eq: "m = Suc m'" "n \<le> m'"
+    using Suc.prems(2) by (cases m) auto
+  show ?case
+  proof (cases bs)
+    case Nil
+    then show ?thesis using Suc.prems by simp
+  next
+    case (Cons b rest')
+    let ?acc' = "acc * 128 + unat (b AND 0x7F)"
+    show ?thesis
+    proof (cases "b AND 0x80 = 0")
+      case True
+      then show ?thesis using Suc.prems Cons m_eq by simp
+    next
+      case False
+      then have "varint_decode_loop n ?acc' rest' = Some (v, rest)"
+        using Suc.prems Cons by (simp add: Let_def)
+      hence "varint_decode_loop m' ?acc' rest' = Some (v, rest)"
+        using Suc.IH m_eq by blast
+      thus ?thesis using False Cons m_eq by (simp add: Let_def)
+    qed
+  qed
+qed
+
 end
