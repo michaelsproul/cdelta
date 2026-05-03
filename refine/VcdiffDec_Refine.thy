@@ -100,36 +100,40 @@ proof -
     by (simp add: read_byte'_spec)
 qed
 
-(* ---------- read_varint refinement (TODO) ---------- *)
+(* ---------- read_varint refinement ---------- *)
 
 (*
   Hoare-triple contract for read_varint'. Sketch:
 
-    {{ ∀i<unat len. ptr_valid (heap_typing s) (buf +ₚ int i);
-       pos ≤ len;
-       unat len ≤ length (heap_bytes s buf (unat len)) }}
+    {{ \<forall>i<unat len. ptr_valid (heap_typing s) (buf +\<^sub>p int i);
+       pos \<le> len;
+       unat len \<le> length (heap_bytes s buf (unat len)) }}
       read_varint' buf len pos
-    {{ λrv s'.
+    {{ \<lambda>rv s'.
         s' = s \<and>
         (case varint_decode (drop (unat pos) (heap_bytes s buf (unat len))) of
-           Some (v, rest) ⇒
-             v < 2^32 ∧
+           Some (v, rest) \<Rightarrow>
+             v < 2^32 \<and>
              rv = Result (pr_t_C (len - of_nat (length rest)) (of_nat v) VCD_OK)
-         | None ⇒ ∃cur e. rv = Result (pr_t_C cur 0 e) ∧ e ≠ VCD_OK) }}
+         | None \<Rightarrow> \<exists>cur e. rv = Result (pr_t_C cur 0 e) \<and> e \<noteq> VCD_OK) }}
 
-  Proof plan: apply runs_to_vcg, use a whileLoop invariant I(cur, i, v)
-  = "(cur = pos + of_nat i) ∧
-     (i ≤ 5) ∧
-     (unat v < 2 ^ (7*i)) ∧
-     (after processing bytes [pos..cur), varint_decode_loop (5 - i) (unat v)
-        (drop (unat cur) (heap_bytes s buf (unat len)))
-      = varint_decode (drop (unat pos) (heap_bytes s buf (unat len))))"
-  with measure R = "λ((cur, i, v), _). 5 - i".
+  Proof via runs_to_vcg + whileLoop invariant:
+    I(cur, i, v) = "(cur = pos + of_nat (unat i))
+                  \<and> (i \<le> 5)
+                  \<and> (unat v < 2 ^ (7 * unat i))
+                  \<and> (varint_decode_loop (5 - unat i) (unat v)
+                       (drop (unat cur) (heap_bytes s buf (unat len)))
+                     = varint_decode (drop (unat pos) (heap_bytes s buf (unat len))))"
+    with measure R = "\<lambda>((cur, i, v), _). 5 - unat i".
 
-  Significant effort (~1 week). Left as a target pending bit-arithmetic
-  infrastructure (the `v ← (v << 7) | UCAST(…) (b && 0x7F)` step requires
-  showing unat (v << 7) = unat v * 128 when v < 2^25).
+  The varint_acc_step lemma (Varint.thy) bridges the unat-arithmetic
+  step `v ← (v << 7) | UCAST(b & 0x7F)` to `v * 128 + (b & 0x7F)`.
+
+  Effort: several days for the whileLoop invariant plus two exit cases
+  (continuation-bit-clear success and iteration-limit-reached failure).
 *)
+
+lemmas runs_to_whileLoop3 = runs_to_whileLoop_res' [split_tuple C and B arity: 3]
 
 (* ---------- decode_address refinement (TODO) ---------- *)
 
