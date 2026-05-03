@@ -15,8 +15,8 @@
 *)
 theory Spec_Roundtrip
   imports
-    Encoder_Spec
-    Decoder_Spec
+    CdeltaSpecBase.Encoder_Spec
+    CdeltaSpecBase.Decoder_Spec
 begin
 
 unbundle bit_operations_syntax
