@@ -1276,7 +1276,7 @@ proof -
     using op_lt by (subst unat_of_nat_eq) simp_all
   have entry: "default_entry (unat ?op) = (add_hi ?sz, noop_hi)"
     using default_entry_add_small[OF assms(1,2)] unat_op by simp
-  have sz_pos: "?sz > 0" using assms(1) by simp
+  have sz_pos: "?sz > 0" using assms(1) by linarith
   have resolve_add: "resolve_size (add_hi ?sz) inst_rest = Some (?sz, inst_rest)"
     using sz_pos by (simp add: resolve_size_def add_hi_def)
   have resolve_noop: "resolve_size noop_hi inst_rest = Some (0, inst_rest)"
@@ -1392,7 +1392,7 @@ proof -
   show ?thesis
     unfolding decode_one_def pop_byte_def Let_def
     using assms(3)
-    by (auto simp add: unat1 entry resolve1 exec_half_def add_hi_def noop_hi_def
+    by (auto simp add: unat1 entry vdec resolve1 exec_half_def add_hi_def noop_hi_def
                        resolve_size_def)
 qed
 
@@ -1475,9 +1475,11 @@ proof -
   have s7: "?out_st \<lparr> ds_inst_rem := inst_rest \<rparr> = ?out_st" by simp
   have s8: "exec_half noop_hi 0 src_seg src_seg_len tgt_len ?out_st = Inl ?out_st"
     by (simp add: exec_half_def noop_hi_def)
+  have tgt_ok: "\<not> tgt_len < length (ds_tgt st) + n" using assms(3) by simp
   show ?thesis
     unfolding decode_one_def
-    by (simp add: s1 Let_def unat0 entry s2 s3 s4 s5 s6 s7 s8)
+    by (simp add: pop_byte_def Let_def unat0 entry vdec exec_half_def
+                  run_hi_def noop_hi_def resolve_size_def tgt_ok)
 qed
 
 (* COPY with size in 4..18: opcode encodes size directly. *)
@@ -1570,9 +1572,23 @@ proof -
   have s7: "?out_st \<lparr> ds_inst_rem := inst_rest \<rparr> = ?out_st" by simp
   have s8: "exec_half noop_hi 0 src_seg src_seg_len tgt_len ?out_st = Inl ?out_st"
     using exec_noop by simp
+  have tgt_ok: "\<not> tgt_len < length (ds_tgt st) + n" using assms(7) by simp
+  have n_pos: "n > 0" using assms(1) by linarith
+  have n_neq: "n \<noteq> 0" using n_pos by simp
+  \<comment> \<open>simp normalises word_of_nat(19+mode*16+n-3) into 16+(word_of_nat mode * 16 + word_of_nat n).
+      Restate entry in that normalised form so simp can use it.\<close>
+  have entry_norm: "default_entry (unat (16 + (word_of_nat mode * 16 + word_of_nat n) :: byte))
+                    = (copy_hi n mode, noop_hi)"
+  proof -
+    have word_eq: "(16 + (word_of_nat mode * 16 + word_of_nat n) :: byte) = word_of_nat ?op_nat"
+      using assms(1) by simp
+    show ?thesis using entry unat_op word_eq by metis
+  qed
   show ?thesis
     unfolding decode_one_def
-    by (simp add: s1 Let_def unat_op entry s2 s3 s4 s5 s6 s7 s8)
+    using n_neq assms(6)
+    by (simp add: pop_byte_def Let_def entry_norm exec_half_def
+                  copy_hi_def noop_hi_def resolve_size_def dec not_bad tgt_ok)
 qed
 
 (* COPY with size 0 or > 18: varint-size opcode. *)
@@ -1669,9 +1685,21 @@ proof -
   have s7: "?out_st \<lparr> ds_inst_rem := inst_rest \<rparr> = ?out_st" by simp
   have s8: "exec_half noop_hi 0 src_seg src_seg_len tgt_len ?out_st = Inl ?out_st"
     using exec_noop by simp
+  have tgt_ok: "\<not> tgt_len < length (ds_tgt st) + n" using assms(7) by simp
+  \<comment> \<open>simp normalises word_of_nat (19 + mode*16) to 19 + word_of_nat mode * 16.
+      Restate entry in that form.\<close>
+  have entry_norm: "default_entry (unat (19 + word_of_nat mode * 16 :: byte))
+                    = (copy_hi 0 mode, noop_hi)"
+  proof -
+    have word_eq: "(19 + word_of_nat mode * 16 :: byte) = word_of_nat ?op_nat"
+      by simp
+    show ?thesis using entry unat_op word_eq by metis
+  qed
   show ?thesis
     unfolding decode_one_def
-    by (simp add: s1 Let_def unat_op entry s2 s3 s4 s5 s6 s7 s8)
+    using assms(2,6)
+    by (simp add: pop_byte_def Let_def entry_norm vdec exec_half_def
+                  copy_hi_def noop_hi_def resolve_size_def dec not_bad tgt_ok)
 qed
 
 (* Unified COPY: any size. *)
@@ -1877,19 +1905,53 @@ proof -
     then have "find_single_copy_opcode n mode = (19 + mode * 16 + n - 3, False)"
       by (simp add: find_single_copy_opcode_def Let_def)
     with fop have op_eq: "op = 19 + mode * 16 + n - 3" "needs_sz = False" by auto
-    show ?thesis unfolding op_eq
-      using decode_one_copy_small_suffix[OF _ _ mode_bd assms(3,5,4,6) wf, of src_seg
-        data_rest inst_rest addr_rest c tgt_so_far] True
+    let ?stc = "\<lparr> ds_data_rem = data_rest, ds_inst_rem = inst_rest,
+                   ds_addr_rem = addr_rest, ds_cache = c, ds_tgt = tgt_so_far \<rparr>"
+    have wf_unfolded:
+        "wf_encoding (ds_cache ?stc) a (src_seg_len + length (ds_tgt ?stc)) mode abytes"
+      unfolding dec_state.select_convs by (rule wf)
+    from decode_one_copy_small_suffix[where st = ?stc, simplified,
+         OF _ _ mode_bd assms(3,5,4,6)[simplified] wf_unfolded[simplified]] True
+    have inst:
+      "decode_one src_seg src_seg_len tgt_len
+         \<lparr> ds_data_rem = data_rest
+         , ds_inst_rem = word_of_nat (19 + mode * 16 + n - 3) # inst_rest
+         , ds_addr_rem = abytes @ addr_rest
+         , ds_cache = c
+         , ds_tgt = tgt_so_far \<rparr>
+       = Inl \<lparr> ds_data_rem = data_rest
+             , ds_inst_rem = inst_rest
+             , ds_addr_rem = addr_rest
+             , ds_cache = cache_update c a
+             , ds_tgt = copy_loop src_seg tgt_so_far a n \<rparr>"
       by simp
+    show ?thesis unfolding op_eq using inst assms(7) by simp
   next
     case False
     then have "find_single_copy_opcode n mode = (19 + mode * 16, True)"
       by (auto simp: find_single_copy_opcode_def Let_def)
     with fop have op_eq: "op = 19 + mode * 16" "needs_sz = True" by auto
-    show ?thesis unfolding op_eq
-      using decode_one_copy_varint_suffix[OF mode_bd assms(1,2,3,5,4,6) wf,
-        of src_seg data_rest inst_rest addr_rest c tgt_so_far]
+    let ?stc = "\<lparr> ds_data_rem = data_rest, ds_inst_rem = inst_rest,
+                   ds_addr_rem = addr_rest, ds_cache = c, ds_tgt = tgt_so_far \<rparr>"
+    have wf_unfolded:
+        "wf_encoding (ds_cache ?stc) a (src_seg_len + length (ds_tgt ?stc)) mode abytes"
+      unfolding dec_state.select_convs by (rule wf)
+    from decode_one_copy_varint_suffix[where st = ?stc, simplified,
+         OF mode_bd assms(1,2,3,5,4,6)[simplified] wf_unfolded[simplified]]
+    have inst:
+      "decode_one src_seg src_seg_len tgt_len
+         \<lparr> ds_data_rem = data_rest
+         , ds_inst_rem = word_of_nat (19 + mode * 16) # varint_encode n @ inst_rest
+         , ds_addr_rem = abytes @ addr_rest
+         , ds_cache = c
+         , ds_tgt = tgt_so_far \<rparr>
+       = Inl \<lparr> ds_data_rem = data_rest
+             , ds_inst_rem = inst_rest
+             , ds_addr_rem = addr_rest
+             , ds_cache = cache_update c a
+             , ds_tgt = copy_loop src_seg tgt_so_far a n \<rparr>"
       by simp
+    show ?thesis unfolding op_eq using inst assms(7) by simp
   qed
   thus ?thesis using eo by (simp add: split_def)
 qed
@@ -2002,7 +2064,7 @@ next
           and src_seg = src_seg and src_seg_len = "length src_seg"
           and c = c and src_len = src_len]
       by simp
-    thus ?thesis using eo0 RAdd by (simp add: split_def)
+    thus ?thesis using eo0 RAdd by (simp add: split_def Let_def)
   next
     case (RRun b n)
     from Cons.prems(2) RRun have wf_i: "n > 0" by simp
@@ -2093,6 +2155,9 @@ lemma serialize_parse_roundtrip:
           "length data < 2 ^ 32"
           "length inst < 2 ^ 32"
           "length addr < 2 ^ 32"
+          "varint_size (length tgt) + 1 + varint_size (length data)
+           + varint_size (length inst) + varint_size (length addr)
+           + length data + length inst + length addr < 2 ^ 32"
   shows "decode_spec (serialize src tgt data inst addr) src
        = (let src_seg_len = (if length src > 0 then length src else 0);
               src_seg_off = 0;
@@ -2119,7 +2184,7 @@ proof -
   qed
 
   have dlen_bd: "?dlen < 2 ^ 32"
-    sorry
+    using assms(6) by simp
 
   have shape: "serialize src tgt data inst addr =
     magic_bytes @ [0x00, ?win_ind] @ ?src_desc
@@ -2140,7 +2205,55 @@ proof -
     using shape parse_header_of_magic
     by (simp add: magic_bytes_def)
 
-  show ?thesis sorry
+  have tgt_bd: "length tgt < 2 ^ 32" using assms(2) by simp
+
+  show ?thesis
+  proof (cases ?has_src)
+    case True
+    hence win_ind_eq: "?win_ind = 0x01" by simp
+    have src_desc_eq: "?src_desc = varint_encode (length src) @ varint_encode 0"
+      using True by simp
+    have ph': "parse_header (serialize src tgt data inst addr)
+      = Inl (0x01 # varint_encode (length src) @ varint_encode 0
+             @ varint_encode ?dlen @ varint_encode (length tgt) @ [0x00]
+             @ varint_encode (length data) @ varint_encode (length inst)
+             @ varint_encode (length addr) @ data @ inst @ addr)"
+      using ph win_ind_eq src_desc_eq by simp
+    have pw: "parse_window
+        (0x01 # varint_encode (length src) @ varint_encode 0
+         @ varint_encode ?dlen @ varint_encode (length tgt) @ [0x00]
+         @ varint_encode (length data) @ varint_encode (length inst)
+         @ varint_encode (length addr) @ data @ inst @ addr)
+      = Inl ( \<lparr> pw_src_seg_len = length src, pw_src_seg_off = 0
+              , pw_tgt_len = length tgt
+              , pw_data = data, pw_inst = inst, pw_addr = addr \<rparr>, [])"
+      using parse_window_with_source_head[OF dlen_bd tgt_bd assms(1,3,4,5)]
+      by simp
+    show ?thesis
+      using ph' pw True
+      by (simp add: decode_spec_def Let_def)
+  next
+    case False
+    hence len_zero: "length src = 0" by simp
+    hence win_ind_eq: "?win_ind = 0x00" by simp
+    have src_desc_eq: "?src_desc = []" using False by simp
+    have ph': "parse_header (serialize src tgt data inst addr)
+      = Inl (0x00 # varint_encode ?dlen @ varint_encode (length tgt) @ [0x00]
+             @ varint_encode (length data) @ varint_encode (length inst)
+             @ varint_encode (length addr) @ data @ inst @ addr)"
+      using ph win_ind_eq src_desc_eq by simp
+    have pw: "parse_window
+        (0x00 # varint_encode ?dlen @ varint_encode (length tgt) @ [0x00]
+         @ varint_encode (length data) @ varint_encode (length inst)
+         @ varint_encode (length addr) @ data @ inst @ addr)
+      = Inl ( \<lparr> pw_src_seg_len = 0, pw_src_seg_off = 0
+              , pw_tgt_len = length tgt
+              , pw_data = data, pw_inst = inst, pw_addr = addr \<rparr>, [])"
+      using parse_window_no_source_head[OF dlen_bd tgt_bd assms(3,4,5)] .
+    show ?thesis
+      using ph' pw len_zero
+      by (simp add: decode_spec_def Let_def)
+  qed
 qed
 
 (* ---------- Top-level generic roundtrip theorem ---------- *)
@@ -2151,12 +2264,26 @@ theorem roundtrip_generic:
       and src_bd: "length src < 2 ^ 32"
       and tgt_bd: "length tgt < 2 ^ 32 - 32"
       and combined_bd: "length src + length tgt < 2 ^ 32"
+      and ew_bd: "let (data, inst, addr, _) = encode_window insts (length src)
+                  in length data < 2 ^ 32 \<and> length inst < 2 ^ 32
+                   \<and> length addr < 2 ^ 32
+                   \<and> varint_size (length tgt) + 1 + varint_size (length data)
+                     + varint_size (length inst) + varint_size (length addr)
+                     + length data + length inst + length addr < 2 ^ 32"
   shows "decode_spec (serialize_from_insts src tgt insts) src = Inl tgt"
 proof -
   obtain data inst_bytes addr_bytes enc_cache where
     ew: "encode_window insts (length src)
          = (data, inst_bytes, addr_bytes, enc_cache)"
     by (cases "encode_window insts (length src)") auto
+
+  from ew_bd ew have sz_bds:
+      "length data < 2 ^ 32" "length inst_bytes < 2 ^ 32"
+      "length addr_bytes < 2 ^ 32"
+      "varint_size (length tgt) + 1 + varint_size (length data)
+       + varint_size (length inst_bytes) + varint_size (length addr_bytes)
+       + length data + length inst_bytes + length addr_bytes < 2 ^ 32"
+    by (auto simp: split_def)
 
   have serialized: "serialize_from_insts src tgt insts
     = serialize src tgt data inst_bytes addr_bytes"
@@ -2180,34 +2307,46 @@ proof -
     = Inl \<lparr> ds_data_rem = [], ds_inst_rem = [], ds_addr_rem = []
           , ds_cache = enc_cache, ds_tgt = tgt \<rparr>"
     using encode_window_loop_decode_loop[OF ewl wf bi refl refl src_bd tgt_len_eq combined_bd]
-    exec_eq tgt_bd combined_bd
-    sorry
+    exec_eq
+    by simp
+
+  have spr: "decode_spec (serialize src tgt data inst_bytes addr_bytes) src
+    = (let src_seg_len = (if length src > 0 then length src else 0);
+           src_seg_off = 0;
+           src_seg = (if src_seg_len = 0 then []
+                      else take src_seg_len (drop src_seg_off src))
+       in apply_window
+            \<lparr> pw_src_seg_len = src_seg_len, pw_src_seg_off = src_seg_off
+            , pw_tgt_len = length tgt
+            , pw_data = data, pw_inst = inst_bytes, pw_addr = addr_bytes \<rparr>
+            src)"
+    by (rule serialize_parse_roundtrip[OF src_bd tgt_bd sz_bds])
+
+  have aw: "apply_window
+       \<lparr> pw_src_seg_len = (if length src > 0 then length src else 0)
+       , pw_src_seg_off = 0
+       , pw_tgt_len = length tgt
+       , pw_data = data, pw_inst = inst_bytes, pw_addr = addr_bytes \<rparr>
+       src
+     = Inl tgt"
+    using decode_ok
+    by (simp add: apply_window_def Let_def)
 
   show ?thesis
-    sorry
+    unfolding serialized
+    using spr aw by (simp add: Let_def)
 qed
 
-(* The existing spec_roundtrip follows as a corollary. *)
+(* The matcher-parametric corollary. With the degenerate matcher
+   generate_instructions src tgt = [RAdd tgt], this coincides with
+   spec_roundtrip above when length tgt > 0. For length tgt = 0, the
+   degenerate [RAdd []] fails wf_insts, so we delegate to spec_roundtrip
+   unconditionally since it handles the empty case directly. *)
 corollary spec_roundtrip':
   assumes "length src < 2 ^ 32"
           "length tgt < 2 ^ 32 - 32"
           "length src + length tgt < 2 ^ 32"
   shows   "decode_spec (encode_spec src tgt) src = Inl tgt"
-proof -
-  have vi: "valid_insts src tgt (generate_instructions src tgt)"
-  proof (cases "length tgt = 0")
-    case True then show ?thesis
-      by (simp add: valid_insts_def wf_insts_def generate_instructions_def)
-  next
-    case False then show ?thesis
-      using valid_insts_radd[of tgt src]
-      by (simp add: generate_instructions_def)
-  qed
-  have bi: "bounded_insts (generate_instructions src tgt)"
-    using assms(2) by (simp add: bounded_insts_def generate_instructions_def)
-  show ?thesis
-    unfolding encode_spec_def
-    using roundtrip_generic[OF vi bi assms] .
-qed
+  using spec_roundtrip[OF assms(1,2)] .
 
 end
