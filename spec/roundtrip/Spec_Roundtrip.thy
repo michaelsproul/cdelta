@@ -2053,35 +2053,51 @@ next
     from Cons.prems(2) RAdd have wf_i: "length bs > 0" by simp
     from bi_hd RAdd have bd_i: "length bs < 2 ^ 32" by simp
     from tgt_len_ge RAdd have tgt_ge: "length tgt_so_far + length bs \<le> tgt_len" by simp
-    have "let (d, ib, ab, c'', tp') = encode_one (RAdd bs) src_len (length tgt_so_far) c [] [] []
-       in decode_one src_seg (length src_seg) tgt_len
-             \<lparr> ds_data_rem = d @ dr, ds_inst_rem = ib @ ir
-             , ds_addr_rem = ab @ ar, ds_cache = c, ds_tgt = tgt_so_far \<rparr>
-          = Inl \<lparr> ds_data_rem = dr, ds_inst_rem = ir
-                , ds_addr_rem = ar, ds_cache = c'', ds_tgt = tgt_so_far @ bs \<rparr>"
+    \<comment> \<open>From eo0 (applied with i = RAdd bs) and the encode_one definition,
+        extract concrete component values.\<close>
+    obtain op needs_sz where fop: "find_single_add_opcode (length bs) = (op, needs_sz)"
+      by (cases "find_single_add_opcode (length bs)") auto
+    let ?ib = "[word_of_nat op :: byte] @ (if needs_sz then varint_encode (length bs) else [])"
+    have d0_eq: "d0 = bs" and ib0_eq: "ib0 = ?ib" and ab0_eq: "ab0 = []"
+         and c0_eq: "c0 = c"
+      using eo0 RAdd Cons.prems(4) fop by (auto simp add: Let_def split_def)
+    have decode_add:
+      "decode_one src_seg (length src_seg) tgt_len
+         \<lparr> ds_data_rem = bs @ dr, ds_inst_rem = ?ib @ ir
+         , ds_addr_rem = [] @ ar, ds_cache = c, ds_tgt = tgt_so_far \<rparr>
+       = Inl \<lparr> ds_data_rem = dr, ds_inst_rem = ir
+             , ds_addr_rem = ar, ds_cache = c, ds_tgt = tgt_so_far @ bs \<rparr>"
       using encode_one_decode_one_add[OF wf_i bd_i tgt_ge,
         where data_rest = dr and inst_rest = ir and addr_rest = ar
           and src_seg = src_seg and src_seg_len = "length src_seg"
           and c = c and src_len = src_len]
-      by simp
-    thus ?thesis using eo0 RAdd by (simp add: split_def Let_def)
+      by (simp add: Let_def split_def fop)
+    show ?thesis
+      unfolding d0_eq ib0_eq ab0_eq c0_eq using decode_add RAdd by simp
   next
     case (RRun b n)
     from Cons.prems(2) RRun have wf_i: "n > 0" by simp
     from bi_hd RRun have bd_i: "n < 2 ^ 32" by simp
     from tgt_len_ge RRun have tgt_ge: "length tgt_so_far + n \<le> tgt_len" by simp
-    have "let (d, ib, ab, c'', tp') = encode_one (RRun b n) src_len (length tgt_so_far) c [] [] []
-       in decode_one src_seg (length src_seg) tgt_len
-             \<lparr> ds_data_rem = d @ dr, ds_inst_rem = ib @ ir
-             , ds_addr_rem = ab @ ar, ds_cache = c, ds_tgt = tgt_so_far \<rparr>
-          = Inl \<lparr> ds_data_rem = dr, ds_inst_rem = ir
-                , ds_addr_rem = ar, ds_cache = c'', ds_tgt = tgt_so_far @ replicate n b \<rparr>"
+    obtain op needs_sz where fop: "find_single_run_opcode n = (op, needs_sz)"
+      by (cases "find_single_run_opcode n") auto
+    let ?ib = "[word_of_nat op :: byte] @ (if needs_sz then varint_encode n else [])"
+    have d0_eq: "d0 = [b]" and ib0_eq: "ib0 = ?ib" and ab0_eq: "ab0 = []"
+         and c0_eq: "c0 = c"
+      using eo0 RRun Cons.prems(4) fop by (auto simp add: Let_def split_def)
+    have decode_run:
+      "decode_one src_seg (length src_seg) tgt_len
+         \<lparr> ds_data_rem = [b] @ dr, ds_inst_rem = ?ib @ ir
+         , ds_addr_rem = [] @ ar, ds_cache = c, ds_tgt = tgt_so_far \<rparr>
+       = Inl \<lparr> ds_data_rem = dr, ds_inst_rem = ir
+             , ds_addr_rem = ar, ds_cache = c, ds_tgt = tgt_so_far @ replicate n b \<rparr>"
       using encode_one_decode_one_run[OF wf_i bd_i tgt_ge,
         where data_rest = dr and inst_rest = ir and addr_rest = ar
           and src_seg = src_seg and src_seg_len = "length src_seg"
           and c = c and src_len = src_len]
-      by simp
-    thus ?thesis using eo0 RRun by (simp add: split_def)
+      by (simp add: Let_def split_def fop)
+    show ?thesis
+      unfolding d0_eq ib0_eq ab0_eq c0_eq using decode_run RRun by simp
   next
     case (RCopy a n)
     from Cons.prems(2) RCopy have wf_i: "n > 0" "a < length src_seg + length tgt_so_far"
@@ -2094,24 +2110,47 @@ next
       proof -
         have "tgt_len = length (exec_inst_list src_seg (i # rest) tgt_so_far)"
           using Cons.prems(7) .
-        also have "\<dots> \<ge> length tgt_so_far"
-          by (simp add: exec_inst_list_length)
-        finally show ?thesis .
+        also have "\<dots> = length tgt_so_far
+                       + sum_list (map (\<lambda>i. case i of RAdd bs \<Rightarrow> length bs
+                                           | RCopy _ n \<Rightarrow> n | RRun _ n \<Rightarrow> n) (i # rest))"
+          by (rule exec_inst_list_length)
+        finally show ?thesis by linarith
       qed
       thus ?thesis using Cons.prems(8) by linarith
     qed
-    have "let (d, ib, ab, c'', tp') = encode_one (RCopy a n) src_len (length tgt_so_far) c [] [] []
-       in decode_one src_seg (length src_seg) tgt_len
-             \<lparr> ds_data_rem = d @ dr, ds_inst_rem = ib @ ir
-             , ds_addr_rem = ab @ ar, ds_cache = c, ds_tgt = tgt_so_far \<rparr>
-          = Inl \<lparr> ds_data_rem = dr, ds_inst_rem = ir
-                , ds_addr_rem = ar, ds_cache = c'', ds_tgt = copy_loop src_seg tgt_so_far a n \<rparr>"
-      using encode_one_decode_one_copy[OF wf_i(1) bd_i(1) bd_i(2) wf_i(2) here_bd tgt_ge
-              Cons.prems(5),
-        where data_rest = dr and inst_rest = ir and addr_rest = ar
-          and src_seg = src_seg and c = c]
-      by simp
-    thus ?thesis using eo0 RCopy by (simp add: split_def)
+    obtain mode abytes c1 where ea: "encode_address c a (src_len + length tgt_so_far)
+                                       = (mode, abytes, c1)"
+      by (cases "encode_address c a (src_len + length tgt_so_far)") auto
+    obtain op needs_sz where fop: "find_single_copy_opcode n mode = (op, needs_sz)"
+      by (cases "find_single_copy_opcode n mode") auto
+    let ?ib = "[word_of_nat op :: byte] @ (if needs_sz then varint_encode n else [])"
+    have d0_eq: "d0 = []" and ib0_eq: "ib0 = ?ib" and ab0_eq: "ab0 = abytes"
+         and c0_eq: "c0 = c1"
+      using eo0 RCopy Cons.prems(4) ea fop by (auto simp add: Let_def split_def)
+    have decode_copy:
+      "decode_one src_seg (length src_seg) tgt_len
+         \<lparr> ds_data_rem = [] @ dr, ds_inst_rem = ?ib @ ir
+         , ds_addr_rem = abytes @ ar, ds_cache = c, ds_tgt = tgt_so_far \<rparr>
+       = Inl \<lparr> ds_data_rem = dr, ds_inst_rem = ir
+             , ds_addr_rem = ar, ds_cache = c1, ds_tgt = copy_loop src_seg tgt_so_far a n \<rparr>"
+    proof -
+      have "let (d, ib, ab, c'', tp') = encode_one (RCopy a n) src_len (length tgt_so_far) c [] [] []
+         in decode_one src_seg (length src_seg) tgt_len
+               \<lparr> ds_data_rem = d @ dr, ds_inst_rem = ib @ ir
+               , ds_addr_rem = ab @ ar, ds_cache = c, ds_tgt = tgt_so_far \<rparr>
+            = Inl \<lparr> ds_data_rem = dr, ds_inst_rem = ir
+                  , ds_addr_rem = ar, ds_cache = c''
+                  , ds_tgt = copy_loop src_seg tgt_so_far a n \<rparr>"
+        using encode_one_decode_one_copy[OF wf_i(1) bd_i(1) bd_i(2) wf_i(2) here_bd tgt_ge
+                Cons.prems(5),
+          where data_rest = dr and inst_rest = ir and addr_rest = ar
+            and src_seg = src_seg and c = c]
+        by simp
+      thus ?thesis
+        using ea fop Cons.prems(5) by (simp add: Let_def split_def)
+    qed
+    show ?thesis
+      unfolding d0_eq ib0_eq ab0_eq c0_eq using decode_copy RCopy by simp
   qed
 
   have wf_tl: "wf_insts_aux src_seg rest ?tgt1"
@@ -2130,7 +2169,10 @@ next
     by simp
 
   have fuel_ge: "length (ib0 @ ir) - 1 \<ge> length ir"
-    using ib0_ne by simp
+  proof -
+    have "length ib0 \<ge> 1" using ib0_ne by (cases ib0) auto
+    thus ?thesis by simp
+  qed
   have ih_mono: "decode_loop (length (ib0 @ ir) - 1) src_seg (length src_seg) tgt_len
       \<lparr> ds_data_rem = dr, ds_inst_rem = ir
       , ds_addr_rem = ar, ds_cache = c0, ds_tgt = ?tgt1 \<rparr>
@@ -2144,7 +2186,7 @@ next
 
   show ?case
     unfolding data_eq inst_eq addr_eq c'_eq
-    using do_step ih_mono fuel_eq by simp
+    using do_step ih_mono fuel_eq ib0_ne by simp
 qed
 
 (* ---------- Generic serialize / parse roundtrip ---------- *)
@@ -2301,12 +2343,15 @@ proof -
   have tgt_len_eq: "length tgt = length (exec_inst_list src insts [])"
     using exec_eq by simp
 
+  have tgt_pos_eq: "(0 :: nat) = length ([] :: byte list)" by simp
+  have src_len_eq: "length src = length src" by simp
   have decode_ok: "decode_loop (length inst_bytes) src (length src) (length tgt)
       \<lparr> ds_data_rem = data, ds_inst_rem = inst_bytes, ds_addr_rem = addr_bytes
       , ds_cache = cache_init, ds_tgt = [] \<rparr>
     = Inl \<lparr> ds_data_rem = [], ds_inst_rem = [], ds_addr_rem = []
           , ds_cache = enc_cache, ds_tgt = tgt \<rparr>"
-    using encode_window_loop_decode_loop[OF ewl wf bi refl refl src_bd tgt_len_eq combined_bd]
+    using encode_window_loop_decode_loop[OF ewl wf bi tgt_pos_eq src_len_eq
+            src_bd tgt_len_eq combined_bd]
     exec_eq
     by simp
 
@@ -2329,8 +2374,36 @@ proof -
        , pw_data = data, pw_inst = inst_bytes, pw_addr = addr_bytes \<rparr>
        src
      = Inl tgt"
-    using decode_ok
-    by (simp add: apply_window_def Let_def)
+  proof (cases "length src > 0")
+    case True
+    have src_eq: "take (length src) src = src" by simp
+    have "decode_loop (length inst_bytes) src (length src) (length tgt)
+            \<lparr> ds_data_rem = data, ds_inst_rem = inst_bytes
+            , ds_addr_rem = addr_bytes, ds_cache = cache_init, ds_tgt = [] \<rparr>
+          = Inl \<lparr> ds_data_rem = [], ds_inst_rem = [], ds_addr_rem = []
+                , ds_cache = enc_cache, ds_tgt = tgt \<rparr>"
+      using decode_ok .
+    thus ?thesis
+      using True src_eq by (simp add: apply_window_def Let_def)
+  next
+    case False
+    hence len_zero: "length src = 0" by simp
+    hence src_eq: "src = []" by simp
+    have "decode_loop (length inst_bytes) src (length src) (length tgt)
+            \<lparr> ds_data_rem = data, ds_inst_rem = inst_bytes
+            , ds_addr_rem = addr_bytes, ds_cache = cache_init, ds_tgt = [] \<rparr>
+          = Inl \<lparr> ds_data_rem = [], ds_inst_rem = [], ds_addr_rem = []
+                , ds_cache = enc_cache, ds_tgt = tgt \<rparr>"
+      using decode_ok .
+    hence "decode_loop (length inst_bytes) [] 0 (length tgt)
+            \<lparr> ds_data_rem = data, ds_inst_rem = inst_bytes
+            , ds_addr_rem = addr_bytes, ds_cache = cache_init, ds_tgt = [] \<rparr>
+          = Inl \<lparr> ds_data_rem = [], ds_inst_rem = [], ds_addr_rem = []
+                , ds_cache = enc_cache, ds_tgt = tgt \<rparr>"
+      using src_eq by simp
+    thus ?thesis
+      using len_zero src_eq by (simp add: apply_window_def Let_def)
+  qed
 
   show ?thesis
     unfolding serialized
