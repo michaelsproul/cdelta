@@ -504,6 +504,18 @@ lemma varint_decode_loop_no_fuel:
   by simp
 
 (*
+  TODO (varint_overflow_check_nat): prove
+    (v AND 0xFE000000 = 0) = (unat v < 2 ^ 25)
+  The refinement invariant for read_varint' uses this to show that the
+  C's overflow check `v & 0xFE000000 != 0` fires exactly when the next
+  step `v * 128 + ...` would exceed 2^32.
+
+  Requires combining word_bitwise unfolding with the nat-level inequality
+  (or find the right Word_Lib lemma). Not blocking read_varint'_spec
+  structurally — can be inlined when needed.
+*)
+
+(*
   varint_decode_loop is monotone in fuel in the sense that if the decode
   succeeds with fuel n, it succeeds with any fuel >= n giving the same
   result. Useful for the invariant: at iteration i in the C, the loop
