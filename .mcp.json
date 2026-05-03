@@ -8,9 +8,15 @@
         "run",
         "isabelle-mcp",
         "-l",
-        "CdeltaSpecBase",
+        "CdeltaRefine",
         "-d",
         "/home/michael/Programming/cdelta/spec",
+        "-d",
+        "/home/michael/Programming/cdelta/spec/roundtrip",
+        "-d",
+        "/home/michael/Programming/cdelta/decoder",
+        "-d",
+        "/home/michael/Programming/cdelta/refine",
         "-v"
       ]
     }
