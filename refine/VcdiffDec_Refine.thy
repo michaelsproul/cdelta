@@ -73,15 +73,64 @@ lemma read_byte'_spec:
   unfolding read_byte'_def
   by (auto simp add: ocondition_def oreturn_def oguard_def ogets_def obind_def K_def)
 
-(* ---------- read_varint refinement ---------- *)
+(*
+  TODO (read_varint'_spec): Hoare triple
+    {{ buffer valid for [pos, len) ∧ len < 2^32 }}
+       read_varint' buf len pos
+    {{ λrv s'.
+        case varint_decode (drop (unat pos) (heap_bytes s buf (unat len))) of
+          Some (v, rest) ⇒
+            rv = Result (pr_t_C (len - of_nat (length rest)) (of_nat v) 0)
+        | None ⇒ error case }}
+
+  Proof via whileLoop invariant relating (cur, i, v) to
+  varint_decode_loop (5 - i) (unat v) (drop (unat cur - unat pos)
+                                             (take (unat len) bytes)).
+
+  Key challenge: the v bound ensures no 32-bit overflow; threading this
+  through the invariant matches varint_decode_loop's "acc' < 2^32" check.
+  Effort: ~1 week.
+*)
+
+(* ---------- decode_address refinement ---------- *)
 
 (*
-  read_varint' decodes a VCDIFF varint (up to 5 bytes) from `buf` starting
-  at position `pos`. Under buffer validity, it refines the pure
-  varint_decode against the byte list obtained from the heap.
+  TODO (decode_address'_spec): Hoare triple relating decode_address'
+  (uses near_arr, same_arr file-scope caches) to the pure decode_address
+  in AddressCache.thy. Requires invariant:
+    cache_abstraction near_arr same_arr near_ptr = ⦇near = ..., same = ..., near_ptr = ...⦈
+*)
 
-  The C loop reads up to 5 bytes, shifting and OR'ing. Stops when it sees
-  a byte with the high bit clear. Matches Varint.thy's varint_decode.
+(* ---------- build_code_table refinement ---------- *)
+
+(*
+  TODO (build_code_table'_spec): After build_code_table', the file-scope
+  code_tbl matches default_entry pointwise. Small Hoare triple; the
+  bookkeeping is all in translating the 256×6 byte array to default_entry
+  values.
+*)
+
+(* ---------- vcdiff_decode' main refinement ---------- *)
+
+(*
+  TODO (vcdiff_decode'_spec): top-level refinement. Under the preconds
+  of decode_c_refines_spec (see planning), prove:
+
+    vcdiff_decode' patch patch_len src src_len out out_cap out_len_ptr \<bullet> s
+      \<lbrace>\<lambda>rv s'.
+        case decode_spec (heap_bytes s patch (unat patch_len))
+                         (heap_bytes s src (unat src_len)) of
+          Inl tgt ⇒ rv = Result VCD_OK
+                   ∧ unat out_cap \<ge> length tgt
+                   ∧ heap_bytes s' out (length tgt) = tgt
+                   ∧ heap_w32 s' out_len_ptr = of_nat (length tgt)
+                   ∧ (heap elsewhere unchanged)
+        | Inr _ ⇒ rv \<noteq> Result VCD_OK \<rbrace>
+
+  Proof structure: header parse, window header, then main while loop with
+  invariant. The invariant is the largest piece: ties cursor positions
+  to decode_loop state via encode_window_loop_decode_loop from the pure
+  spec.
 *)
 
 end
