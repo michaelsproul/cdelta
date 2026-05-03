@@ -135,6 +135,32 @@ qed
 
 lemmas runs_to_whileLoop3 = runs_to_whileLoop_res' [split_tuple C and B arity: 3]
 
+(*
+  Partial proof exploration to establish the shape. Use runs_to_whileLoop_exn
+  (not runs_to_whileLoop3 — the loop body contains throws, needing the exn
+  variant). Subgoals after application:
+
+    1. wf R (trivial for measure)
+    2. I (Result initial) s (trivial for True invariant)
+    3. ¬ C → postcondition (normal exit)
+    4. I (Exn a) → postcondition on throw (throw handled by finally)
+    5. Body: B a \<bullet> s ⦃λr t. I r t ∧ measure decrease for Result⦄
+
+  The non-trivial case is (5): under the invariant and loop condition
+  (i < 5), the body either throws or returns with i incremented (so
+  5 - unat i decreases).
+
+  For functional correctness, the invariant I needs to include:
+    - pos ≤ cur ≤ len
+    - cur = pos + of_nat (unat i)
+    - i ≤ 5
+    - unat v < 2 ^ (7 * unat i)
+    - Inv_varint: varint_decode_loop (5 - unat i) (unat v) (drop (unat cur) ...)
+                = varint_decode (drop (unat pos) ...)
+
+  The bit-arithmetic step uses varint_acc_step from Varint.thy.
+*)
+
 (* ---------- decode_address refinement (TODO) ---------- *)
 
 (*
