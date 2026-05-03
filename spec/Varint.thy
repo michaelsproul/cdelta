@@ -445,4 +445,55 @@ next
                   acc_eq_n)
 qed
 
+(* ---------- Bit-arithmetic helper for the refinement layer ---------- *)
+
+(*
+  The C's per-iteration step `v ← (v << 7) | (b & 0x7F)` equals, in
+  natural-number arithmetic, `v * 128 + (b & 0x7F)` — provided v fits in
+  25 bits (so the shift doesn't overflow in 32-bit word arithmetic).
+
+  This lemma lives here rather than in the refinement session because
+  it's a pure bit-arithmetic statement (no heap, no monad). The
+  refinement invariant needs it to relate the C's word accumulator to
+  varint_decode_loop's nat accumulator.
+*)
+lemma varint_acc_step:
+  fixes v :: "32 word" and b :: "8 word"
+  assumes "unat v < 2 ^ 25"
+  shows "unat ((v << 7) OR UCAST(8 \<rightarrow> 32) (b AND 0x7F))
+       = unat v * 128 + unat (b AND 0x7F)"
+proof -
+  let ?mb = "UCAST(8 \<rightarrow> 32) (b AND 0x7F)"
+  have mask_bd: "unat (b AND 0x7F :: 8 word) < 128"
+  proof -
+    have "b AND 0x7F \<le> 0x7F" by (simp add: word_and_le1)
+    hence "unat (b AND 0x7F) \<le> 127" by (simp add: word_le_nat_alt)
+    thus ?thesis by simp
+  qed
+  have ucast_eq: "unat ?mb = unat (b AND 0x7F)"
+    by (simp add: unat_ucast_upcast is_up)
+  have shift_eq: "unat (v << 7) = unat v * 128"
+  proof -
+    have step1: "unat (v << 7) = unat v * 128 mod 2 ^ 32"
+      by (simp add: shiftl_t2n unat_word_ariths(2) mult.commute)
+    have "unat v * 128 < 2 ^ 32" using assms by simp
+    hence "unat v * 128 mod 2 ^ 32 = unat v * 128" by simp
+    thus ?thesis using step1 by simp
+  qed
+  (* The AND = 0 step: (v << 7) has zeros in low 7 bits; (b AND 0x7F) has
+     only low 7 bits set. *)
+  have disjoint: "(v << 7) AND ?mb = 0"
+    by (intro word_eqI) (auto simp: bit_simps)
+  (* word_plus_and_or: (x AND y) + (x OR y) = x + y. With disjoint = 0:
+     x + y = x OR y. *)
+  have sum_eq: "(v << 7) + ?mb = (v << 7) OR ?mb"
+    using disjoint by (metis add.left_neutral word_plus_and_or)
+  have no_overflow: "unat (v << 7) + unat ?mb < 2 ^ 32"
+    using assms shift_eq ucast_eq mask_bd by simp
+  have "unat ((v << 7) + ?mb) = unat (v << 7) + unat ?mb"
+    using no_overflow by (simp add: unat_plus_if_size word_size)
+  thus ?thesis
+    using sum_eq shift_eq ucast_eq by simp
+qed
+
 end
