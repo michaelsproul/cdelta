@@ -623,6 +623,9 @@ qed
   Given v < 2^(7*i) and the overflow check passes at step i (either
   i < 4, or i = 4 and v's high bits clear), the updated accumulator
   after one step fits in 2^(7*(i+1)).
+
+  The overflow-check hypothesis is phrased at nat level to match the
+  loop's invariant context (where i is also a nat, from `unat x1a`).
 *)
 lemma varint_acc_step_bound:
   fixes v :: "32 word" and b :: "8 word" and i :: nat
@@ -648,6 +651,33 @@ proof -
     thus ?thesis using expand by simp
   qed
   ultimately show ?thesis by linarith
+qed
+
+(*
+  Word-level variant of varint_acc_step_bound: express the iteration
+  counter and overflow-check precondition directly in terms of the
+  32-word value `i_w` from the C loop, matching the invariant context.
+*)
+lemma varint_acc_step_bound_w:
+  fixes v :: "32 word" and b :: "8 word" and i_w :: "32 word"
+  assumes v_bd: "unat v < 2 ^ (7 * unat i_w)"
+      and i_lt: "i_w < 5"
+      and ovf:  "i_w = 4 \<longrightarrow> v AND 0xFE000000 = 0"
+  shows "unat v * 128 + unat (b AND 0x7F) < 2 ^ (7 * (unat i_w + 1))"
+proof -
+  have nat_lt: "unat i_w < 5" using i_lt by (simp add: word_less_nat_alt)
+  have nat_ovf: "unat i_w = 4 \<longrightarrow> v AND 0xFE000000 = 0"
+  proof
+    assume eq: "unat i_w = 4"
+    have "i_w = 4"
+    proof -
+      have unat_4: "unat (4 :: 32 word) = 4" by simp
+      from eq unat_4 have "unat i_w = unat (4 :: 32 word)" by simp
+      thus ?thesis by (simp add: word_unat_eq_iff[of i_w 4])
+    qed
+    thus "v AND 0xFE000000 = 0" using ovf by simp
+  qed
+  show ?thesis using varint_acc_step_bound[OF v_bd nat_lt nat_ovf] .
 qed
 
 (*

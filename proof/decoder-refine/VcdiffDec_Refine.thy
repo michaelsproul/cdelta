@@ -430,10 +430,9 @@ lemma read_varint'_spec:
       apply (subst unat_word_ariths(1))
       apply simp
       done
-    \<comment> \<open>Goal 12: unat v' < 2 ^ (7 * unat (x1a+1)). Almost closed —
-        varint_acc_safe rewrites the bit-shift to nat arithmetic; residual
-        obligation is x1a = 4 (word) \<longleftrightarrow> unat x1a = 4 (nat), which needs
-        a word-nat injectivity rewrite.\<close>
+    \<comment> \<open>Goal 12: unat v' < 2 ^ (7 * unat (x1a+1)). TODO - close via
+        varint_acc_safe + varint_acc_step_bound_w; rule application
+        isn't instantiating i_w = x1a cleanly.\<close>
     subgoal sorry
     \<comment> \<open>Goal 13: unat (x1 + 1) = unat pos + unat (x1a + 1).\<close>
     subgoal for x1 x1a x2a
