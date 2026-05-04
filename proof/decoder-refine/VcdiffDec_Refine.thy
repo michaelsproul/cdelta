@@ -206,12 +206,14 @@ lemma read_varint'_no_modify:
 (*
   Stronger spec: under buffer validity and `pos \<le> len`, read_varint'
   doesn't modify state, returns a Result, and the returned cursor
-  position stays within [pos, len]. Callers chaining reads
-  (decode_address', vcdiff_decode') rely on this bound.
+  position stays within [pos, len]. Additionally, when the return's
+  err_C is not VCD_OK, the val_C field is guaranteed to be 0 (the C
+  always resets val on throw paths). Callers chaining reads rely on
+  these two properties.
 
   Invariant carries:
    - Result (cur, i, v): pos \<le> cur \<le> len and unat i \<le> 5
-   - Exn e: pos \<le> e.pos_C \<le> len (the throw path preserves the bound)
+   - Exn e: pos \<le> e.pos_C \<le> len and e.val_C = 0 and e.err_C \<noteq> VCD_OK
 *)
 lemma read_varint'_bounded:
   assumes "buf_valid s buf (unat len)"
@@ -220,7 +222,8 @@ lemma read_varint'_bounded:
            \<lbrace> \<lambda>r t. t = s \<and>
                   (\<exists>v. r = Result v \<and>
                        pos \<le> pr_t_C.pos_C v \<and>
-                       pr_t_C.pos_C v \<le> len) \<rbrace>"
+                       pr_t_C.pos_C v \<le> len \<and>
+                       (pr_t_C.err_C v \<noteq> VCD_OK \<longrightarrow> pr_t_C.val_C v = 0)) \<rbrace>"
   unfolding read_varint'_def
   apply (runs_to_vcg)
   apply (rule runs_to_whileLoop_exn [
@@ -230,7 +233,8 @@ lemma read_varint'_bounded:
                           pos \<le> cur \<and> cur \<le> len \<and> unat i \<le> 5
                       | Exn e \<Rightarrow>
                           pos \<le> pr_t_C.pos_C e \<and>
-                          pr_t_C.pos_C e \<le> len)"
+                          pr_t_C.pos_C e \<le> len \<and>
+                          (pr_t_C.err_C e \<noteq> VCD_OK \<longrightarrow> pr_t_C.val_C e = 0))"
       and R = "measure (\<lambda>((cur, i, v), _). 5 - unat i)"])
   subgoal by simp
   subgoal using assms(2) by simp
@@ -273,30 +277,80 @@ lemma read_varint'_bounded:
     done
   done
 
+(*
+  Full functional-correctness spec for read_varint'. Relates the Result
+  cursor/value to varint_decode on the heap_bytes view of the buffer.
+  Under buffer validity and pos \<le> len, the function terminates and:
+    - if varint_decode drop-pos succeeds with (v, rest), then the Result
+      is pr_t_C pos' (of_nat v) VCD_OK with pos' = len - length rest
+    - if varint_decode drop-pos fails, then the Result has err_C \<noteq> VCD_OK
+
+  Invariant (over Result / Exn):
+    Result (cur, i, v):
+      cur = pos + of_nat (unat i)   \<comment> \<open>no wrap: unat cur < 2^32\<close>
+      pos \<le> cur \<and> cur \<le> len
+      unat i \<le> 5
+      unat v < 128 ^ unat i
+      varint_decode_loop (5 - unat i) (unat v)
+        (drop (unat cur) (heap_bytes s buf (unat len)))
+      = varint_decode (drop (unat pos) (heap_bytes s buf (unat len)))
+    Exn e:
+      e.err_C \<noteq> VCD_OK and e.val_C = 0 and pos \<le> e.pos_C \<and> e.pos_C \<le> len
+      and varint_decode (drop (unat pos) bytes) = None
+
+  This is deferred: the proof requires multi-day development of per-throw
+  invariant preservation using varint_acc_step and varint_overflow_check_nat
+  plus list-drop reasoning through the byte buffer.
+*)
+
+(* ---------- build_code_table refinement ---------- *)
+
+(*
+  build_code_table' has no failure branches — only guarded array writes.
+  Under the simplest precondition (no precondition needed on state), it
+  terminates with a Result () and modifies only the code_tbl and
+  code_tbl_built fields. Full functional refinement (relating the
+  resulting code_tbl to default_entry) is TODO.
+
+  Six nested whileLoops, each writing specific code_tbl[idx][slot]
+  entries. The top-level Hoare triple we want is:
+    {{ True }} build_code_table' () {{ \<lambda>_ s'. code_tbl_built_'' s' = 1 }}
+  combined with a functional relation over code_tbl_'' s'.
+*)
+
 (* ---------- decode_address refinement (TODO) ---------- *)
 
 (*
   Hoare-triple contract for decode_address'. Mirrors the pure
-  decode_address in AddressCache.thy.
+  decode_address in AddressCache.thy. Requires a `cache_abstraction`
+  predicate relating near_arr + same_arr + near_ptr record field to
+  the spec's `cache` record.
 
-  Requires cache_abstraction predicate relating near_arr + same_arr +
-  near_ptr to ⦇near = ..., same = ..., near_ptr = ...⦈. The cache is
-  UPDATED in-place for non-mode-8 branches, so the postcondition
-  describes a modified state. Builds on read_varint'_spec and
-  read_byte'_spec.
-*)
+  Sketch:
+    cache_abs s c near_ptr \<equiv>
+       (\<forall>i<s_near. heap_w32 s (near_arr + int i) = of_nat (near c ! i)) \<and>
+       (\<forall>i<same_buckets. heap_w32 s (same_arr + int i) = of_nat (same c ! i))
 
-(* ---------- build_code_table refinement (TODO) ---------- *)
+  Contract:
+    {{ buf_valid ... ; mode \<le> 8; cache_abs s c near_ptr; addr_cache_ok c }}
+      decode_address' patch addr_end pos here mode near_ptr
+    {{ \<lambda>r s'. case r of
+          Result ar \<Rightarrow>
+             case decode_address c (unat mode) (unat here)
+                     (drop (unat pos) (heap_bytes s patch (unat addr_end)))
+             of Some (addr, rest, c') \<Rightarrow>
+                  ar_t_C.pos_C ar = addr_end - of_nat (length rest)
+                  \<and> ar_t_C.addr_C ar = of_nat addr
+                  \<and> cache_abs s' c' (ar_t_C.near_ptr_C ar)
+              | None \<Rightarrow> False
+        | Exn e \<Rightarrow> ar_t_C.err_C e \<noteq> 0 \<and> s' = s }}
 
-(*
-  {{ code_tbl_built = 0 }}
-    build_code_table' ()
-  {{ λ_ s'. code_tbl_built s' = 1 \<and>
-            (∀i<256. default_entry i matches code_tbl_C s' ! i) }}
+  The `finally` structure turns the "normal" flow into a throw that
+  carries the final ar_t_C with err = 0, so the postcondition inverts
+  Result/Exn compared to what it might naively look like.
 
-  After build, a relation code_table_abstraction. Used by vcdiff_decode'
-  via a precondition that either code_tbl_built = 1 already or we
-  call build_code_table' first.
+  Builds on: read_byte'_spec, read_varint'_bounded (and eventually
+  read_varint'_spec for full functional correctness).
 *)
 
 (* ---------- vcdiff_decode main refinement (TODO) ---------- *)
