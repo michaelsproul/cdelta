@@ -604,6 +604,74 @@ next
 qed
 
 (*
+  Given v < 2^(7*i) and the overflow check passes at step i (either
+  i < 4, or i = 4 and v's high bits clear), the updated accumulator
+  after one step fits in 2^(7*(i+1)).
+*)
+lemma varint_acc_step_bound:
+  fixes v :: "32 word" and b :: "8 word" and i :: nat
+  assumes v_bd: "unat v < 2 ^ (7 * i)"
+      and i_lt: "i < 5"
+      and ovf:  "i = 4 \<longrightarrow> v AND 0xFE000000 = 0"
+  shows "unat v * 128 + unat (b AND 0x7F) < 2 ^ (7 * (i + 1))"
+proof -
+  have "unat (b AND 0x7F :: 8 word) < 128"
+  proof -
+    have "b AND 0x7F \<le> 0x7F" by (simp add: word_and_le1)
+    hence "unat (b AND 0x7F) \<le> 127" by (simp add: word_le_nat_alt)
+    thus ?thesis by simp
+  qed
+  moreover have "unat v * 128 + 128 \<le> 2 ^ (7 * (i + 1))"
+  proof -
+    have v_lt_exp: "unat v < 2 ^ (7 * i)" using v_bd .
+    have expand: "(2 :: nat) ^ (7 * (i + 1)) = 128 * 2 ^ (7 * i)"
+      by (simp add: power_add)
+    have "unat v + 1 \<le> 2 ^ (7 * i)" using v_lt_exp by simp
+    hence "(unat v + 1) * 128 \<le> 2 ^ (7 * i) * 128" by simp
+    hence "unat v * 128 + 128 \<le> 128 * 2 ^ (7 * i)" by simp
+    thus ?thesis using expand by simp
+  qed
+  ultimately show ?thesis by linarith
+qed
+
+(*
+  Full overflow-safe step: varint_acc_step + varint_acc_step_bound.
+  Under precondition v fits in 2^(7*i) with overflow check passed,
+  the C's (v << 7) | (b & 0x7F) equals v*128 + (b & 0x7F) as nats,
+  and stays bounded in 2^(7*(i+1)).
+*)
+lemma varint_acc_safe:
+  fixes v :: "32 word" and b :: "8 word" and i :: nat
+  assumes v_bd: "unat v < 2 ^ (7 * i)"
+      and i_lt: "i < 5"
+      and ovf:  "i = 4 \<longrightarrow> v AND 0xFE000000 = 0"
+  shows "unat ((v << 7) OR UCAST(8 \<rightarrow> 32) (b AND 0x7F))
+           = unat v * 128 + unat (b AND 0x7F)"
+      and "unat v * 128 + unat (b AND 0x7F) < 2 ^ (7 * (i + 1))"
+proof -
+  have v_25: "unat v < 2 ^ 25"
+  proof (cases "i \<le> 3")
+    case True
+    then have "7 * i \<le> 21" by simp
+    then have "(2::nat) ^ (7 * i) \<le> 2 ^ 21"
+      by (rule power_increasing) simp
+    then have "unat v < 2 ^ 21" using v_bd by linarith
+    moreover have "(2 :: nat) ^ 21 < 2 ^ 25" by simp
+    ultimately show ?thesis by linarith
+  next
+    case False
+    with i_lt have "i = 4" by simp
+    with ovf have "v AND 0xFE000000 = 0" by simp
+    then show ?thesis using varint_overflow_check_nat[of v] by simp
+  qed
+  show "unat ((v << 7) OR UCAST(8 \<rightarrow> 32) (b AND 0x7F))
+           = unat v * 128 + unat (b AND 0x7F)"
+    using varint_acc_step[OF v_25] .
+  show "unat v * 128 + unat (b AND 0x7F) < 2 ^ (7 * (i + 1))"
+    using varint_acc_step_bound[OF v_bd i_lt ovf] .
+qed
+
+(*
   varint_decode_loop is monotone in fuel in the sense that if the decode
   succeeds with fuel n, it succeeds with any fuel >= n giving the same
   result. Useful for the invariant: at iteration i in the C, the loop
