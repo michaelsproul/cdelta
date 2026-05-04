@@ -42,9 +42,22 @@ session CdeltaSpecRoundtrip in "proof/roundtrip" = CdeltaSpecBase +
   theories
     Spec_Roundtrip
 
-session CdeltaRefine in "proof/decoder-refine" = CdeltaSpecRoundtrip +
+(*
+  Image-only parent for CdeltaRefine. Exists so the Isabelle MCP
+  (`isabelle vscode_server`) can be launched with `-l CdeltaRefineBase`
+  and then re-elaborate VcdiffDec_Refine.thy live — if the MCP is
+  launched with `-l CdeltaRefine` directly, PIDE considers the edited
+  theory "already loaded" from the heap and refuses to produce goal
+  state under the caret.
+*)
+session CdeltaRefineBase = CdeltaSpecRoundtrip +
   options [timeout = 1800, quick_and_dirty = false]
   sessions
     CdeltaDecoder
+  theories
+    "CdeltaDecoder.VcdiffDec"
+
+session CdeltaRefine in "proof/decoder-refine" = CdeltaRefineBase +
+  options [timeout = 1800, quick_and_dirty = false]
   theories
     VcdiffDec_Refine

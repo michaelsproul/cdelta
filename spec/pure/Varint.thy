@@ -504,16 +504,37 @@ lemma varint_decode_loop_no_fuel:
   by simp
 
 (*
-  TODO (varint_overflow_check_nat): prove
-    (v AND 0xFE000000 = 0) = (unat v < 2 ^ 25)
-  The refinement invariant for read_varint' uses this to show that the
-  C's overflow check `v & 0xFE000000 != 0` fires exactly when the next
-  step `v * 128 + ...` would exceed 2^32.
-
-  Requires combining word_bitwise unfolding with the nat-level inequality
-  (or find the right Word_Lib lemma). Not blocking read_varint'_spec
-  structurally — can be inlined when needed.
+  The C's overflow check `(v & 0xFE000000) != 0` fires exactly when the
+  accumulator v no longer fits in 25 bits — i.e. the next step
+  `v * 128 + (b & 0x7F)` would exceed 2^32. Used by read_varint'_spec.
 *)
+lemma varint_overflow_check_nat:
+  fixes v :: "32 word"
+  shows "(v AND 0xFE000000 = 0) \<longleftrightarrow> unat v < 2 ^ 25"
+proof -
+  have not_mask: "(NOT (mask 25) :: 32 word) = 0xFE000000"
+    by (simp add: mask_eq_decr_exp)
+  have split: "(v AND mask 25) + (v AND NOT (mask 25)) = v"
+    by (rule word_plus_and_or_coroll2)
+  have "(v AND 0xFE000000 = 0) \<longleftrightarrow> v AND NOT (mask 25) = 0"
+    using not_mask by simp
+  also have "\<dots> \<longleftrightarrow> v AND mask 25 = v"
+  proof
+    assume "v AND NOT (mask 25) = 0"
+    with split show "v AND mask 25 = v" by simp
+  next
+    assume eq: "v AND mask 25 = v"
+    have "v + (v AND NOT (mask 25)) = v" using split eq by simp
+    thus "v AND NOT (mask 25) = 0" by simp
+  qed
+  also have "\<dots> \<longleftrightarrow> v \<le> mask 25"
+    by (rule and_mask_eq_iff_le_mask)
+  also have "\<dots> \<longleftrightarrow> v < 2 ^ 25"
+    using le_mask_iff_lt_2n[of 25 v] by simp
+  also have "\<dots> \<longleftrightarrow> unat v < 2 ^ 25"
+    by (simp add: word_less_nat_alt)
+  finally show ?thesis .
+qed
 
 (*
   varint_decode_loop is monotone in fuel in the sense that if the decode

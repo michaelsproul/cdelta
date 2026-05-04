@@ -48,6 +48,10 @@ definition buf_valid :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> n
   "buf_valid s buf n =
      (\<forall>i < n. ptr_valid (heap_typing s) (buf +\<^sub>p int i))"
 
+lemma buf_validD:
+  "\<lbrakk> buf_valid s buf n; i < n \<rbrakk> \<Longrightarrow> ptr_valid (heap_typing s) (buf +\<^sub>p int i)"
+  by (simp add: buf_valid_def)
+
 (* ---------- Return-code constants ---------- *)
 
 abbreviation VCD_OK  :: "32 signed word" where "VCD_OK  \<equiv> 0"
@@ -136,9 +140,8 @@ qed
 lemmas runs_to_whileLoop3 = runs_to_whileLoop_res' [split_tuple C and B arity: 3]
 
 (*
-  Partial proof exploration to establish the shape. Use runs_to_whileLoop_exn
-  (not runs_to_whileLoop3 — the loop body contains throws, needing the exn
-  variant). Subgoals after application:
+  Use runs_to_whileLoop_exn (not runs_to_whileLoop3) — the loop body
+  contains throws, needing the exn variant. Subgoals after application:
 
     1. wf R (trivial for measure)
     2. I (Result initial) s (trivial for True invariant)
@@ -158,8 +161,47 @@ lemmas runs_to_whileLoop3 = runs_to_whileLoop_res' [split_tuple C and B arity: 3
     - Inv_varint: varint_decode_loop (5 - unat i) (unat v) (drop (unat cur) ...)
                 = varint_decode (drop (unat pos) ...)
 
-  The bit-arithmetic step uses varint_acc_step from Varint.thy.
+  The bit-arithmetic step uses varint_acc_step from Varint.thy; the
+  overflow-check step uses varint_overflow_check_nat.
+
+  Currently proved below: `read_varint'_no_modify` — state unchanged,
+  result is Result, no functional correctness. Bounded and full specs
+  TODO.
 *)
+
+lemma read_varint'_no_modify:
+  assumes "buf_valid s buf (unat len)"
+  shows "read_varint' buf len pos \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and> (\<exists>v. r = Result v) \<rbrace>"
+  unfolding read_varint'_def
+  apply (runs_to_vcg)
+  apply (rule runs_to_whileLoop_exn [
+    where I = "\<lambda>r t. t = s"
+      and R = "measure (\<lambda>((cur, i, v), _). 5 - unat i)"])
+  subgoal by simp
+  subgoal by simp
+  subgoal by (clarsimp split: prod.splits)
+  subgoal by simp
+  subgoal
+    apply (clarsimp split: prod.splits)
+    apply runs_to_vcg
+     apply (simp_all add: word_less_nat_alt)
+    subgoal for x1 x1a x2a
+      using buf_validD[OF assms, of "unat x1"]
+      apply (subgoal_tac "unat x1 < unat len")
+       apply (simp only: uint_nat)
+      apply (simp add: word_le_nat_alt)
+      done
+    subgoal for x1 x1a x2a
+      \<comment> \<open>Measure decreases: under the loop guard x1a < 5, so x1a + 1 cannot
+          wrap, and unat (x1a + 1) = unat x1a + 1.\<close>
+      apply (subgoal_tac "unat x1a < 5")
+       prefer 2 apply (simp add: word_less_nat_alt)
+      apply (subst unat_word_ariths(1))
+      apply simp
+      done
+    done
+  done
 
 (* ---------- decode_address refinement (TODO) ---------- *)
 
