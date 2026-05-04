@@ -537,6 +537,73 @@ proof -
 qed
 
 (*
+  Under the invariant v < 2^(7*i), i < 5 and v has overflow bits set
+  (so v \<ge> 2^25), then i must be 4. Used by the read_varint' overflow-
+  throw obligation.
+*)
+lemma varint_bound_forces_i_4:
+  fixes i :: "32 word" and v :: "32 word"
+  assumes "unat v < 2 ^ (7 * unat i)"
+      and "2 ^ 25 \<le> unat v"
+      and "unat i \<le> 5"
+      and "i < 5"
+  shows "unat i = 4"
+proof -
+  have "7 * unat i \<ge> 25"
+  proof (rule ccontr)
+    assume "\<not> 7 * unat i \<ge> 25"
+    hence le24: "7 * unat i \<le> 24" by simp
+    have "(2::nat) ^ (7 * unat i) \<le> 2 ^ 24"
+      using le24 by (rule power_increasing) simp
+    hence "unat v < 2 ^ 24" using assms(1) by linarith
+    moreover have "(2::nat) ^ 25 > 2 ^ 24" by simp
+    ultimately show False using assms(2) by linarith
+  qed
+  hence "unat i \<ge> 4" by linarith
+  moreover have "unat i < 5" using assms(4) by (simp add: word_less_nat_alt)
+  ultimately show ?thesis by linarith
+qed
+
+(*
+  When the accumulator v already exceeds 2^25, any further iteration
+  (fuel 1) returns None because v * 128 \<ge> 2^32 exceeds the overflow
+  check. This captures the VCDIFF overflow-detection semantics at the
+  5th byte.
+*)
+lemma varint_decode_loop_fuel1_overflow:
+  assumes "v \<ge> 2 ^ 25"
+  shows "varint_decode_loop 1 v bs = None"
+proof (cases bs)
+  case Nil
+  then show ?thesis by simp
+next
+  case (Cons b rest)
+  let ?digit = "unat (b AND 0x7F :: byte)"
+  have digit_lt: "?digit < 128"
+  proof -
+    have "b AND 0x7F \<le> 0x7F" by (simp add: word_and_le1)
+    hence "unat (b AND 0x7F) \<le> 127" by (simp add: word_le_nat_alt)
+    thus ?thesis by simp
+  qed
+  have "v * 128 + ?digit \<ge> 2 ^ 32"
+  proof -
+    have "v * 128 \<ge> 2 ^ 25 * 128"
+      using assms by simp
+    also have "(2 :: nat) ^ 25 * 128 = 2 ^ 32" by simp
+    finally show ?thesis by simp
+  qed
+  hence acc_not_lt: "\<not> v * 128 + ?digit < 2 ^ 32" by simp
+  show ?thesis
+  proof (cases "b AND 0x80 = 0")
+    case True
+    with Cons acc_not_lt show ?thesis by (simp add: Let_def)
+  next
+    case False
+    with Cons show ?thesis by (simp add: Let_def)
+  qed
+qed
+
+(*
   varint_decode_loop is monotone in fuel in the sense that if the decode
   succeeds with fuel n, it succeeds with any fuel >= n giving the same
   result. Useful for the invariant: at iteration i in the C, the loop

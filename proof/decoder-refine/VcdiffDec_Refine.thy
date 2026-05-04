@@ -385,8 +385,22 @@ lemma read_varint'_spec:
     subgoal for x1 x1a x2a by uint_arith
     \<comment> \<open>Goal 4: x1+1 \<le> len (overflow throw).\<close>
     subgoal for x1 x1a x2a by uint_arith
-    \<comment> \<open>Goal 5: overflow-throw — varint_decode = None (TODO).\<close>
-    subgoal sorry
+    \<comment> \<open>Goal 5: overflow-throw — varint_decode = None.
+        varint_overflow_check_nat gives v \<ge> 2^25; varint_bound_forces_i_4
+        gives i = 4; then 5 - i = 1; varint_decode_loop_fuel1_overflow
+        gives None.\<close>
+    subgoal for x1 x1a x2a
+      apply (subgoal_tac "2 ^ 25 \<le> unat x2a")
+       prefer 2 using varint_overflow_check_nat[of x2a] apply simp
+      apply (subgoal_tac "unat x1a = 4")
+       prefer 2 using varint_bound_forces_i_4 apply blast
+      apply (subgoal_tac "varint_decode_loop 1 (unat x2a)
+                            (drop (unat pos + 4) (heap_bytes s buf (unat len)))
+                          = None")
+       apply simp
+      apply (rule varint_decode_loop_fuel1_overflow)
+      apply simp
+      done
     \<comment> \<open>Goal 6: pos \<le> x1+1 (success path).\<close>
     subgoal for x1 x1a x2a by uint_arith
     \<comment> \<open>Goal 7: x1+1 \<le> len (success path).\<close>
