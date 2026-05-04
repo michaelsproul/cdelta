@@ -13,8 +13,8 @@ fn main() {
         .expect("harness is under workspace root")
         .to_path_buf();
 
-    let enc = workspace.join("encoder/vcdiff_enc.c");
-    let dec = workspace.join("decoder/vcdiff_dec.c");
+    let enc = workspace.join("spec/cenc/vcdiff_enc.c");
+    let dec = workspace.join("spec/cdec/vcdiff_dec.c");
 
     println!("cargo:rerun-if-changed={}", enc.display());
     println!("cargo:rerun-if-changed={}", dec.display());

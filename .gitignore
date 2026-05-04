@@ -1,3 +1,5 @@
 /test-data
-encoder/harness
-decoder/harness
+spec/cenc/harness
+spec/cdec/harness
+/true
+*~
