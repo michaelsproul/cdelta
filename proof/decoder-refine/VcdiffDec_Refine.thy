@@ -203,6 +203,76 @@ lemma read_varint'_no_modify:
     done
   done
 
+(*
+  Stronger spec: under buffer validity and `pos \<le> len`, read_varint'
+  doesn't modify state, returns a Result, and the returned cursor
+  position stays within [pos, len]. Callers chaining reads
+  (decode_address', vcdiff_decode') rely on this bound.
+
+  Invariant carries:
+   - Result (cur, i, v): pos \<le> cur \<le> len and unat i \<le> 5
+   - Exn e: pos \<le> e.pos_C \<le> len (the throw path preserves the bound)
+*)
+lemma read_varint'_bounded:
+  assumes "buf_valid s buf (unat len)"
+      and "pos \<le> len"
+  shows "read_varint' buf len pos \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and>
+                  (\<exists>v. r = Result v \<and>
+                       pos \<le> pr_t_C.pos_C v \<and>
+                       pr_t_C.pos_C v \<le> len) \<rbrace>"
+  unfolding read_varint'_def
+  apply (runs_to_vcg)
+  apply (rule runs_to_whileLoop_exn [
+    where I = "\<lambda>r t. t = s \<and>
+                     (case r of
+                        Result (cur, i, v) \<Rightarrow>
+                          pos \<le> cur \<and> cur \<le> len \<and> unat i \<le> 5
+                      | Exn e \<Rightarrow>
+                          pos \<le> pr_t_C.pos_C e \<and>
+                          pr_t_C.pos_C e \<le> len)"
+      and R = "measure (\<lambda>((cur, i, v), _). 5 - unat i)"])
+  subgoal by simp
+  subgoal using assms(2) by simp
+  subgoal by (clarsimp split: prod.splits)
+  subgoal by (clarsimp split: prod.splits)
+  subgoal
+    apply (clarsimp split: prod.splits)
+    apply runs_to_vcg
+    subgoal  \<comment> \<open>Goal 1: pos \<le> len (fall-through / truncation throw, pos_C = x1)\<close>
+      using assms(2) by simp
+    subgoal for x1 x1a x2a  \<comment> \<open>Goal 2: IS_VALID (buf +_p uint x1) from x1 < len\<close>
+      using buf_validD[OF assms(1), of "unat x1"]
+      apply (subgoal_tac "x1 < len")
+       apply (subgoal_tac "unat x1 < unat len")
+        apply (simp only: uint_nat)
+       apply (simp add: word_less_nat_alt)
+      apply (simp add: less_le)
+      done
+    \<comment> \<open>Goals 3-8: three throw/success branches, each needing
+         pos \<le> x1 + 1 and x1 + 1 \<le> len (given pos \<le> x1, x1 \<le> len, len \<noteq> x1).
+         All follow by uint arithmetic since x1 < len gives no wrap.\<close>
+    subgoal for x1 x1a x2a by uint_arith
+    subgoal for x1 x1a x2a by uint_arith
+    subgoal for x1 x1a x2a by uint_arith
+    subgoal for x1 x1a x2a by uint_arith
+    subgoal for x1 x1a x2a by uint_arith
+    subgoal for x1 x1a x2a by uint_arith
+    subgoal for x1 x1a x2a  \<comment> \<open>Goal 9: unat (x1a + 1) \<le> 5 under x1a < 5\<close>
+      apply (subgoal_tac "unat x1a < 5")
+       prefer 2 apply (simp add: word_less_nat_alt)
+      apply (subst unat_word_ariths(1))
+      apply simp
+      done
+    subgoal for x1 x1a x2a  \<comment> \<open>Goal 10: measure strict decrease\<close>
+      apply (subgoal_tac "unat x1a < 5")
+       prefer 2 apply (simp add: word_less_nat_alt)
+      apply (subst unat_word_ariths(1))
+      apply simp
+      done
+    done
+  done
+
 (* ---------- decode_address refinement (TODO) ---------- *)
 
 (*
