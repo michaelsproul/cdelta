@@ -337,12 +337,10 @@ lemma read_varint'_spec:
                        | Exn e \<Rightarrow>
                            pos \<le> pr_t_C.pos_C e \<and>
                            pr_t_C.pos_C e \<le> len \<and>
-                           (case decoded of
-                              Some (nv, rest) \<Rightarrow>
-                                pr_t_C.err_C e = VCD_OK \<and>
-                                unat (pr_t_C.pos_C e) = unat len - length rest \<and>
-                                nv = unat (pr_t_C.val_C e)
-                            | None \<Rightarrow> pr_t_C.err_C e \<noteq> VCD_OK))"
+                           (pr_t_C.err_C e = VCD_OK
+                              \<longrightarrow> (\<exists>rest. decoded = Some (unat (pr_t_C.val_C e), rest)
+                                        \<and> unat (pr_t_C.pos_C e) = unat len - length rest)) \<and>
+                           (pr_t_C.err_C e \<noteq> VCD_OK \<longrightarrow> decoded = None))"
       and R = "measure (\<lambda>((cur, i, v), _). 5 - unat i)"])
   subgoal by simp  \<comment> \<open>wf measure\<close>
   subgoal \<comment> \<open>initial invariant: cur = pos, i = 0, v = 0, fuel = 5 matches top-level\<close>
@@ -358,19 +356,58 @@ lemma read_varint'_spec:
     apply (simp add: varint_decode_loop_no_fuel)
     done
   subgoal
-    \<comment> \<open>Exn post: Exn invariant already contains exactly what we need.\<close>
-    by (clarsimp simp: Let_def split: prod.splits option.splits)
+    \<comment> \<open>Exn post: Exn invariant contains err-dispatched Some/None cases;
+        outer post wants the inverse case-split on decoded. Prove via
+        contradiction in each of the two directions.\<close>
+    apply (clarsimp simp: Let_def split: prod.splits option.splits)
+    apply (intro conjI)
+     apply auto
+    done
   subgoal
-    \<comment> \<open>Body: 16 subgoals after runs_to_vcg. 10 are closable with existing
-        tactics (bounds / IS_VALID / measure). The 6 substantive goals
-        (truncation-throw post, overflow-throw post, success-throw post,
-        and four continue-path invariant conjuncts) remain: they require
-        varint_decode_loop stepping via varint_acc_step and
-        varint_overflow_check_nat + list-drop chaining via
-        heap_bytes_drop_shift.\<close>
     apply (clarsimp simp: Let_def split: prod.splits)
     apply runs_to_vcg
-    oops
+    \<comment> \<open>Goal 1: truncation-throw pos \<le> len.\<close>
+    subgoal using pos_ok by simp
+    \<comment> \<open>Goal 2: truncation-throw — varint_decode = None (TODO).\<close>
+    subgoal sorry
+    \<comment> \<open>Goal 3: IS_VALID (given len \<noteq> x1).\<close>
+    subgoal for x1 x1a x2a
+      using buf_validD[OF buf_ok, of "unat x1"]
+      apply (subgoal_tac "x1 < len")
+       apply (simp only: uint_nat)
+       apply (simp add: word_less_nat_alt)
+      apply (simp add: less_le)
+      done
+    \<comment> \<open>Goal 4: pos \<le> x1+1 (overflow throw).\<close>
+    subgoal for x1 x1a x2a by uint_arith
+    \<comment> \<open>Goal 5: x1+1 \<le> len (overflow throw).\<close>
+    subgoal for x1 x1a x2a by uint_arith
+    \<comment> \<open>Goal 6: overflow-throw — varint_decode = None (TODO).\<close>
+    subgoal sorry
+    \<comment> \<open>Goal 7: pos \<le> x1+1 (success path).\<close>
+    subgoal for x1 x1a x2a by uint_arith
+    \<comment> \<open>Goal 8: x1+1 \<le> len (success path).\<close>
+    subgoal for x1 x1a x2a by uint_arith
+    \<comment> \<open>Goal 9: success post — varint_decode = Some (val_C, rest) (TODO).\<close>
+    subgoal sorry
+    \<comment> \<open>Goal 10: pos \<le> x1+1 (continue path).\<close>
+    subgoal for x1 x1a x2a by uint_arith
+    \<comment> \<open>Goal 11: x1+1 \<le> len (continue path).\<close>
+    subgoal for x1 x1a x2a by uint_arith
+    \<comment> \<open>Goals 12-15: continue invariant preservation (TODO).\<close>
+    subgoal sorry
+    subgoal sorry
+    subgoal sorry
+    subgoal sorry
+    \<comment> \<open>Goal 16: measure strict decrease.\<close>
+    subgoal for x1 x1a x2a
+      apply (subgoal_tac "unat x1a < 5")
+       prefer 2 apply (simp add: word_less_nat_alt)
+      apply (subst unat_word_ariths(1))
+      apply simp
+      done
+    done
+  done
 
 (* ---------- build_code_table refinement ---------- *)
 
