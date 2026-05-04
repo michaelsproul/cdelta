@@ -315,6 +315,21 @@ lemma heap_bytes_drop_shift:
        = drop i (drop (unat pos) (heap_bytes s buf (unat len)))"
   by (simp add: drop_drop add.commute)
 
+(* When i < length, drop i xs = xs ! i # drop (Suc i) xs. *)
+lemma heap_bytes_drop_Cons:
+  assumes "i < unat len"
+  shows "drop i (heap_bytes s buf (unat len))
+       = heap_w8 s (buf +\<^sub>p int i) # drop (Suc i) (heap_bytes s buf (unat len))"
+proof -
+  have len: "length (heap_bytes s buf (unat len)) = unat len"
+    by simp
+  have nth: "heap_bytes s buf (unat len) ! i = heap_w8 s (buf +\<^sub>p int i)"
+    using assms by (rule heap_bytes_nth)
+  show ?thesis
+    using assms len nth Cons_nth_drop_Suc[of i "heap_bytes s buf (unat len)"]
+    by simp
+qed
+
 (*
   Attempt: full functional spec. Result-side case analysis drives the
   top-level shape; invariant relates C state to varint_decode_loop.
@@ -455,7 +470,89 @@ lemma read_varint'_spec:
       apply (simp add: less_le)
       done
     \<comment> \<open>Goal 14: loop-eq preservation on continue.\<close>
-    subgoal sorry
+    subgoal premises prems for x1 x1a x2a
+    proof -
+      let ?bytes = "heap_bytes s buf (unat len)"
+      let ?b = "heap_w8 s (buf +\<^sub>p uint x1)"
+      let ?newv = "(x2a << 7) OR UCAST(8 \<rightarrow> 32) (?b AND 0x7F)"
+      have x1a_lt: "unat x1a < 5"
+        using prems by (simp add: word_less_nat_alt)
+      have i_plus_1: "unat (x1a + 1) = unat x1a + 1"
+        using x1a_lt by (simp add: unat_word_ariths)
+      have x1_lt_len: "unat x1 < unat len"
+      proof -
+        have le: "x1 \<le> len" using prems by simp
+        have ne: "x1 \<noteq> len" using prems by auto
+        from le ne have "x1 < len" by (simp add: less_le)
+        thus ?thesis by (simp add: word_less_nat_alt)
+      qed
+      have x1_plus_1: "unat (x1 + 1) = unat x1 + 1"
+      proof -
+        have "x1 < len" using prems by (simp add: less_le)
+        thus ?thesis by (rule unat_x_plus_1)
+      qed
+      have b_hi_set: "?b AND 0x80 \<noteq> 0"
+        using prems by (simp add: ucast_and_0x80_eq_zero)
+      have addr_eq: "(buf +\<^sub>p uint x1) = (buf +\<^sub>p int (unat x1))"
+        by (simp only: uint_nat)
+      have suc_eq: "Suc (unat x1) = unat x1 + 1" by simp
+      have cons_eq: "drop (unat x1) ?bytes
+                   = ?b # drop (unat x1 + 1) ?bytes"
+      proof -
+        have step: "drop (unat x1) ?bytes
+                  = heap_w8 s (buf +\<^sub>p int (unat x1))
+                    # drop (Suc (unat x1)) ?bytes"
+          using x1_lt_len by (rule heap_bytes_drop_Cons)
+        show ?thesis
+          by (simp only: step addr_eq[symmetric] suc_eq)
+      qed
+      have x1_eq: "unat x1 = unat pos + unat x1a" using prems by simp
+      have inv: "varint_decode_loop (5 - unat x1a) (unat x2a) (drop (unat x1) ?bytes)
+               = varint_decode (drop (unat pos) ?bytes)"
+        using prems x1_eq by simp
+      have v_bd: "unat x2a < 2 ^ (7 * unat x1a)" using prems by simp
+      have ovf_nat: "unat x1a = 4 \<longrightarrow> x2a AND 0xFE000000 = 0"
+      proof
+        assume eq4: "unat x1a = 4"
+        have "unat x1a = unat (4 :: 32 word)" using eq4 by simp
+        hence "x1a = 4" using word_unat_eq_iff[of x1a 4] by simp
+        with prems show "x2a AND 0xFE000000 = 0" by simp
+      qed
+      have step: "varint_decode_loop (5 - unat x1a) (unat x2a) (?b # drop (unat x1 + 1) ?bytes)
+                = varint_decode_loop (5 - (unat x1a + 1))
+                    (unat ((x2a << 7) OR UCAST(8 \<rightarrow> 32) (?b AND 0x7F)))
+                    (drop (unat x1 + 1) ?bytes)"
+        by (rule varint_decode_loop_step_continue[OF v_bd x1a_lt ovf_nat b_hi_set])
+      have lhs: "varint_decode_loop (5 - (unat x1a + 1))
+                   (unat ((x2a << 7) OR UCAST(8 \<rightarrow> 32) (?b AND 0x7F)))
+                   (drop (unat x1 + 1) ?bytes)
+               = varint_decode (drop (unat pos) ?bytes)"
+        using step cons_eq inv by simp
+      have drop_eq: "drop (unat (x1 + 1)) ?bytes = drop (unat x1 + 1) ?bytes"
+        by (simp only: x1_plus_1)
+      have fuel_eq: "5 - unat (x1a + 1) = 5 - (unat x1a + 1)"
+        by (simp only: i_plus_1)
+      have uint_simp: "(buf +\<^sub>p uint x1) = (buf +\<^sub>p int (unat x1))"
+        by (simp only: uint_nat)
+      \<comment> \<open>Put it all together. Goal LHS uses:
+          varint_decode_loop (5 - unat (x1a + 1))
+            (unat ((x2a << 7) OR UCAST(8\<rightarrow>32) (heap_w8 s (buf +_p uint x1)) AND 0x7F))
+            (drop (unat (x1 + 1)) ?bytes)
+          = varint_decode (drop (unat pos) ?bytes). \<close>
+      have v_eq: "(UCAST(8 \<rightarrow> 32) (heap_w8 s (buf +\<^sub>p uint x1)) AND 0x7F)
+                 = UCAST(8 \<rightarrow> 32) (heap_w8 s (buf +\<^sub>p uint x1) AND 0x7F)"
+        by (simp only: ucast_and_0x7F)
+      have lhs': "varint_decode_loop (5 - unat (x1a + 1))
+                    (unat ((x2a << 7) OR UCAST(8 \<rightarrow> 32)
+                             (heap_w8 s (buf +\<^sub>p uint x1)) AND 0x7F))
+                    (drop (unat (x1 + 1)) ?bytes)
+                = varint_decode_loop (5 - (unat x1a + 1))
+                    (unat ((x2a << 7) OR UCAST(8 \<rightarrow> 32) (?b AND 0x7F)))
+                    (drop (unat x1 + 1) ?bytes)"
+        by (simp only: v_eq drop_eq fuel_eq)
+      show ?thesis
+        using lhs' lhs by simp
+    qed
     \<comment> \<open>Goal 15: measure strict decrease.\<close>
     subgoal for x1 x1a x2a
       apply (subgoal_tac "unat x1a < 5")

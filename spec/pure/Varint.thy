@@ -749,6 +749,46 @@ lemma ucast_and_0x80_eq_zero:
   by word_bitwise
 
 (*
+  Goal 14 loop-eq preservation helper: one iteration of the C loop body,
+  given continuation bit set and overflow check passed, preserves
+  varint_decode_loop's left-hand-side.
+*)
+lemma varint_decode_loop_step_continue:
+  fixes v :: "32 word" and b :: "8 word" and i :: nat
+  assumes v_bd: "unat v < 2 ^ (7 * i)"
+      and i_lt: "i < 5"
+      and ovf:  "i = 4 \<longrightarrow> v AND 0xFE000000 = 0"
+      and cont: "b AND 0x80 \<noteq> 0"
+  shows "varint_decode_loop (5 - i) (unat v) (b # rest)
+       = varint_decode_loop (5 - (i + 1))
+           (unat ((v << 7) OR UCAST(8 \<rightarrow> 32) (b AND 0x7F)))
+           rest"
+proof -
+  from i_lt have pos: "5 - i > 0" by simp
+  then obtain k where k_eq: "5 - i = Suc k" by (cases "5 - i") auto
+  have k_val: "k = 5 - (i + 1)" using k_eq i_lt by simp
+  have unat_eq: "unat ((v << 7) OR UCAST(8 \<rightarrow> 32) (b AND 0x7F))
+               = unat v * 128 + unat (b AND 0x7F)"
+    by (rule varint_acc_safe(1)[OF v_bd i_lt ovf])
+  have unfold: "varint_decode_loop (Suc k) (unat v) (b # rest)
+              = (if b AND 0x80 = 0
+                 then if unat v * 128 + unat (b AND 0x7F) < 2^32
+                      then Some (unat v * 128 + unat (b AND 0x7F), rest)
+                      else None
+                 else varint_decode_loop k (unat v * 128 + unat (b AND 0x7F)) rest)"
+    by (simp add: Let_def)
+  have branch: "\<not> (b AND 0x80 = 0)" using cont by simp
+  have "varint_decode_loop (5 - i) (unat v) (b # rest)
+      = varint_decode_loop k (unat v * 128 + unat (b AND 0x7F)) rest"
+    using unfold k_eq branch by simp
+  also have "\<dots> = varint_decode_loop (5 - (i + 1))
+                   (unat ((v << 7) OR UCAST(8 \<rightarrow> 32) (b AND 0x7F)))
+                   rest"
+    using k_val unat_eq by simp
+  finally show ?thesis .
+qed
+
+(*
   End-to-end Goal 12 helper: the continue-path-new-v expression
   `(v << 7) OR UCAST(b && 0x7F)` (matching the AutoCorres form)
   has unat strictly bounded by 2^(7*(unat i+1)) under the word-level
