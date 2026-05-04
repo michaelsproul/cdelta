@@ -8,7 +8,7 @@
         "run",
         "isabelle-mcp",
         "-l",
-        "CdeltaRefine",
+        "CdeltaRefineBase",
         "-d",
         "/home/michael/Programming/cdelta",
         "-v"
