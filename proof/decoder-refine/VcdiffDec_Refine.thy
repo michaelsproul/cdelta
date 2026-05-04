@@ -411,10 +411,18 @@ lemma read_varint'_spec:
     subgoal for x1 x1a x2a by uint_arith
     \<comment> \<open>Goal 10: x1+1 \<le> len (continue path).\<close>
     subgoal for x1 x1a x2a by uint_arith
-    \<comment> \<open>Goals 11-14: continue invariant preservation (TODO).\<close>
+    \<comment> \<open>Goal 11: unat (x1a + 1) \<le> 5 (continue: x1a < 5 so x1a + 1 \<le> 5).\<close>
+    subgoal for x1 x1a x2a
+      apply (subgoal_tac "unat x1a < 5")
+       prefer 2 apply (simp add: word_less_nat_alt)
+      apply (subst unat_word_ariths(1))
+      apply simp
+      done
+    \<comment> \<open>Goal 12: unat v' < 2 ^ (7 * unat (x1a+1)) — uses varint_acc_step.\<close>
     subgoal sorry
+    \<comment> \<open>Goal 13: unat (x1 + 1) = unat pos + unat (x1a + 1) — TODO.\<close>
     subgoal sorry
-    subgoal sorry
+    \<comment> \<open>Goal 14: loop-eq preservation on continue.\<close>
     subgoal sorry
     \<comment> \<open>Goal 15: measure strict decrease.\<close>
     subgoal for x1 x1a x2a
