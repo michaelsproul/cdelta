@@ -278,30 +278,30 @@ lemma read_varint'_bounded:
   done
 
 (*
-  Full functional-correctness spec for read_varint'. Relates the Result
-  cursor/value to varint_decode on the heap_bytes view of the buffer.
-  Under buffer validity and pos \<le> len, the function terminates and:
-    - if varint_decode drop-pos succeeds with (v, rest), then the Result
-      is pr_t_C pos' (of_nat v) VCD_OK with pos' = len - length rest
-    - if varint_decode drop-pos fails, then the Result has err_C \<noteq> VCD_OK
+  Full functional-correctness spec for read_varint'. Relates the returned
+  value/cursor to varint_decode on the heap_bytes view of the buffer.
 
-  Invariant (over Result / Exn):
-    Result (cur, i, v):
-      cur = pos + of_nat (unat i)   \<comment> \<open>no wrap: unat cur < 2^32\<close>
-      pos \<le> cur \<and> cur \<le> len
-      unat i \<le> 5
-      unat v < 128 ^ unat i
-      varint_decode_loop (5 - unat i) (unat v)
-        (drop (unat cur) (heap_bytes s buf (unat len)))
-      = varint_decode (drop (unat pos) (heap_bytes s buf (unat len)))
-    Exn e:
-      e.err_C \<noteq> VCD_OK and e.val_C = 0 and pos \<le> e.pos_C \<and> e.pos_C \<le> len
-      and varint_decode (drop (unat pos) bytes) = None
+  Under buffer validity and pos \<le> len, the function terminates with
+  Result v such that (letting bytes = heap_bytes s buf (unat len)):
+    case varint_decode (drop (unat pos) bytes) of
+      Some (nv, rest) \<Rightarrow> pr_t_C.err_C v = VCD_OK
+                         \<and> pr_t_C.pos_C v = len - of_nat (length rest)
+                         \<and> unat (pr_t_C.val_C v) = nv
+    | None           \<Rightarrow> pr_t_C.err_C v \<noteq> VCD_OK
 
-  This is deferred: the proof requires multi-day development of per-throw
-  invariant preservation using varint_acc_step and varint_overflow_check_nat
-  plus list-drop reasoning through the byte buffer.
+  Attempt: prove the Result-side of the spec that the cursor matches
+  "len - length rest" when varint_decode succeeds. The invariant needs to
+  track that dropping (unat cur) from the buffer reduces to the decode loop
+  with fuel = 5 - unat i and accumulator unat v.
 *)
+
+(* Helper: heap_bytes drop relation — dropping unat cur from the buffer
+   is the same as dropping unat i elements from drop unat pos. *)
+lemma heap_bytes_drop_shift:
+  assumes "unat pos + i \<le> unat len"
+  shows "drop (unat pos + i) (heap_bytes s buf (unat len))
+       = drop i (drop (unat pos) (heap_bytes s buf (unat len)))"
+  by (simp add: drop_drop add.commute)
 
 (* ---------- build_code_table refinement ---------- *)
 
