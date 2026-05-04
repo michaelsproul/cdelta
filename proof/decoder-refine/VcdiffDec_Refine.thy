@@ -289,10 +289,10 @@ lemma read_varint'_bounded:
                          \<and> unat (pr_t_C.val_C v) = nv
     | None           \<Rightarrow> pr_t_C.err_C v \<noteq> VCD_OK
 
-  Attempt: prove the Result-side of the spec that the cursor matches
-  "len - length rest" when varint_decode succeeds. The invariant needs to
-  track that dropping (unat cur) from the buffer reduces to the decode loop
-  with fuel = 5 - unat i and accumulator unat v.
+  Body has 16 subgoals — 10 of them (bounds/IS_VALID/measure) are closed
+  using the same pattern as read_varint'_bounded. The remaining 6 are
+  the substantive work: relating read_varint's per-iteration state to
+  varint_decode_loop via varint_acc_step + varint_overflow_check_nat.
 *)
 
 (* Helper: heap_bytes drop relation — dropping unat cur from the buffer
@@ -302,6 +302,75 @@ lemma heap_bytes_drop_shift:
   shows "drop (unat pos + i) (heap_bytes s buf (unat len))
        = drop i (drop (unat pos) (heap_bytes s buf (unat len)))"
   by (simp add: drop_drop add.commute)
+
+(*
+  Attempt: full functional spec. Result-side case analysis drives the
+  top-level shape; invariant relates C state to varint_decode_loop.
+*)
+lemma read_varint'_spec:
+  assumes buf_ok: "buf_valid s buf (unat len)"
+      and pos_ok: "pos \<le> len"
+  shows "read_varint' buf len pos \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and>
+                  (\<exists>v. r = Result v \<and>
+                       pos \<le> pr_t_C.pos_C v \<and> pr_t_C.pos_C v \<le> len \<and>
+                       (case varint_decode (drop (unat pos) (heap_bytes s buf (unat len))) of
+                          Some (nv, rest) \<Rightarrow>
+                             pr_t_C.err_C v = VCD_OK \<and>
+                             unat (pr_t_C.pos_C v) = unat len - length rest \<and>
+                             nv = unat (pr_t_C.val_C v)
+                        | None \<Rightarrow>
+                             pr_t_C.err_C v \<noteq> VCD_OK)) \<rbrace>"
+  unfolding read_varint'_def
+  apply (runs_to_vcg)
+  apply (rule runs_to_whileLoop_exn [
+    where I = "\<lambda>r t. t = s \<and>
+                     (let bytes = heap_bytes s buf (unat len);
+                          decoded = varint_decode (drop (unat pos) bytes)
+                      in case r of
+                         Result (cur, i, v) \<Rightarrow>
+                           pos \<le> cur \<and> cur \<le> len \<and> unat i \<le> 5 \<and>
+                           unat v < 2 ^ (7 * unat i) \<and>
+                           unat cur = unat pos + unat i \<and>
+                           varint_decode_loop (5 - unat i) (unat v)
+                             (drop (unat cur) bytes) = decoded
+                       | Exn e \<Rightarrow>
+                           pos \<le> pr_t_C.pos_C e \<and>
+                           pr_t_C.pos_C e \<le> len \<and>
+                           (case decoded of
+                              Some (nv, rest) \<Rightarrow>
+                                pr_t_C.err_C e = VCD_OK \<and>
+                                unat (pr_t_C.pos_C e) = unat len - length rest \<and>
+                                nv = unat (pr_t_C.val_C e)
+                            | None \<Rightarrow> pr_t_C.err_C e \<noteq> VCD_OK))"
+      and R = "measure (\<lambda>((cur, i, v), _). 5 - unat i)"])
+  subgoal by simp  \<comment> \<open>wf measure\<close>
+  subgoal \<comment> \<open>initial invariant: cur = pos, i = 0, v = 0, fuel = 5 matches top-level\<close>
+    using pos_ok
+    by (simp add: varint_decode_def Let_def)
+  subgoal
+    \<comment> \<open>Result post: fall-through path (x1a = 5 since unat x1a \<le> 5 and
+        \<not> x1a < 5). Invariant's loop-equality with fuel 0 forces
+        varint_decode to be None; err = VCD_ERR_VARINT \<noteq> VCD_OK.\<close>
+    apply (clarsimp simp: Let_def split: prod.splits)
+    apply (subgoal_tac "unat x1a = 5")
+     prefer 2 apply (simp add: word_less_nat_alt)
+    apply (simp add: varint_decode_loop_no_fuel)
+    done
+  subgoal
+    \<comment> \<open>Exn post: Exn invariant already contains exactly what we need.\<close>
+    by (clarsimp simp: Let_def split: prod.splits option.splits)
+  subgoal
+    \<comment> \<open>Body: 16 subgoals after runs_to_vcg. 10 are closable with existing
+        tactics (bounds / IS_VALID / measure). The 6 substantive goals
+        (truncation-throw post, overflow-throw post, success-throw post,
+        and four continue-path invariant conjuncts) remain: they require
+        varint_decode_loop stepping via varint_acc_step and
+        varint_overflow_check_nat + list-drop chaining via
+        heap_bytes_drop_shift.\<close>
+    apply (clarsimp simp: Let_def split: prod.splits)
+    apply runs_to_vcg
+    oops
 
 (* ---------- build_code_table refinement ---------- *)
 
