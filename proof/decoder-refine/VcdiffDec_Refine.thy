@@ -430,10 +430,20 @@ lemma read_varint'_spec:
       apply (subst unat_word_ariths(1))
       apply simp
       done
-    \<comment> \<open>Goal 12: unat v' < 2 ^ (7 * unat (x1a+1)). TODO - close via
-        varint_acc_safe + varint_acc_step_bound_w; rule application
-        isn't instantiating i_w = x1a cleanly.\<close>
-    subgoal sorry
+    \<comment> \<open>Goal 12: unat v' < 2 ^ (7 * unat (x1a+1)) via varint_acc_step_bound_or,
+        keeping the bound in the `7 * (unat i + 1)` form the helper needs.\<close>
+    subgoal for x1 x1a x2a
+      apply (subgoal_tac "unat (x1a + 1) = unat x1a + 1")
+       prefer 2 apply (rule unat_x_plus_1[where y = 5]; simp)
+      apply (subgoal_tac "unat ((x2a << 7) OR UCAST(8 \<rightarrow> 32)
+                             (heap_w8 s (buf +\<^sub>p uint x1)) AND 0x7F)
+                          < 2 ^ (7 * (unat x1a + 1))")
+       apply simp
+      apply (rule varint_acc_step_bound_or)
+        apply simp
+       apply simp
+      apply simp
+      done
     \<comment> \<open>Goal 13: unat (x1 + 1) = unat pos + unat (x1a + 1).\<close>
     subgoal for x1 x1a x2a
       apply (subgoal_tac "unat (x1 + 1) = unat x1 + 1")

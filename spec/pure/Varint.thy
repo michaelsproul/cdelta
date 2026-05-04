@@ -718,6 +718,40 @@ proof -
 qed
 
 (*
+  End-to-end Goal 12 helper: the continue-path-new-v expression
+  `(v << 7) OR UCAST(b && 0x7F)` (matching the AutoCorres form)
+  has unat strictly bounded by 2^(7*(unat i+1)) under the word-level
+  overflow-check hypothesis.
+*)
+lemma varint_acc_step_bound_or:
+  fixes v :: "32 word" and b :: "8 word" and i_w :: "32 word"
+  assumes v_bd: "unat v < 2 ^ (7 * unat i_w)"
+      and i_lt: "i_w < 5"
+      and ovf:  "i_w = 4 \<longrightarrow> v AND 0xFE000000 = 0"
+  shows "unat ((v << 7) OR UCAST(8 \<rightarrow> 32) b AND 0x7F)
+         < 2 ^ (7 * (unat i_w + 1))"
+proof -
+  have nat_lt: "unat i_w < 5" using i_lt by (simp add: word_less_nat_alt)
+  have nat_ovf: "unat i_w = 4 \<longrightarrow> v AND 0xFE000000 = 0"
+  proof
+    assume eq: "unat i_w = 4"
+    have unat_4: "unat (4 :: 32 word) = 4" by simp
+    from eq unat_4 have "unat i_w = unat (4 :: 32 word)" by simp
+    hence "i_w = 4" by (simp add: word_unat_eq_iff[of i_w 4])
+    thus "v AND 0xFE000000 = 0" using ovf by simp
+  qed
+  have eq1: "unat ((v << 7) OR UCAST(8 \<rightarrow> 32) b AND 0x7F)
+             = unat ((v << 7) OR UCAST(8 \<rightarrow> 32) (b AND 0x7F))"
+    by (simp only: ucast_and_0x7F)
+  have eq2: "unat ((v << 7) OR UCAST(8 \<rightarrow> 32) (b AND 0x7F))
+             = unat v * 128 + unat (b AND 0x7F)"
+    using varint_acc_safe(1)[OF v_bd nat_lt nat_ovf] .
+  have bd: "unat v * 128 + unat (b AND 0x7F) < 2 ^ (7 * (unat i_w + 1))"
+    using varint_acc_safe(2)[OF v_bd nat_lt nat_ovf] .
+  show ?thesis using eq1 eq2 bd by simp
+qed
+
+(*
   varint_decode_loop is monotone in fuel in the sense that if the decode
   succeeds with fuel n, it succeeds with any fuel >= n giving the same
   result. Useful for the invariant: at iteration i in the C, the loop
