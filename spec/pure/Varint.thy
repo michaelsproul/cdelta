@@ -718,6 +718,37 @@ proof -
 qed
 
 (*
+  UCAST(8 → 32) b AND 0x80 = 0 iff b AND 0x80 = 0 (byte-level).
+  The 0x80 bit is within byte range so the cast preserves it.
+*)
+(* Generic version of varint_overflow_check_nat for any 0x80-style mask on a word. *)
+lemma and_not_mask_eq_zero_iff:
+  fixes v :: "'a::len word"
+  assumes "n \<le> LENGTH('a)"
+  shows "(v AND NOT (mask n) = 0) \<longleftrightarrow> v AND mask n = v"
+proof -
+  have split: "(v AND mask n) + (v AND NOT (mask n)) = v"
+    by (rule word_plus_and_or_coroll2)
+  show ?thesis
+  proof
+    assume "v AND NOT (mask n) = 0"
+    with split show "v AND mask n = v" by simp
+  next
+    assume eq: "v AND mask n = v"
+    have "v + (v AND NOT (mask n)) = v" using split eq by simp
+    thus "v AND NOT (mask n) = 0" by simp
+  qed
+qed
+
+(* Bit-level identity bridging UCAST and AND. *)
+(* UCAST(8\<rightarrow>32) b AND 0x80 = 0 iff b AND 0x80 = 0.
+   Proof via word_bitwise (finite bit-vector decision procedure). *)
+lemma ucast_and_0x80_eq_zero:
+  fixes b :: "8 word"
+  shows "(UCAST(8 \<rightarrow> 32) b AND 0x80 = 0) = (b AND 0x80 = 0)"
+  by word_bitwise
+
+(*
   End-to-end Goal 12 helper: the continue-path-new-v expression
   `(v << 7) OR UCAST(b && 0x7F)` (matching the AutoCorres form)
   has unat strictly bounded by 2^(7*(unat i+1)) under the word-level
