@@ -749,6 +749,52 @@ lemma ucast_and_0x80_eq_zero:
   by word_bitwise
 
 (*
+  Goal 8 loop-success helper: one iteration of the C loop body with
+  continuation bit CLEAR returns Some. Under the overflow check,
+  the accumulated v*128 + (b & 0x7F) < 2^32.
+*)
+lemma varint_decode_loop_step_success:
+  fixes v :: "32 word" and b :: "8 word" and i :: nat
+  assumes v_bd: "unat v < 2 ^ (7 * i)"
+      and i_lt: "i < 5"
+      and ovf:  "i = 4 \<longrightarrow> v AND 0xFE000000 = 0"
+      and succ: "b AND 0x80 = 0"
+  shows "varint_decode_loop (5 - i) (unat v) (b # rest)
+       = Some (unat ((v << 7) OR UCAST(8 \<rightarrow> 32) (b AND 0x7F)), rest)"
+proof -
+  from i_lt have pos: "5 - i > 0" by simp
+  then obtain k where k_eq: "5 - i = Suc k" by (cases "5 - i") auto
+  have acc_eq: "unat ((v << 7) OR UCAST(8 \<rightarrow> 32) (b AND 0x7F))
+              = unat v * 128 + unat (b AND 0x7F)"
+    by (rule varint_acc_safe(1)[OF v_bd i_lt ovf])
+  have acc_bd: "unat v * 128 + unat (b AND 0x7F) < 2 ^ 32"
+  proof -
+    have "7 * (i + 1) \<le> 35" using i_lt by simp
+    hence "(2 :: nat) ^ (7 * (i + 1)) \<le> 2 ^ 35"
+      by (rule power_increasing) simp
+    moreover have "unat v * 128 + unat (b AND 0x7F) < 2 ^ (7 * (i + 1))"
+      by (rule varint_acc_step_bound[OF v_bd i_lt ovf])
+    ultimately have "unat v * 128 + unat (b AND 0x7F) < 2 ^ 35"
+      by linarith
+    have lt: "unat ((v << 7) OR UCAST(8 \<rightarrow> 32) (b AND 0x7F)) < 2 ^ LENGTH(32)"
+      by (rule unat_lt2p)
+    thus ?thesis using acc_eq by simp
+  qed
+  have "varint_decode_loop (Suc k) (unat v) (b # rest)
+      = (if b AND 0x80 = 0
+         then if unat v * 128 + unat (b AND 0x7F) < 2^32
+              then Some (unat v * 128 + unat (b AND 0x7F), rest)
+              else None
+         else varint_decode_loop k (unat v * 128 + unat (b AND 0x7F)) rest)"
+    by (simp add: Let_def)
+  also have "\<dots> = Some (unat v * 128 + unat (b AND 0x7F), rest)"
+    using succ acc_bd by simp
+  also have "\<dots> = Some (unat ((v << 7) OR UCAST(8 \<rightarrow> 32) (b AND 0x7F)), rest)"
+    using acc_eq by simp
+  finally show ?thesis using k_eq by simp
+qed
+
+(*
   Goal 14 loop-eq preservation helper: one iteration of the C loop body,
   given continuation bit set and overflow check passed, preserves
   varint_decode_loop's left-hand-side.
