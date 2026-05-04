@@ -604,6 +604,22 @@ next
 qed
 
 (*
+  UCAST distributes over AND with a constant within the target type.
+*)
+lemma ucast_and_0x7F:
+  fixes b :: "8 word"
+  shows "UCAST(8 \<rightarrow> 32) b AND 0x7F = UCAST(8 \<rightarrow> 32) (b AND 0x7F)"
+proof -
+  have mask_eq_32: "(0x7F :: 32 word) = mask 7"
+    by (simp add: mask_eq_decr_exp)
+  have mask_eq_8: "(0x7F :: 8 word) = mask 7"
+    by (simp add: mask_eq_decr_exp)
+  have "(UCAST(8 \<rightarrow> 32) (b AND mask 7) :: 32 word) = UCAST(8 \<rightarrow> 32) b AND mask 7"
+    by (rule ucast_and_mask)
+  thus ?thesis by (simp add: mask_eq_32 mask_eq_8)
+qed
+
+(*
   Given v < 2^(7*i) and the overflow check passes at step i (either
   i < 4, or i = 4 and v's high bits clear), the updated accumulator
   after one step fits in 2^(7*(i+1)).

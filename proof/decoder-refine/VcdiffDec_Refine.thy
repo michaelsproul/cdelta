@@ -430,10 +430,7 @@ lemma read_varint'_spec:
       apply (subst unat_word_ariths(1))
       apply simp
       done
-    \<comment> \<open>Goal 12: unat v' < 2 ^ (7 * unat (x1a+1)) — TODO.
-        The expression `UCAST(8→32) b && 0x7F` in the AutoCorres lift
-        differs from `UCAST(8→32) (b AND 0x7F)` in varint_acc_step;
-        needs a ucast_and rewrite first.\<close>
+    \<comment> \<open>Goal 12: unat v' < 2 ^ (7 * unat (x1a+1)) — TODO.\<close>
     subgoal sorry
     \<comment> \<open>Goal 13: unat (x1 + 1) = unat pos + unat (x1a + 1).\<close>
     subgoal for x1 x1a x2a
