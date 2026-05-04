@@ -364,42 +364,45 @@ lemma read_varint'_spec:
      apply auto
     done
   subgoal
-    apply (clarsimp simp: Let_def split: prod.splits)
+    apply (simp add: Let_def split: prod.splits del: if_split)
+    apply safe
     apply runs_to_vcg
-    \<comment> \<open>Goal 1: truncation-throw pos \<le> len.\<close>
-    subgoal using pos_ok by simp
-    \<comment> \<open>Goal 2: truncation-throw — varint_decode = None (TODO).\<close>
-    subgoal sorry
-    \<comment> \<open>Goal 3: IS_VALID (given len \<noteq> x1).\<close>
+    \<comment> \<open>Goal 1: truncation-throw — varint_decode = None.\<close>
+    subgoal for cur i v
+      apply (subgoal_tac "varint_decode_loop (5 - unat i) (unat v) [] = None")
+       apply simp
+      apply (cases "5 - unat i"; simp)
+      done
+    \<comment> \<open>Goal 2: IS_VALID (overflow-read, given \<not> len \<le> x1).\<close>
     subgoal for x1 x1a x2a
       using buf_validD[OF buf_ok, of "unat x1"]
       apply (subgoal_tac "x1 < len")
        apply (simp only: uint_nat)
        apply (simp add: word_less_nat_alt)
-      apply (simp add: less_le)
+      apply simp
       done
-    \<comment> \<open>Goal 4: pos \<le> x1+1 (overflow throw).\<close>
+    \<comment> \<open>Goal 3: pos \<le> x1+1 (overflow throw).\<close>
     subgoal for x1 x1a x2a by uint_arith
-    \<comment> \<open>Goal 5: x1+1 \<le> len (overflow throw).\<close>
+    \<comment> \<open>Goal 4: x1+1 \<le> len (overflow throw).\<close>
     subgoal for x1 x1a x2a by uint_arith
-    \<comment> \<open>Goal 6: overflow-throw — varint_decode = None (TODO).\<close>
+    \<comment> \<open>Goal 5: overflow-throw — varint_decode = None (TODO).\<close>
     subgoal sorry
-    \<comment> \<open>Goal 7: pos \<le> x1+1 (success path).\<close>
+    \<comment> \<open>Goal 6: pos \<le> x1+1 (success path).\<close>
     subgoal for x1 x1a x2a by uint_arith
-    \<comment> \<open>Goal 8: x1+1 \<le> len (success path).\<close>
+    \<comment> \<open>Goal 7: x1+1 \<le> len (success path).\<close>
     subgoal for x1 x1a x2a by uint_arith
-    \<comment> \<open>Goal 9: success post — varint_decode = Some (val_C, rest) (TODO).\<close>
+    \<comment> \<open>Goal 8: success post — varint_decode = Some (val_C, rest) (TODO).\<close>
     subgoal sorry
-    \<comment> \<open>Goal 10: pos \<le> x1+1 (continue path).\<close>
+    \<comment> \<open>Goal 9: pos \<le> x1+1 (continue path).\<close>
     subgoal for x1 x1a x2a by uint_arith
-    \<comment> \<open>Goal 11: x1+1 \<le> len (continue path).\<close>
+    \<comment> \<open>Goal 10: x1+1 \<le> len (continue path).\<close>
     subgoal for x1 x1a x2a by uint_arith
-    \<comment> \<open>Goals 12-15: continue invariant preservation (TODO).\<close>
-    subgoal sorry
-    subgoal sorry
+    \<comment> \<open>Goals 11-14: continue invariant preservation (TODO).\<close>
     subgoal sorry
     subgoal sorry
-    \<comment> \<open>Goal 16: measure strict decrease.\<close>
+    subgoal sorry
+    subgoal sorry
+    \<comment> \<open>Goal 15: measure strict decrease.\<close>
     subgoal for x1 x1a x2a
       apply (subgoal_tac "unat x1a < 5")
        prefer 2 apply (simp add: word_less_nat_alt)
