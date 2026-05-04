@@ -277,6 +277,18 @@ lemma read_varint'_bounded:
     done
   done
 
+(* Helper: x < y (as 32-word) implies unat (x + 1) = unat x + 1 (no wrap). *)
+lemma unat_x_plus_1:
+  fixes x :: "32 word"
+  assumes "x < y"
+  shows "unat (x + 1) = unat x + 1"
+proof -
+  have x_le: "unat x < unat y" using assms by (simp add: word_less_nat_alt)
+  have y_le: "unat y \<le> 2 ^ 32 - 1" using unat_lt2p[of y] by simp
+  have "unat x + 1 < 2 ^ 32" using x_le y_le by simp
+  thus ?thesis by (subst unat_word_ariths(1)) simp
+qed
+
 (*
   Full functional-correctness spec for read_varint'. Relates the returned
   value/cursor to varint_decode on the heap_bytes view of the buffer.
@@ -420,8 +432,16 @@ lemma read_varint'_spec:
       done
     \<comment> \<open>Goal 12: unat v' < 2 ^ (7 * unat (x1a+1)) — uses varint_acc_step.\<close>
     subgoal sorry
-    \<comment> \<open>Goal 13: unat (x1 + 1) = unat pos + unat (x1a + 1) — TODO.\<close>
-    subgoal sorry
+    \<comment> \<open>Goal 13: unat (x1 + 1) = unat pos + unat (x1a + 1).\<close>
+    subgoal for x1 x1a x2a
+      apply (subgoal_tac "unat (x1 + 1) = unat x1 + 1")
+       apply (subgoal_tac "unat (x1a + 1) = unat x1a + 1")
+        apply simp
+       apply (rule unat_x_plus_1[where y = 5])
+       apply simp
+      apply (rule unat_x_plus_1[where y = len])
+      apply (simp add: less_le)
+      done
     \<comment> \<open>Goal 14: loop-eq preservation on continue.\<close>
     subgoal sorry
     \<comment> \<open>Goal 15: measure strict decrease.\<close>
