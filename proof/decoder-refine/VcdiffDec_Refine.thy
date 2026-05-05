@@ -1470,12 +1470,57 @@ lemma build_code_table'_spec:
                           word_less_nat_alt all_zero_row_def)
        \<comment> \<open>Exit Loop 2 \<Longrightarrow> continue with Loops 3..6 + final modify. TODO.\<close>
     subgoal for a t' sorry
-       \<comment> \<open>Body step for Loop 2. Writes row (1+a) with tag = 1 (ADD),
-           size = unat a at slot 1.\<close>
+       \<comment> \<open>Body step for Loop 2.\<close>
     subgoal for a t'
       apply clarsimp
       apply runs_to_vcg
-      sorry
+      subgoal \<comment> \<open>guard: 1 + a < 0x100\<close>
+        by (simp add: word_less_nat_alt unat_word_ariths(1))
+      subgoal \<comment> \<open>unat bound\<close>
+        by (simp add: word_less_nat_alt unat_word_ariths(1))
+      subgoal \<comment> \<open>matches_upto preservation.\<close>
+        apply (subgoal_tac "unat (a + 1) = unat a + 1")
+         prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+        apply (subgoal_tac "unat (1 + a) = 1 + unat a")
+         prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+        apply (subgoal_tac "1 + unat a < CARD(256)")
+         prefer 2 apply (simp add: word_less_nat_alt)
+        apply (simp add: code_tbl_matches_upto_def)
+        apply (intro conjI allI impI)
+        subgoal for op
+          apply (cases "op = 1 + unat a")
+           subgoal
+             \<comment> \<open>Newly written position. Row was all-zero in t' (beyond Suc (unat a)).\<close>
+             apply simp
+             apply (simp add: arr_fupdate_same arr_fupdate_other)
+             apply (subgoal_tac "all_zero_row (code_tbl_'' t' .[Suc (unat a)])")
+              prefer 2
+              apply (drule conjunct2, drule_tac x = "Suc (unat a)" in spec)
+              apply simp
+             apply (cases "unat a = 0")
+              subgoal
+                by (simp add: default_entry_def entry_of_row_def byte_to_hi_def
+                              add_hi_def noop_hi_def unat_ucast all_zero_row_def)
+             subgoal
+               apply (subgoal_tac "1 \<le> unat a \<and> unat a \<le> 17")
+                prefer 2 apply (simp add: word_less_nat_alt)
+               apply (subgoal_tac "default_entry (Suc (unat a)) = (add_hi (unat a), noop_hi)")
+                prefer 2 apply (metis Suc_eq_plus1_left default_entry_add_small)
+               apply (simp add: entry_of_row_def byte_to_hi_def
+                                add_hi_def noop_hi_def unat_ucast
+                                all_zero_row_def)
+               done
+             done
+          subgoal
+            apply (simp add: arr_fupdate_other)
+            done
+          done
+        subgoal for op
+          by (simp add: arr_fupdate_other)
+        done
+      subgoal \<comment> \<open>measure decrease\<close>
+        by (simp add: word_less_nat_alt unat_word_ariths(1))
+      done
     done
      \<comment> \<open>Body step: 3 subgoals (unat bound, invariant preservation, measure).\<close>
   subgoal for a t
