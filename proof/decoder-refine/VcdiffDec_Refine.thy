@@ -1522,8 +1522,33 @@ lemma build_code_table'_spec:
           done
            \<comment> \<open>Exit Loop 4\<close>
         subgoal for x2 t2 sorry
-           \<comment> \<open>Body Loop 4\<close>
-        subgoal for x2 t2 sorry
+           \<comment> \<open>Body Loop 4 (outer). Runs middle loop (add_size 1..4),
+               each middle iter runs inner loop (copy_size 4..6).
+               Total 12 entries per mode iteration.\<close>
+        subgoal for xp s4
+          apply clarsimp
+          apply runs_to_vcg
+          subgoal for y
+            apply (rule runs_to_whileLoop_res'[
+               where R = "measure (\<lambda>(p, _). 5 - unat (fst (p :: 32 word \<times> 32 word)))"
+                 and I = "\<lambda>(add_size :: 32 word, idx :: 32 word) s'.
+                             1 \<le> unat add_size \<and> unat add_size \<le> 5 \<and>
+                             idx = 0xA3 + y * 0xC + (add_size - 1) * 3 \<and>
+                             code_tbl_matches_upto s' (163 + unat y * 12
+                                                      + (unat add_size - 1) * 3) \<and>
+                             near_arr_'' s' = near_arr_'' s \<and>
+                             same_arr_'' s' = same_arr_'' s \<and>
+                             code_tbl_built_'' s' = code_tbl_built_'' s"])
+               \<comment> \<open>wf\<close>
+            subgoal by simp
+               \<comment> \<open>Initial\<close>
+            subgoal by simp
+               \<comment> \<open>Exit middle loop\<close>
+            subgoal for x3 t3 sorry
+               \<comment> \<open>Body middle loop\<close>
+            subgoal for x3 t3 sorry
+            done
+          done
         done
          \<comment> \<open>Body Loop 3 (outer). First writes the size-0 entry at idx = 19+mode*16,
              then runs the inner size-loop for sizes 4..18.\<close>
