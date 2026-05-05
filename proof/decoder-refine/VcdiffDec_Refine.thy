@@ -1058,7 +1058,14 @@ lemma decode_address'_spec:
            apply simp
           apply (simp add: word_le_nat_alt)
           done
-        subgoal sorry \<comment> \<open>(6) addr_C — needs near_arr equality via cache_abs.\<close>
+        subgoal for a aa ba \<comment> \<open>(6) addr_C.\<close>
+          apply (insert cache_ok)
+          apply (simp only: unat_eq_0[symmetric] word_neq_0_conv)
+          by (clarsimp simp: decode_address_def Let_def s_near_def s_same_def
+                             word_less_nat_alt word_unat_eq_iff[of mode 1]
+                             cache_abs_def unat_sub word_le_nat_alt
+                             of_nat_add word_unat.Rep_inverse
+                             split: if_splits)
         subgoal \<comment> \<open>(7) unat ((np+1) mod 4) < s_near.\<close>
           by (simp add: s_near_def unat_mod)
         subgoal for a aa ba \<comment> \<open>(8) near_ptr.\<close>
@@ -1069,11 +1076,81 @@ lemma decode_address'_spec:
           apply (clarsimp simp: cache_abs_def s_near_def word_less_nat_alt
                                 unat_mod unat_word_ariths(1))
           done
-        subgoal sorry \<comment> \<open>(9) cache_abs — needs unat sum equals nat sum helper.\<close>
+        subgoal for a aa ba \<comment> \<open>(9) cache_abs after array writes.\<close>
+          apply (insert cache_ok cache_wf_ok)
+          apply (simp only: unat_eq_0[symmetric] word_neq_0_conv)
+          apply (clarsimp simp: decode_address_def Let_def s_near_def s_same_def
+                                word_less_nat_alt word_unat_eq_iff[of mode 1]
+                                split: if_splits)
+            \<comment> \<open>Derive key facts step by step.\<close>
+          apply (subgoal_tac "unat (mode - 2) = unat mode - 2")
+           prefer 2 apply (simp add: unat_sub word_le_nat_alt)
+          apply (subgoal_tac "unat mode - 2 < s_near")
+           prefer 2 apply (simp add: s_near_def)
+          apply (subgoal_tac "near_arr_'' s.[unat mode - 2]
+                              = word_of_nat (near c ! (unat mode - 2))")
+           prefer 2 apply (simp add: cache_abs_def)
+          apply (subgoal_tac "near c ! (unat mode - 2) < 2 ^ 32")
+           prefer 2 apply (simp add: cache_wf_def)
+          apply (subgoal_tac "unat (near_arr_'' s.[unat mode - 2]) = near c ! (unat mode - 2)")
+           prefer 2 apply (simp add: unat_of_nat_eq)
+          apply (subgoal_tac "unat (near_arr_'' s.[unat mode - 2] + val_C v)
+                              = near c ! (unat mode - 2) + unat (val_C v)")
+           prefer 2
+           apply (subst unat_add_lem[THEN iffD1])
+            apply simp
+           apply simp
+          apply (subgoal_tac "near c ! (unat mode - 2) + unat (val_C v)
+                              = unat (near_arr_'' s.[unat mode - 2] + val_C v)")
+           prefer 2 apply (rule sym, assumption)
+          apply (erule ssubst)
+          apply simp
+          apply (rule cache_abs_update[OF cache_ok])
+          using cache_ok apply (simp add: cache_abs_def s_near_def
+                                          word_less_nat_alt)
+          done
         done
       done
-   (* Mode SAME (6..8): single byte index into same_arr — TODO. *)
-   subgoal sorry
+   (* Mode SAME (6..8): single byte index into same_arr. *)
+   subgoal for x
+     apply runs_to_vcg
+     apply (cases "pos < addr_end")
+       \<comment> \<open>pos < addr_end: read_byte' returns a valid byte.\<close>
+      subgoal
+        apply (rule exI[where x = "pr_t_C (pos + 1)
+                                           (UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p uint pos)))
+                                           VCD_OK"])
+        apply (rule conjI)
+         subgoal
+           apply (subst read_byte'_spec)
+            apply (rule impI)
+            apply (rule buf_validD[OF buf_ok, of "unat pos", simplified uint_nat[symmetric]])
+            apply (simp add: word_less_nat_alt)
+           apply simp
+           done
+        apply runs_to_vcg
+          \<comment> \<open>4 subgoals: slot < 0x300, np_in < 4, addr mod 0x300 < 0x300, post.\<close>
+        subgoal \<comment> \<open>(1) slot < 0x300 — TODO: 32-bit wrapping arithmetic.\<close>
+          sorry
+        subgoal \<comment> \<open>(2) np_in < 4.\<close>
+          using cache_ok
+          by (simp add: cache_abs_def s_near_def word_less_nat_alt)
+        subgoal \<comment> \<open>(3) addr mod 0x300 < 0x300.\<close>
+          by (simp add: word_mod_less_divisor)
+        subgoal \<comment> \<open>(4) postcondition.\<close>
+          sorry
+        done
+      \<comment> \<open>pos \<ge> addr_end: read_byte' returns TRUNC. decode_address returns None
+          (varint/byte-read fails). Throw VCD_ERR_TRUNC.\<close>
+     subgoal
+       apply (rule exI[where x = "pr_t_C pos 0 VCD_ERR_TRUNC"])
+       apply (rule conjI)
+        subgoal by (subst read_byte'_spec[of pos addr_end s patch]; simp)
+       apply runs_to_vcg
+       by (clarsimp simp: decode_address_def Let_def s_near_def s_same_def
+                          word_less_nat_alt word_le_nat_alt
+                          split: list.splits if_splits)
+     done
   done
 
 (* ---------- vcdiff_decode main refinement (TODO) ---------- *)
