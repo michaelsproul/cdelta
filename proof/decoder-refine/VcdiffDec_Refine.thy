@@ -654,40 +654,427 @@ lemma read_varint'_spec:
   combined with a functional relation over code_tbl_'' s'.
 *)
 
-(* ---------- decode_address refinement (TODO) ---------- *)
+(*
+  Helper: if a word pos satisfies pos \<le> len and unat pos = unat len - k,
+  then pos = len - word_of_nat k.
+*)
+lemma word_eq_sub_of_nat:
+  fixes pos len :: "'a::len word"
+  assumes "pos \<le> len"
+      and "unat pos = unat len - k"
+      and "k \<le> unat len"
+  shows "pos = len - of_nat k"
+proof -
+  have k_lt: "k < 2 ^ LENGTH('a)"
+    using assms(3) unat_lt2p[of len] by (simp add: less_le)
+  have unat_k: "unat (of_nat k :: 'a word) = k"
+    using k_lt by (simp add: unat_of_nat_eq)
+  have "unat (len - of_nat k) = unat len - unat (of_nat k :: 'a word)"
+    using assms(3) unat_k
+    by (simp add: unat_sub word_le_nat_alt)
+  also have "\<dots> = unat len - k" by (simp add: unat_k)
+  also have "\<dots> = unat pos" using assms(2) by simp
+  finally show ?thesis by (metis word_unat_eq_iff)
+qed
 
 (*
-  Hoare-triple contract for decode_address'. Mirrors the pure
-  decode_address in AddressCache.thy. Requires a `cache_abstraction`
-  predicate relating near_arr + same_arr + near_ptr record field to
-  the spec's `cache` record.
+  AutoCorres lifts `near_arr` / `same_arr` as record fields of
+  `lifted_globals`, of array type. They are indexed via `.[unat i]`
+  (the Arrays.index abbreviation `arr.[n]`). No heap-pointer
+  validity is required — the arrays are part of the state record.
 
-  Sketch:
-    cache_abs s c near_ptr \<equiv>
-       (\<forall>i<s_near. heap_w32 s (near_arr + int i) = of_nat (near c ! i)) \<and>
-       (\<forall>i<same_buckets. heap_w32 s (same_arr + int i) = of_nat (same c ! i))
+  The pure spec models them as nat lists. cache_abs relates the two:
+    - The `near_ptr` is the C record's `near_ptr_C` field value,
+      supplied by the caller of decode_address (passed in as a
+      parameter, not a global).
+    - near_arr_'' s has length 4; same_arr_'' s has length 768
+      (statically, from the Arrays.array index type).
 
-  Contract:
-    {{ buf_valid ... ; mode \<le> 8; cache_abs s c near_ptr; addr_cache_ok c }}
-      decode_address' patch addr_end pos here mode near_ptr
-    {{ \<lambda>r s'. case r of
-          Result ar \<Rightarrow>
-             case decode_address c (unat mode) (unat here)
-                     (drop (unat pos) (heap_bytes s patch (unat addr_end)))
-             of Some (addr, rest, c') \<Rightarrow>
-                  ar_t_C.pos_C ar = addr_end - of_nat (length rest)
-                  \<and> ar_t_C.addr_C ar = of_nat addr
-                  \<and> cache_abs s' c' (ar_t_C.near_ptr_C ar)
-              | None \<Rightarrow> False
-        | Exn e \<Rightarrow> ar_t_C.err_C e \<noteq> 0 \<and> s' = s }}
-
-  The `finally` structure turns the "normal" flow into a throw that
-  carries the final ar_t_C with err = 0, so the postcondition inverts
-  Result/Exn compared to what it might naively look like.
-
-  Builds on: read_byte'_spec, read_varint'_bounded (and eventually
-  read_varint'_spec for full functional correctness).
+  Under cache_abs, the `near c` and `same c` lists coincide with
+  the array contents once coerced to nat.
 *)
+
+definition cache_abs :: "lifted_globals \<Rightarrow> cache \<Rightarrow> 32 word \<Rightarrow> bool" where
+  "cache_abs s c np =
+     (length (near c) = s_near \<and>
+      length (same c) = same_buckets \<and>
+      unat np < s_near \<and>
+      near_ptr c = unat np \<and>
+      (\<forall>i < s_near. near_arr_'' s .[i] = of_nat (near c ! i)) \<and>
+      (\<forall>i < same_buckets. same_arr_'' s .[i] = of_nat (same c ! i)))"
+
+(*
+  Well-formedness of a cache: entries all fit in 32 bits, so nat/word
+  round-trip doesn't lose information. Needed when writing addr back
+  into the array and matching the pure `cache_update`.
+*)
+definition cache_wf :: "cache \<Rightarrow> bool" where
+  "cache_wf c =
+     (length (near c) = s_near \<and>
+      length (same c) = same_buckets \<and>
+      near_ptr c < s_near \<and>
+      (\<forall>i < s_near. near c ! i < 2 ^ 32) \<and>
+      (\<forall>i < same_buckets. same c ! i < 2 ^ 32))"
+
+lemma cache_abs_wf:
+  assumes "cache_abs s c np"
+  shows "length (near c) = s_near
+       \<and> length (same c) = same_buckets
+       \<and> near_ptr c < s_near"
+  using assms
+  by (auto simp add: cache_abs_def word_less_nat_alt s_near_def)
+
+(*
+  Mirror for the pure cache_update. Writing `addr` at slot `np` of
+  near_arr and at `addr mod same_buckets` of same_arr preserves cache_abs.
+
+  Parameters tracked: new near_ptr becomes (np + 1) mod 4 which is
+  (near_ptr c + 1) mod s_near by cache_abs.
+*)
+lemma cache_abs_update:
+  assumes abs: "cache_abs s c np"
+      and np_lt: "np < 4"
+  shows "cache_abs
+           (same_arr_''_update
+              (\<lambda>a. Arrays.update a (unat (w mod 0x300 :: 32 word)) w)
+              (near_arr_''_update
+                 (\<lambda>a. Arrays.update a (unat np) w)
+                 s))
+           (cache_update c (unat w))
+           ((np + 1) mod 4)"
+proof -
+  let ?sb = "same_buckets"
+  let ?addr = "unat w"
+  let ?slot_w = "w mod 0x300 :: 32 word"
+  let ?slot_n = "unat ?slot_w"
+  let ?s' = "same_arr_''_update (\<lambda>a. Arrays.update a ?slot_n w)
+               (near_arr_''_update (\<lambda>a. Arrays.update a (unat np) w) s)"
+  let ?c' = "cache_update c ?addr"
+  let ?np' = "(np + 1) mod (4 :: 32 word)"
+
+  have len_near: "length (near c) = s_near" using abs cache_abs_def by auto
+  have len_same: "length (same c) = ?sb" using abs cache_abs_def by auto
+  have np_eq: "unat np = near_ptr c" using abs cache_abs_def by auto
+  have np_lt_sn: "unat np < s_near" using abs cache_abs_def by auto
+  have s_near_4: "s_near = 4" by (simp add: s_near_def)
+  have sb_768: "?sb = 768" by (simp add: same_buckets_def s_same_def)
+  have near_i: "\<forall>i. i < s_near \<longrightarrow> near_arr_'' s .[i] = of_nat (near c ! i)"
+    using abs cache_abs_def by auto
+  have same_i: "\<forall>i. i < ?sb \<longrightarrow> same_arr_'' s .[i] = of_nat (same c ! i)"
+    using abs cache_abs_def by auto
+  have w_as_of_nat: "(of_nat ?addr :: 32 word) = w" by simp
+
+  \<comment> \<open>New near_ptr.\<close>
+  have np_plus_1: "unat (np + 1) = unat np + 1"
+    using np_lt unat_x_plus_1 by blast
+  have np'_eq: "unat ?np' = (unat np + 1) mod 4"
+    by (simp add: unat_mod np_plus_1)
+  have np'_lt_sn: "unat ?np' < s_near" using np'_eq s_near_4 by simp
+  have np'_eq_nearptr: "near_ptr ?c' = unat ?np'"
+    by (simp add: cache_update_def np'_eq s_near_4 np_eq)
+
+  \<comment> \<open>New cache field lengths.\<close>
+  have near_len_new: "length (near ?c') = s_near"
+    by (simp add: cache_update_def len_near)
+  have same_len_new: "length (same ?c') = ?sb"
+    by (simp add: cache_update_def len_same)
+
+  \<comment> \<open>Near array contents after update.\<close>
+  have near_slot_lt: "unat np < CARD(4)" using np_lt_sn s_near_4 by simp
+  have near_arr_new:
+    "near_arr_'' ?s' = Arrays.update (near_arr_'' s) (unat np) w"
+    by simp
+  have near_contents:
+    "\<forall>i. i < s_near \<longrightarrow> near_arr_'' ?s' .[i] = of_nat (near ?c' ! i)"
+  proof (intro allI impI)
+    fix i assume i_lt: "i < s_near"
+    have i_lt_4: "i < CARD(4)" using i_lt s_near_4 by simp
+    show "near_arr_'' ?s' .[i] = of_nat (near ?c' ! i)"
+    proof (cases "i = unat np")
+      case True
+      have "near_arr_'' ?s' .[i] = w"
+        using True near_slot_lt near_arr_new
+        by (simp add: Arrays.index_update i_lt_4)
+      also have "\<dots> = of_nat (near ?c' ! i)"
+        using True np_eq len_near np_lt_sn
+        by (simp add: cache_update_def nth_list_update_eq)
+      finally show ?thesis .
+    next
+      case False
+      have "near_arr_'' ?s' .[i] = near_arr_'' s .[i]"
+        using False near_arr_new i_lt_4
+        by (simp add: index_update2)
+      also have "\<dots> = of_nat (near c ! i)"
+        using i_lt near_i by auto
+      also have "\<dots> = of_nat (near ?c' ! i)"
+        using False np_eq
+        by (simp add: cache_update_def nth_list_update_neq)
+      finally show ?thesis .
+    qed
+  qed
+
+  \<comment> \<open>Same array contents after update.\<close>
+  have slot_w_eq_n: "?slot_n = ?addr mod ?sb"
+    by (simp add: unat_mod sb_768)
+  have slot_n_lt_sb: "?slot_n < ?sb"
+    by (simp add: slot_w_eq_n sb_768)
+  have slot_n_lt_768: "?slot_n < CARD(768)"
+    using slot_n_lt_sb sb_768 by simp
+  have same_arr_new:
+    "same_arr_'' ?s' = Arrays.update (same_arr_'' s) ?slot_n w"
+    by simp
+  have same_contents:
+    "\<forall>i. i < ?sb \<longrightarrow> same_arr_'' ?s' .[i] = of_nat (same ?c' ! i)"
+  proof (intro allI impI)
+    fix i assume i_lt: "i < ?sb"
+    have i_lt_768: "i < CARD(768)" using i_lt sb_768 by simp
+    show "same_arr_'' ?s' .[i] = of_nat (same ?c' ! i)"
+    proof (cases "i = ?slot_n")
+      case True
+      have "same_arr_'' ?s' .[i] = w"
+        using True slot_n_lt_768 same_arr_new
+        by (simp add: index_update)
+      also have "\<dots> = of_nat (same ?c' ! i)"
+        using True slot_w_eq_n len_same slot_n_lt_sb
+        by (simp add: cache_update_def nth_list_update_eq)
+      finally show ?thesis .
+    next
+      case False
+      have "same_arr_'' ?s' .[i] = same_arr_'' s .[i]"
+        using False same_arr_new slot_n_lt_768 i_lt_768
+        by (simp add: index_update2)
+      also have "\<dots> = of_nat (same c ! i)"
+        using i_lt same_i by auto
+      also have "\<dots> = of_nat (same ?c' ! i)"
+        using False slot_w_eq_n
+        by (simp add: cache_update_def nth_list_update_neq)
+      finally show ?thesis .
+    qed
+  qed
+
+  show ?thesis
+    unfolding cache_abs_def
+    using near_len_new same_len_new np'_lt_sn np'_eq_nearptr
+          near_contents same_contents
+    by simp
+qed
+
+(*
+  Hoare-triple contract for decode_address'. Follows the pure
+  `decode_address` from AddressCache.thy. The AutoCorres lift uses
+  `finally`, turning the success path into a throw carrying the
+  final ar_t_C. So in the outer runs_to, a Result in fact means
+  "control falls through without throwing" = the final mode 9+
+  rejection path, and Exn carries the outcome (both success with
+  err = 0 and failure with err \<noteq> 0).
+
+  Precondition:
+    - buf_valid on the patch buffer up to unat addr_end
+    - pos \<le> addr_end
+    - cache_abs s c np_in  (the np_in arg is passed via near_ptr parameter)
+    - cache_wf c
+    - unat mode < 9
+
+  Postcondition (inverts Result/Exn because of `finally`):
+    - s unchanged? NO — near_arr/same_arr are modified on success path.
+      Only other fields are preserved.
+    - If decode_address c (unat mode) (unat here) (drop (unat pos) bytes)
+        = Some (addr, rest, c'), then the Exn result is
+          ar_t_C (addr_end - of_nat (length rest)) (of_nat addr)
+                 (of_nat (near_ptr c')) 0
+        and s' satisfies cache_abs s' c' (of_nat (near_ptr c')).
+    - If it's None, then the Exn result has err \<noteq> 0.
+*)
+lemma decode_address'_spec:
+  assumes buf_ok: "buf_valid s patch (unat addr_end)"
+      and pos_ok: "pos \<le> addr_end"
+      and cache_ok: "cache_abs s c np_in"
+      and cache_wf_ok: "cache_wf c"
+      and mode_ok: "unat mode < 9"
+      and here_ok: "unat here < 2 ^ 32"
+  shows "decode_address' patch addr_end pos here mode np_in \<bullet> s
+           \<lbrace> \<lambda>r s'.
+              \<exists>ar. r = Result ar \<and>
+                   (let bytes = heap_bytes s patch (unat addr_end);
+                        decoded = decode_address c (unat mode) (unat here)
+                                    (drop (unat pos) bytes)
+                    in (case decoded of
+                          Some (addr, rest, c') \<Rightarrow>
+                            (if addr < 2 ^ 32
+                             then ar_t_C.err_C ar = 0 \<and>
+                                  ar_t_C.pos_C ar = addr_end - of_nat (length rest) \<and>
+                                  ar_t_C.addr_C ar = of_nat addr \<and>
+                                  unat (ar_t_C.near_ptr_C ar) < s_near \<and>
+                                  near_ptr c' = unat (ar_t_C.near_ptr_C ar) \<and>
+                                  cache_abs s' c' (ar_t_C.near_ptr_C ar)
+                             else True)
+                        | None \<Rightarrow> ar_t_C.err_C ar \<noteq> 0)) \<rbrace>"
+  unfolding decode_address'_def
+  apply runs_to_vcg
+  (* 5 subgoals: mode = 0, mode = 1, NEAR (2..5), SAME (6..8), and mode \<ge> 9.
+     The last is vacuous under mode_ok. *)
+      prefer 5
+      subgoal using mode_ok by (simp add: word_less_nat_alt)
+     (* Mode 0: varint(addr). *)
+     subgoal for x
+       apply (rule runs_to_weaken[OF read_varint'_spec[OF buf_ok pos_ok]])
+       apply (clarsimp split: option.splits)
+         \<comment> \<open>Goal 0a: varint error \<Longrightarrow> decode_address = None \<Longrightarrow> err \<noteq> 0.
+             Goal 0b: varint success, execute array writes + throw.\<close>
+       subgoal for v e
+         \<comment> \<open>varint None: decode_address c 0 _ bytes unfolds to varint_decode bytes = None.\<close>
+         apply (clarsimp simp: decode_address_def)
+         done
+       subgoal for v b
+         \<comment> \<open>varint Some (unat val, b): decode_address c 0 _ bytes
+             = Some (unat val, b, cache_update c (unat val)).\<close>
+         apply runs_to_vcg
+         subgoal \<comment> \<open>guard: np_in < 4. From cache_abs: unat np_in < s_near = 4.\<close>
+           using cache_ok
+           by (simp add: cache_abs_def s_near_def word_less_nat_alt)
+         subgoal \<comment> \<open>guard: val mod 0x300 < 0x300.\<close>
+           by (simp add: word_mod_less_divisor)
+         subgoal \<comment> \<open>(1) varint succeeded but decode_address = None \<Longrightarrow> contradiction.\<close>
+           by (simp add: decode_address_def)
+         subgoal for a aa ba \<comment> \<open>(2) pr_t_C.pos_C v = addr_end - of_nat (length aa).\<close>
+           apply (clarsimp simp: decode_address_def)
+           apply (rule word_eq_sub_of_nat[where k = "length aa"])
+             apply assumption
+            apply simp
+             \<comment> \<open>length aa \<le> unat addr_end:
+                 length aa \<le> length (drop (unat pos) bytes) = unat addr_end - unat pos.\<close>
+           apply (drule varint_decode_length)
+           apply (simp add: word_le_nat_alt)
+           done
+         subgoal for a aa ba \<comment> \<open>(3) val_C v = word_of_nat a where a = unat (val_C v).\<close>
+           apply (clarsimp simp add: decode_address_def)
+           done
+         subgoal for a aa ba \<comment> \<open>(4) unat ((np_in + 1) mod 4) < s_near.\<close>
+           by (simp add: s_near_def unat_mod)
+         subgoal for a aa ba \<comment> \<open>(5) near_ptr ba = unat (np_in + 1) mod 4.\<close>
+           apply (clarsimp simp: decode_address_def cache_update_def)
+           using cache_ok
+           apply (clarsimp simp: cache_abs_def s_near_def word_less_nat_alt
+                                 unat_mod unat_word_ariths(1))
+           done
+         subgoal for a aa ba \<comment> \<open>(6) cache_abs after array writes.\<close>
+           apply (clarsimp simp: decode_address_def)
+           apply (rule cache_abs_update[OF cache_ok])
+           using cache_ok apply (simp add: cache_abs_def s_near_def
+                                           word_less_nat_alt)
+           done
+         done
+       done
+     (* Mode 1: varint(here - addr). *)
+    subgoal for x
+      apply (rule runs_to_weaken[OF read_varint'_spec[OF buf_ok pos_ok]])
+      apply (clarsimp split: option.splits)
+      subgoal for v e
+        \<comment> \<open>varint error path: decode_address returns None for None varint.\<close>
+        by (clarsimp simp: decode_address_def)
+      subgoal for v b
+        apply runs_to_vcg
+           \<comment> \<open>9 subgoals: (1) contradict Some in the here<val path, (2) np_in<4,
+               (3) val mod 0x300, (4) contradict None in the here\<ge>val path,
+               (5) pos_C, (6) addr_C, (7) unat mod, (8) near_ptr, (9) cache_abs.\<close>
+        subgoal \<comment> \<open>(1) here < val_C v path, decode_address gave Some — contradiction.\<close>
+          by (clarsimp simp: decode_address_def word_less_nat_alt)
+        subgoal \<comment> \<open>(2) guard np_in < 4.\<close>
+          using cache_ok
+          by (simp add: cache_abs_def s_near_def word_less_nat_alt)
+        subgoal \<comment> \<open>(3) guard val mod 0x300.\<close>
+          by (simp add: word_mod_less_divisor)
+        subgoal \<comment> \<open>(4) \<not>here<val path, decode_address gave None — contradiction.\<close>
+          by (clarsimp simp: decode_address_def Let_def word_less_nat_alt)
+        subgoal for a aa ba \<comment> \<open>(5) pos_C.\<close>
+          apply (clarsimp simp: decode_address_def Let_def
+                                split: if_splits)
+          apply (rule word_eq_sub_of_nat[where k = "length aa"])
+            apply assumption
+           apply simp
+          apply (drule varint_decode_length, simp add: word_le_nat_alt)
+          done
+        subgoal for a aa ba \<comment> \<open>(6) addr_C = word_of_nat a where a = unat here - unat val_C.\<close>
+          by (clarsimp simp: decode_address_def Let_def word_less_nat_alt
+                             of_nat_diff[symmetric, where 'a = "32 word"]
+                             split: if_splits)
+        subgoal \<comment> \<open>(7) unat ((np_in + 1) mod 4) < s_near.\<close>
+          by (simp add: s_near_def unat_mod)
+        subgoal \<comment> \<open>(8) near_ptr.\<close>
+          apply (clarsimp simp: decode_address_def Let_def word_less_nat_alt
+                                split: if_splits)
+          using cache_ok
+          apply (clarsimp simp: cache_abs_def cache_update_def s_near_def
+                                unat_mod unat_word_ariths(1))
+          done
+        subgoal \<comment> \<open>(9) cache_abs after array writes.\<close>
+          apply (clarsimp simp: decode_address_def Let_def word_less_nat_alt
+                                split: if_splits)
+          apply (subst unat_sub[symmetric])
+           apply (simp add: word_le_nat_alt)
+          apply (rule cache_abs_update[OF cache_ok])
+          using cache_ok apply (simp add: cache_abs_def s_near_def
+                                          word_less_nat_alt)
+          done
+        done
+      done
+     (* Mode NEAR (2..5): near_arr[mode - 2] + varint. *)
+    subgoal for x
+      apply (rule runs_to_weaken[OF read_varint'_spec[OF buf_ok pos_ok]])
+      apply (clarsimp split: option.splits)
+      subgoal for v e
+        \<comment> \<open>varint error.\<close>
+        by (auto simp: decode_address_def s_near_def s_same_def
+                       word_less_nat_alt
+                 split: if_splits)
+      subgoal for v b
+        apply runs_to_vcg
+           \<comment> \<open>9 subgoals: guard mode-2<4, np<4, val mod, False on decode=None,
+               pos_C, addr_C, unat mod, near_ptr, cache_abs.\<close>
+        subgoal \<comment> \<open>(1) mode - 2 < 4.\<close>
+          apply (subgoal_tac "(2 :: 32 word) \<le> mode")
+           apply (simp add: word_less_nat_alt unat_sub)
+          apply (simp add: word_le_nat_alt)
+          apply (subgoal_tac "unat mode \<noteq> 0 \<and> unat mode \<noteq> 1")
+           apply arith
+          apply (simp add: unat_eq_0 word_unat_eq_iff[of mode 1])
+          done
+        subgoal \<comment> \<open>(2) np_in < 4.\<close>
+          using cache_ok
+          by (simp add: cache_abs_def s_near_def word_less_nat_alt)
+        subgoal \<comment> \<open>(3) val mod 0x300.\<close>
+          by (simp add: word_mod_less_divisor)
+        subgoal \<comment> \<open>(4) decode_address = None contradicts Some varint.\<close>
+          by (clarsimp simp: decode_address_def Let_def s_near_def s_same_def
+                             word_less_nat_alt unat_eq_0
+                             word_unat_eq_iff[of mode 1])
+        subgoal for a aa ba \<comment> \<open>(5) pos_C.\<close>
+          apply (frule varint_decode_length)
+          apply (clarsimp simp: decode_address_def Let_def s_near_def s_same_def
+                                word_less_nat_alt unat_eq_0
+                                word_unat_eq_iff[of mode 1])
+          apply (rule word_eq_sub_of_nat[where k = "length aa"])
+            apply assumption
+           apply simp
+          apply (simp add: word_le_nat_alt)
+          done
+        subgoal sorry \<comment> \<open>(6) addr_C — needs near_arr equality via cache_abs.\<close>
+        subgoal \<comment> \<open>(7) unat ((np+1) mod 4) < s_near.\<close>
+          by (simp add: s_near_def unat_mod)
+        subgoal for a aa ba \<comment> \<open>(8) near_ptr.\<close>
+          apply (clarsimp simp: decode_address_def Let_def s_near_def s_same_def
+                                word_less_nat_alt cache_update_def unat_eq_0
+                                word_unat_eq_iff[of mode 1])
+          using cache_ok
+          apply (clarsimp simp: cache_abs_def s_near_def word_less_nat_alt
+                                unat_mod unat_word_ariths(1))
+          done
+        subgoal sorry \<comment> \<open>(9) cache_abs — needs unat sum equals nat sum helper.\<close>
+        done
+      done
+   (* Mode SAME (6..8): single byte index into same_arr — TODO. *)
+   subgoal sorry
+  done
 
 (* ---------- vcdiff_decode main refinement (TODO) ---------- *)
 

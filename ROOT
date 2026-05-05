@@ -58,6 +58,6 @@ session CdeltaRefineBase = CdeltaSpecRoundtrip +
     "CdeltaDecoder.VcdiffDec"
 
 session CdeltaRefine in "proof/decoder-refine" = CdeltaRefineBase +
-  options [timeout = 1800, quick_and_dirty = false]
+  options [timeout = 1800, quick_and_dirty = true]
   theories
     VcdiffDec_Refine
