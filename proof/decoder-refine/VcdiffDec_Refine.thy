@@ -1555,8 +1555,26 @@ lemma build_code_table'_spec:
             subgoal for op
               by (simp add: arr_fupdate_other code_tbl_matches_upto_def)
             done
-             \<comment> \<open>Exit\<close>
-          subgoal for x t''' sorry
+             \<comment> \<open>Exit inner loop.\<close>
+          subgoal for x t'''
+            apply (cases x, simp)
+            apply runs_to_vcg
+            apply clarsimp
+            apply (subgoal_tac "unat y < 9")
+             prefer 2 apply (simp add: word_less_nat_alt)
+            apply (subgoal_tac "unat (y + 1) = unat y + 1")
+             prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+            apply (subgoal_tac "unat b = 19")
+             prefer 2 apply (simp add: word_le_nat_alt word_less_nat_alt)
+            apply (intro conjI)
+               subgoal by simp
+              subgoal
+                apply (subst word_unat_eq_iff)
+                apply simp
+                done
+             subgoal by clarsimp
+            subgoal by (simp add: word_less_nat_alt)
+            done
              \<comment> \<open>Inner body: size \<to> size+1, write next COPY entry.\<close>
           subgoal for x t'''
             apply clarsimp
