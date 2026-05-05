@@ -1543,8 +1543,27 @@ lemma build_code_table'_spec:
             subgoal by simp
                \<comment> \<open>Initial\<close>
             subgoal by simp
-               \<comment> \<open>Exit middle loop\<close>
-            subgoal for x3 t3 sorry
+               \<comment> \<open>Exit middle loop: add_size = 5, idx = 163+12y+12. After return (idx, y+1).\<close>
+            subgoal for x3 t3
+              apply (cases x3, simp)
+              apply runs_to_vcg
+              subgoal for ab
+                apply clarsimp
+                apply (subgoal_tac "unat y < 6 \<and> unat (y + 1) = unat y + 1")
+                 prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+                apply (erule conjE)
+                apply (subgoal_tac "unat ab = 5")
+                 prefer 2 apply (simp add: word_le_nat_alt word_less_nat_alt)
+                apply (intro conjI)
+                   subgoal by simp
+                  subgoal
+                    apply (rule word_unat.Rep_inject[THEN iffD1])
+                    apply (simp add: unat_word_ariths(2))
+                    done
+                 subgoal by clarsimp
+                subgoal by (simp add: word_less_nat_alt)
+                done
+              done
                \<comment> \<open>Body middle loop\<close>
             subgoal for x3 t3 sorry
             done
