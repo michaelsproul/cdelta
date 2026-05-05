@@ -1468,13 +1468,69 @@ lemma build_code_table'_spec:
                           entry_of_row_def byte_to_hi_def run_hi_def noop_hi_def
                           arr_fupdate_same arr_fupdate_other
                           word_less_nat_alt all_zero_row_def)
-       \<comment> \<open>Exit Loop 2. At this point matches_upto t' 19 holds.
-           The remaining loops (COPY, ADD+COPY 0..5, ADD+COPY 6..8,
-           COPY+ADD) extend matches_upto to 163, 235, 247, 256
-           respectively, then code_tbl_built \<leftarrow> 1. TODO: lengthy but
-           mechanical — each nested loop uses the same runs_to_whileLoop_res'
-           pattern as Loop 2. Omitted for now.\<close>
-    subgoal for a t' sorry
+       \<comment> \<open>Exit Loop 2. matches_upto t' 19. Continue with Loops 3..6 + final modify.\<close>
+    subgoal for a t'
+      apply clarsimp
+      apply runs_to_vcg
+      apply (rule runs_to_whileLoop_res'[
+         where R = "measure (\<lambda>(p, _). 9 - unat (snd (p :: 32 word \<times> 32 word)))"
+           and I = "\<lambda>(idx :: 32 word, mode :: 32 word) s'.
+                       unat mode \<le> 9 \<and>
+                       idx = 19 + mode * 16 \<and>
+                       code_tbl_matches_upto s' (19 + unat mode * 16) \<and>
+                       near_arr_'' s' = near_arr_'' s \<and>
+                       same_arr_'' s' = same_arr_'' s \<and>
+                       code_tbl_built_'' s' = code_tbl_built_'' s"])
+         \<comment> \<open>wf R\<close>
+      subgoal by simp
+         \<comment> \<open>Initial: I (0x13, 0) s'. matches_upto s' 19 follows from
+             matches_upto t' (Suc (unat a)) and a forced to value 18 at exit.\<close>
+      subgoal
+        apply clarsimp
+        apply (subgoal_tac "unat a = 18")
+         prefer 2 apply (simp add: word_le_nat_alt word_less_nat_alt)
+        apply simp
+        done
+         \<comment> \<open>Exit Loop 3\<close>
+      subgoal for x t'' sorry
+         \<comment> \<open>Body Loop 3 (outer). First writes the size-0 entry at idx = 19+mode*16,
+             then runs the inner size-loop for sizes 4..18.\<close>
+      subgoal for x t''
+        apply clarsimp
+        apply runs_to_vcg
+           \<comment> \<open>Guard idx < 0x100: true since idx = 19 + mode*16 and mode \<le> 8.\<close>
+        subgoal for y
+          apply (subgoal_tac "unat y < 9")
+           prefer 2 apply (simp add: word_less_nat_alt)
+          apply (simp add: word_less_nat_alt unat_word_ariths(1)
+                           unat_word_ariths(2))
+          done
+           \<comment> \<open>Inner loop: sizes 4..18 write 15 more entries.
+               Initial (idx, size) = (20+16*y, 4). Final (35+16*y, 19).\<close>
+        subgoal for y
+          apply (rule runs_to_whileLoop_res'[
+             where R = "measure (\<lambda>(p, _). 19 - unat (snd (p :: 32 word \<times> 32 word)))"
+               and I = "\<lambda>(idx :: 32 word, size :: 32 word) s'.
+                           4 \<le> unat size \<and> unat size \<le> 19 \<and>
+                           idx = (20 + y * 16) + (size - 4) \<and>
+                           code_tbl_matches_upto s' (20 + unat y * 16 + (unat size - 4)) \<and>
+                           near_arr_'' s' = near_arr_'' s \<and>
+                           same_arr_'' s' = same_arr_'' s \<and>
+                           code_tbl_built_'' s' = code_tbl_built_'' s"])
+             \<comment> \<open>wf R\<close>
+          subgoal by simp
+             \<comment> \<open>Initial I (20+16*y, 4): need matches_upto 20+16*y.
+                 After outer body modifies, row (19+16*y) is written with (3, 0, y)
+                 matching default_entry (19+16*y) = (copy_hi 0 y, noop_hi).
+                 So matches_upto extends from 19+16*y to 20+16*y.\<close>
+          subgoal sorry
+             \<comment> \<open>Exit\<close>
+          subgoal for x t''' sorry
+             \<comment> \<open>Inner body: size \<to> size+1, write next COPY entry.\<close>
+          subgoal for x t''' sorry
+          done
+        done
+      done
        \<comment> \<open>Body step for Loop 2.\<close>
     subgoal for a t'
       apply clarsimp
