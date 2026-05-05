@@ -1230,7 +1230,71 @@ lemma decode_address'_spec:
         subgoal \<comment> \<open>(3) addr mod 0x300 < 0x300.\<close>
           by (simp add: word_mod_less_divisor)
         subgoal \<comment> \<open>(4) postcondition.\<close>
-          sorry
+          apply (insert cache_ok cache_wf_ok)
+          apply (subgoal_tac "unat mode \<in> {6, 7, 8}")
+           prefer 2
+           apply (simp add: unat_eq_0[symmetric] word_neq_0_conv
+                            word_less_nat_alt
+                            word_unat_eq_iff[of mode 1])
+           apply arith
+            \<comment> \<open>Extract head of drop.\<close>
+          apply (subgoal_tac "drop (unat pos) (heap_bytes s patch (unat addr_end))
+                              = heap_w8 s (patch +\<^sub>p uint pos)
+                                # drop (Suc (unat pos)) (heap_bytes s patch (unat addr_end))")
+           prefer 2
+           apply (simp only: uint_nat)
+           apply (rule heap_bytes_drop_Cons)
+           apply (simp add: word_less_nat_alt)
+            \<comment> \<open>Unfold decode_address.\<close>
+          apply (simp add: decode_address_def Let_def s_near_def s_same_def
+                           word_less_nat_alt)
+            \<comment> \<open>Rewrite unat slot_w = (unat mode - 6) * 256 + unat byte.\<close>
+          apply (subgoal_tac
+             "unat (0xFFFFFA00 + mode * 0x100
+                    + UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p uint pos)))
+              = (unat mode - 6) * 256 + unat (heap_w8 s (patch +\<^sub>p uint pos))")
+           prefer 2
+           apply (rule unat_same_slot_word)
+           apply fastforce
+            \<comment> \<open>Using cache_abs: same_arr_'' s.[slot_n] = of_nat (same c ! slot_n).\<close>
+          apply (subgoal_tac "(unat mode - 6) * 256
+                              + unat (heap_w8 s (patch +\<^sub>p uint pos))
+                              < same_buckets")
+           prefer 2
+           apply (simp add: same_buckets_def s_same_def)
+           apply (subgoal_tac "unat (heap_w8 s (patch +\<^sub>p uint pos)) < 256")
+            apply arith
+           using unat_lt2p[of "heap_w8 s (patch +\<^sub>p uint pos)"] apply simp
+          apply (subgoal_tac
+             "same_arr_'' s.[(unat mode - 6) * 256
+                             + unat (heap_w8 s (patch +\<^sub>p uint pos))]
+              = word_of_nat (same c ! ((unat mode - 6) * 256
+                                       + unat (heap_w8 s (patch +\<^sub>p uint pos))))")
+           prefer 2
+           apply (simp add: cache_abs_def)
+            \<comment> \<open>Now simp: unat slot_w = slot_n lets same_arr_'' s.[unat slot_w] reduce.\<close>
+          apply simp
+          apply (rule impI)
+            \<comment> \<open>Split into 3 conjuncts.\<close>
+          apply (rule conjI)
+           apply (simp add: unat_mod)
+          apply (rule conjI)
+           apply (simp add: cache_update_def s_near_def cache_abs_def unat_mod
+                            unat_word_ariths(1))
+            \<comment> \<open>cache_abs after array writes. Apply cache_abs_update with
+                w = word_of_nat (same c ! slot_n). Use `subst` targeting the 2nd arg
+                of cache_update on the conclusion.\<close>
+          apply (rule subst[where P = "\<lambda>n. cache_abs _ (cache_update _ n) _",
+                   of "unat ((word_of_nat :: nat \<Rightarrow> 32 word)
+                              (same c ! ((unat mode - 6) * 256
+                                        + unat (heap_w8 s (patch +\<^sub>p uint pos)))))"
+                      "same c ! ((unat mode - 6) * 256
+                                 + unat (heap_w8 s (patch +\<^sub>p uint pos)))"])
+           apply (simp add: unat_of_nat_eq cache_wf_def)
+          apply (rule cache_abs_update[OF cache_ok])
+          using cache_ok apply (simp add: cache_abs_def s_near_def
+                                          word_less_nat_alt)
+          done
         done
       \<comment> \<open>pos \<ge> addr_end: read_byte' returns TRUNC. decode_address returns None
           (varint/byte-read fails). Throw VCD_ERR_TRUNC.\<close>
