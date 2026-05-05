@@ -1432,7 +1432,71 @@ lemma build_code_table'_spec:
                        near_arr_'' s' = near_arr_'' s \<and>
                        same_arr_'' s' = same_arr_'' s \<and>
                        code_tbl_built_'' s' = code_tbl_built_'' s"])
-  sorry
+     \<comment> \<open>wf R\<close>
+  subgoal by simp
+     \<comment> \<open>Initial I(0, s)\<close>
+  subgoal by simp
+     \<comment> \<open>Exit: Loop 1 done. Now continue with the rest of build_code_table'
+         — the remaining 5 whileLoops (ADD, COPY, ADD+COPY 0..5, ADD+COPY 6..8,
+         COPY+ADD) plus the final code_tbl_built := 1.
+
+         Strategy: each subsequent loop writes a contiguous range of
+         positions. Use runs_to_whileLoop_res' per loop with an invariant
+         tracking "already-written positions match default_entry on that
+         range, other positions unchanged from entering this loop".\<close>
+  subgoal for a t
+    apply clarsimp
+    apply runs_to_vcg
+    sorry
+     \<comment> \<open>Body step: 3 subgoals (unat bound, invariant preservation, measure).\<close>
+  subgoal for a t
+    apply runs_to_vcg
+    subgoal by (simp add: word_less_nat_alt unat_word_ariths(1))
+    subgoal premises prems for j
+    proof (cases "j < unat a")
+      case True
+      have j_lt: "j < CARD(256)" using True prems by (simp add: word_less_nat_alt)
+      have "fupdate (unat a) (\<lambda>v. Arrays.update v 5 0)
+             (fupdate (unat a) (\<lambda>v. Arrays.update v 4 0)
+              (fupdate (unat a) (\<lambda>v. Arrays.update v 3 0)
+               (fupdate (unat a) (\<lambda>v. Arrays.update v 2 0)
+                (fupdate (unat a) (\<lambda>v. Arrays.update v (Suc 0) 0)
+                 (fupdate (unat a) (\<lambda>v. Arrays.update v 0 0)
+                  (code_tbl_'' t)))))) .[j]
+           = code_tbl_'' t .[j]"
+        using True j_lt by (simp add: arr_fupdate_other)
+      thus ?thesis using prems True by simp
+    next
+      case False
+      have unat_a1: "unat (a + 1) = unat a + 1"
+        using prems by (simp add: unat_word_ariths(1) word_less_nat_alt)
+      have j_eq: "j = unat a" using False prems unat_a1 by simp
+      have unat_a_lt: "unat a < 256" using prems by (simp add: word_less_nat_alt)
+      have row_eq: "fupdate (unat a) (\<lambda>v. Arrays.update v 5 0)
+                     (fupdate (unat a) (\<lambda>v. Arrays.update v 4 0)
+                      (fupdate (unat a) (\<lambda>v. Arrays.update v 3 0)
+                       (fupdate (unat a) (\<lambda>v. Arrays.update v 2 0)
+                        (fupdate (unat a) (\<lambda>v. Arrays.update v (Suc 0) 0)
+                         (fupdate (unat a) (\<lambda>v. Arrays.update v 0 0)
+                          (code_tbl_'' t)))))) .[unat a]
+                   = Arrays.update (Arrays.update (Arrays.update (Arrays.update
+                      (Arrays.update (Arrays.update (code_tbl_'' t .[unat a])
+                       0 0) (Suc 0) 0) 2 0) 3 0) 4 0) 5 0"
+        using unat_a_lt by (simp add: arr_fupdate_same)
+      have "all_zero_row (fupdate (unat a) (\<lambda>v. Arrays.update v 5 0)
+                           (fupdate (unat a) (\<lambda>v. Arrays.update v 4 0)
+                            (fupdate (unat a) (\<lambda>v. Arrays.update v 3 0)
+                             (fupdate (unat a) (\<lambda>v. Arrays.update v 2 0)
+                              (fupdate (unat a) (\<lambda>v. Arrays.update v (Suc 0) 0)
+                               (fupdate (unat a) (\<lambda>v. Arrays.update v 0 0)
+                                (code_tbl_'' t))))))
+                           .[unat a])"
+        using row_eq zero_all_slots by simp
+      thus ?thesis using j_eq by simp
+    qed
+    subgoal by (simp add: word_less_nat_alt unat_word_ariths(1))
+    done
+  done
 
 (* ---------- vcdiff_decode main refinement (TODO) ---------- *)
 
