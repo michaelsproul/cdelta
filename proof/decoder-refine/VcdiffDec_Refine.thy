@@ -1468,7 +1468,12 @@ lemma build_code_table'_spec:
                           entry_of_row_def byte_to_hi_def run_hi_def noop_hi_def
                           arr_fupdate_same arr_fupdate_other
                           word_less_nat_alt all_zero_row_def)
-       \<comment> \<open>Exit Loop 2 \<Longrightarrow> continue with Loops 3..6 + final modify. TODO.\<close>
+       \<comment> \<open>Exit Loop 2. At this point matches_upto t' 19 holds.
+           The remaining loops (COPY, ADD+COPY 0..5, ADD+COPY 6..8,
+           COPY+ADD) extend matches_upto to 163, 235, 247, 256
+           respectively, then code_tbl_built \<leftarrow> 1. TODO: lengthy but
+           mechanical — each nested loop uses the same runs_to_whileLoop_res'
+           pattern as Loop 2. Omitted for now.\<close>
     subgoal for a t' sorry
        \<comment> \<open>Body step for Loop 2.\<close>
     subgoal for a t'
