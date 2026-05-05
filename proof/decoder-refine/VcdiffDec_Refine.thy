@@ -1558,7 +1558,69 @@ lemma build_code_table'_spec:
              \<comment> \<open>Exit\<close>
           subgoal for x t''' sorry
              \<comment> \<open>Inner body: size \<to> size+1, write next COPY entry.\<close>
-          subgoal for x t''' sorry
+          subgoal for x t'''
+            apply clarsimp
+            apply runs_to_vcg
+              \<comment> \<open>(1) guard\<close>
+            subgoal for ya
+              apply (subgoal_tac "unat ya \<le> 18 \<and> unat y \<le> 8")
+               prefer 2 apply (simp add: word_less_nat_alt)
+              by (simp add: word_less_nat_alt unat_word_ariths(1) unat_word_ariths(2))
+              \<comment> \<open>(2) 4 \<le> unat (ya + 1)\<close>
+            subgoal for ya
+              apply (subgoal_tac "unat ya < 19")
+               prefer 2 apply (simp add: word_less_nat_alt)
+              by (simp add: unat_word_ariths(1) word_less_nat_alt)
+              \<comment> \<open>(3) unat (ya + 1) \<le> 19\<close>
+            subgoal for ya
+              apply (subgoal_tac "unat ya < 19")
+               prefer 2 apply (simp add: word_less_nat_alt)
+              by (simp add: unat_word_ariths(1) word_less_nat_alt)
+              \<comment> \<open>(4) matches_upto preservation\<close>
+            subgoal for ya
+              apply (subgoal_tac "unat ya \<le> 18 \<and> 4 \<le> unat ya \<and> unat y \<le> 8")
+               prefer 2 apply (simp add: word_less_nat_alt)
+              apply (subgoal_tac "unat (0x10 + (y * 0x10 + ya)) = 16 + unat y * 16 + unat ya")
+               prefer 2 apply (simp add: word_less_nat_alt unat_word_ariths(1)
+                                         unat_word_ariths(2))
+              apply (subgoal_tac "16 + unat y * 16 + unat ya < CARD(256)")
+               prefer 2 apply simp
+              apply (subgoal_tac "unat (ya + 1) = unat ya + 1")
+               prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+              apply (simp add: code_tbl_matches_upto_def)
+              apply (intro conjI allI impI)
+              subgoal for op
+                apply (cases "op = 16 + unat y * 16 + unat ya")
+                 subgoal
+                   apply simp
+                   apply (subgoal_tac "all_zero_row (code_tbl_'' t''' .[16 + unat y * 16 + unat ya])")
+                    prefer 2
+                    apply (drule conjunct2, drule_tac x = "16 + unat y * 16 + unat ya" in spec)
+                    apply simp
+                   apply (subgoal_tac "default_entry (16 + unat y * 16 + unat ya)
+                                       = (copy_hi (unat ya) (unat y), noop_hi)")
+                    prefer 2
+                    apply (subgoal_tac "16 + unat y * 16 + unat ya
+                                        = 19 + unat y * 16 + unat ya - 3")
+                     prefer 2 apply simp
+                    apply (simp only: default_entry_copy_small)
+                   apply (simp add: arr_fupdate_same arr_fupdate_other
+                                    entry_of_row_def byte_to_hi_def
+                                    copy_hi_def noop_hi_def unat_ucast
+                                    all_zero_row_def)
+                   done
+                subgoal
+                  by (simp add: arr_fupdate_other)
+                done
+              subgoal for op
+                by (simp add: arr_fupdate_other)
+              done
+              \<comment> \<open>(5) measure decrease\<close>
+            subgoal for ya
+              apply (subgoal_tac "unat ya < 19")
+               prefer 2 apply (simp add: word_less_nat_alt)
+              by (simp add: unat_word_ariths(1) word_less_nat_alt)
+            done
           done
         done
       done
