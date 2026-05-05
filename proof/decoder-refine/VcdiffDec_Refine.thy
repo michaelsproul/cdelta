@@ -1491,8 +1491,40 @@ lemma build_code_table'_spec:
          prefer 2 apply (simp add: word_le_nat_alt word_less_nat_alt)
         apply simp
         done
-         \<comment> \<open>Exit Loop 3\<close>
-      subgoal for x t'' sorry
+         \<comment> \<open>Exit Loop 3: mode = 9. matches_upto s' 163. Continue with Loops 4..6 + final.\<close>
+      subgoal for x t''
+        apply (cases x, simp)
+        apply clarsimp
+        apply (subgoal_tac "unat b = 9")
+         prefer 2 apply (simp add: word_less_nat_alt word_le_nat_alt)
+        apply simp
+        apply runs_to_vcg
+        \<comment> \<open>Loop 4: ADD+COPY modes 0..5. Outer (idx, mode), initial (163, 0).
+            Each outer iteration runs middle loop (add_size 1..4) and inner
+            (copy_size 4..6). Total per mode: 4*3 = 12 entries.
+            Extends matches_upto from 163+12*mode to 163+12*(mode+1). \<close>
+        apply (rule runs_to_whileLoop_res'[
+           where R = "measure (\<lambda>(p, _). 6 - unat (snd (p :: 32 word \<times> 32 word)))"
+             and I = "\<lambda>(idx :: 32 word, mode :: 32 word) s'.
+                         unat mode \<le> 6 \<and>
+                         idx = 163 + mode * 12 \<and>
+                         code_tbl_matches_upto s' (163 + unat mode * 12) \<and>
+                         near_arr_'' s' = near_arr_'' s \<and>
+                         same_arr_'' s' = same_arr_'' s \<and>
+                         code_tbl_built_'' s' = code_tbl_built_'' s"])
+           \<comment> \<open>wf R\<close>
+        subgoal by simp
+           \<comment> \<open>Initial: idx = 0x13 + 9 * 0x10 = 163 (after Loop 3 exit).\<close>
+        subgoal
+          apply clarsimp
+          apply (rule word_unat.Rep_inject[THEN iffD1])
+          apply (simp add: unat_word_ariths(2))
+          done
+           \<comment> \<open>Exit Loop 4\<close>
+        subgoal for x2 t2 sorry
+           \<comment> \<open>Body Loop 4\<close>
+        subgoal for x2 t2 sorry
+        done
          \<comment> \<open>Body Loop 3 (outer). First writes the size-0 entry at idx = 19+mode*16,
              then runs the inner size-loop for sizes 4..18.\<close>
       subgoal for x t''
