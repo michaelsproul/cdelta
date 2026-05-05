@@ -1309,6 +1309,131 @@ lemma decode_address'_spec:
      done
   done
 
+(* ---------- build_code_table refinement ---------- *)
+
+(*
+  Conversion from three bytes (tag/size/mode) to a half_inst. The tag
+  byte matches the C's OP_* constants:
+    0 = NOOP, 1 = ADD, 2 = RUN, 3 = COPY (mode in mode byte).
+*)
+definition byte_to_hi :: "8 word \<Rightarrow> 8 word \<Rightarrow> 8 word \<Rightarrow> half_inst" where
+  "byte_to_hi tag sz mode =
+     (if tag = 0 then noop_hi
+      else if tag = 1 then add_hi (unat sz)
+      else if tag = 2 then run_hi (unat sz)
+      else if tag = 3 then copy_hi (unat sz) (unat mode)
+      else noop_hi)"
+
+definition entry_of_row :: "(8 word, 6) array \<Rightarrow> half_inst \<times> half_inst" where
+  "entry_of_row row =
+     (byte_to_hi (row .[0]) (row .[1]) (row .[2]),
+      byte_to_hi (row .[3]) (row .[4]) (row .[5]))"
+
+definition code_tbl_matches :: "lifted_globals \<Rightarrow> bool" where
+  "code_tbl_matches s =
+     (\<forall>op < 256. entry_of_row (code_tbl_'' s .[op]) = default_entry op)"
+
+(*
+  Build-code-table contract.
+
+  Postcondition:
+    - returns Result ()
+    - code_tbl_built_'' s' = 1
+    - code_tbl_matches s'
+    - every other field is preserved (near_arr, same_arr, heap_w8,
+      heap_typing, ...). For now we only state the fields we care about.
+*)
+(*
+  Prove each whileLoop separately. Strategy: the body is deterministic
+  and the counter increments by exactly 1; use runs_to_whileLoop_inc_res
+  with F i = counter value at step i, S i = state at step i.
+
+  A state description for each loop needs to say "code_tbl entries
+  in range [start, start + i) match default_entry, other fields
+  preserved, other code_tbl positions unchanged or still zero".
+*)
+
+\<comment> \<open>Zeroed row (all 6 slots are 0).\<close>
+definition all_zero_row :: "(8 word, 6) array \<Rightarrow> bool" where
+  "all_zero_row row = (\<forall>k < 6. row .[k] = 0)"
+
+\<comment> \<open>Zero 6 slots of a row. Use `Suc 0` rather than `1` so later simp steps match.\<close>
+definition zero_row :: "(8 word, 6) array \<Rightarrow> (8 word, 6) array" where
+  "zero_row row = Arrays.update (Arrays.update (Arrays.update
+                      (Arrays.update (Arrays.update (Arrays.update
+                       row 0 0) (Suc 0) 0) 2 0) 3 0) 4 0) 5 0"
+
+lemma all_zero_zero_row[simp]: "all_zero_row (zero_row row)"
+proof -
+  have "\<forall>k < 6. (zero_row row :: (8 word, 6) array) .[k] = 0"
+  proof (intro allI impI)
+    fix k :: nat
+    assume "k < 6"
+    then consider "k = 0" | "k = 1" | "k = 2" | "k = 3" | "k = 4" | "k = 5"
+      by linarith
+    thus "zero_row row .[k] = 0"
+      by cases (simp_all add: zero_row_def)
+  qed
+  thus ?thesis by (simp add: all_zero_row_def)
+qed
+
+\<comment> \<open>Helper: after zeroing slots 0..5, the row satisfies all_zero_row.\<close>
+lemma zero_all_slots:
+  "all_zero_row (Arrays.update (Arrays.update (Arrays.update (Arrays.update
+                    (Arrays.update (Arrays.update row 0 0) (Suc 0) 0) 2 0) 3 0) 4 0) 5 0)"
+proof -
+  have "\<forall>k < 6. (Arrays.update (Arrays.update (Arrays.update (Arrays.update
+                    (Arrays.update (Arrays.update (row :: (8 word, 6) array) 0 0)
+                     (Suc 0) 0) 2 0) 3 0) 4 0) 5 0) .[k] = 0"
+  proof (intro allI impI)
+    fix k :: nat
+    assume "k < 6"
+    then consider "k = 0" | "k = 1" | "k = 2" | "k = 3" | "k = 4" | "k = 5"
+      by linarith
+    thus "(Arrays.update (Arrays.update (Arrays.update (Arrays.update
+            (Arrays.update (Arrays.update row 0 0) (Suc 0) 0) 2 0) 3 0) 4 0) 5 0) .[k] = 0"
+      by cases simp_all
+  qed
+  thus ?thesis by (simp add: all_zero_row_def)
+qed
+
+\<comment> \<open>Loop 1: zero-initialise all 256 rows — TODO.\<close>
+lemma bct_loop_zero_init:
+  "whileLoop (\<lambda>(i :: 32 word) s. i < 0x100) (\<lambda>i. do {
+      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 0 0)));
+      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 1 0)));
+      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 2 0)));
+      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 3 0)));
+      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 4 0)));
+      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 5 0)));
+      return (i + 1)
+    }) 0 \<bullet> s
+    \<lbrace> \<lambda>r s'. r = Result 0x100 \<and>
+            (\<forall>j < 256. all_zero_row (code_tbl_'' s' .[j])) \<and>
+            near_arr_'' s' = near_arr_'' s \<and>
+            same_arr_'' s' = same_arr_'' s \<and>
+            code_tbl_built_'' s' = code_tbl_built_'' s \<rbrace>"
+  sorry
+
+lemma build_code_table'_spec:
+  "build_code_table' \<bullet> s
+     \<lbrace> \<lambda>r s'. r = Result () \<and>
+             code_tbl_built_'' s' = 1 \<and>
+             code_tbl_matches s' \<and>
+             near_arr_'' s' = near_arr_'' s \<and>
+             same_arr_'' s' = same_arr_'' s \<rbrace>"
+  unfolding build_code_table'_def
+  apply runs_to_vcg
+   \<comment> \<open>Loop 1: zero-init. This is a res_monad (no exceptions).\<close>
+  apply (rule runs_to_whileLoop_res'[
+     where R = "measure (\<lambda>((i :: 32 word), _). 256 - unat i)"
+       and I = "\<lambda>i s'. unat i \<le> 256 \<and>
+                       (\<forall>j < unat i. all_zero_row (code_tbl_'' s' .[j])) \<and>
+                       near_arr_'' s' = near_arr_'' s \<and>
+                       same_arr_'' s' = same_arr_'' s \<and>
+                       code_tbl_built_'' s' = code_tbl_built_'' s"])
+  sorry
+
 (* ---------- vcdiff_decode main refinement (TODO) ---------- *)
 
 (*
