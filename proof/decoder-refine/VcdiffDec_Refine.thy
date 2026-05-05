@@ -1407,6 +1407,59 @@ proof -
   thus ?thesis by (simp add: all_zero_row_def)
 qed
 
+\<comment> \<open>Extension lemma: matches_upto extends by one when writing 6 slots whose
+    byte_to_hi decoding matches default_entry at position N.\<close>
+lemma code_tbl_matches_upto_extend:
+  fixes N :: nat
+  assumes match: "code_tbl_matches_upto s N"
+      and N_lt: "N < 256"
+      and def: "default_entry N = (byte_to_hi b0 b1 b2, byte_to_hi b3 b4 b5)"
+      and s'_eq: "s' = code_tbl_''_update
+                        (fupdate N (\<lambda>v. Arrays.update v 5 b5) \<circ>
+                         fupdate N (\<lambda>v. Arrays.update v 4 b4) \<circ>
+                         fupdate N (\<lambda>v. Arrays.update v 3 b3) \<circ>
+                         fupdate N (\<lambda>v. Arrays.update v 2 b2) \<circ>
+                         fupdate N (\<lambda>v. Arrays.update v (Suc 0) b1) \<circ>
+                         fupdate N (\<lambda>v. Arrays.update v 0 b0)) s"
+  shows "code_tbl_matches_upto s' (Suc N)"
+proof -
+  have tbl_other: "\<forall>j < 256. j \<noteq> N \<longrightarrow> code_tbl_'' s' .[j] = code_tbl_'' s .[j]"
+    by (clarsimp simp: s'_eq arr_fupdate_other)
+  have tbl_N: "code_tbl_'' s' .[N]
+               = Arrays.update (Arrays.update (Arrays.update (Arrays.update
+                   (Arrays.update (Arrays.update (code_tbl_'' s .[N]) 0 b0)
+                    (Suc 0) b1) 2 b2) 3 b3) 4 b4) 5 b5"
+    using N_lt by (simp add: s'_eq arr_fupdate_same)
+  have entry_N: "entry_of_row (code_tbl_'' s' .[N]) = default_entry N"
+    by (simp add: tbl_N entry_of_row_def def)
+  have upper: "\<forall>op. Suc N \<le> op \<and> op < 256 \<longrightarrow> all_zero_row (code_tbl_'' s' .[op])"
+  proof (intro allI impI)
+    fix op assume op_bd: "Suc N \<le> op \<and> op < 256"
+    hence "N \<noteq> op" by auto
+    hence "code_tbl_'' s' .[op] = code_tbl_'' s .[op]" using tbl_other op_bd by blast
+    moreover have "all_zero_row (code_tbl_'' s .[op])"
+      using match op_bd by (simp add: code_tbl_matches_upto_def)
+    ultimately show "all_zero_row (code_tbl_'' s' .[op])" by simp
+  qed
+  have lower: "\<forall>op < Suc N. entry_of_row (code_tbl_'' s' .[op]) = default_entry op"
+  proof (intro allI impI)
+    fix op assume op_bd: "op < Suc N"
+    show "entry_of_row (code_tbl_'' s' .[op]) = default_entry op"
+    proof (cases "op = N")
+      case True thus ?thesis using entry_N by simp
+    next
+      case False
+      then have op_lt_N: "op < N" using op_bd by auto
+      hence "entry_of_row (code_tbl_'' s .[op]) = default_entry op"
+        using match by (simp add: code_tbl_matches_upto_def)
+      moreover have "code_tbl_'' s' .[op] = code_tbl_'' s .[op]"
+        using tbl_other False op_lt_N N_lt by auto
+      ultimately show ?thesis by simp
+    qed
+  qed
+  show ?thesis using upper lower by (simp add: code_tbl_matches_upto_def)
+qed
+
 \<comment> \<open>Loop 1: zero-initialise all 256 rows — TODO.\<close>
 lemma bct_loop_zero_init:
   "whileLoop (\<lambda>(i :: 32 word) s. i < 0x100) (\<lambda>i. do {
