@@ -678,6 +678,93 @@ proof -
 qed
 
 (*
+  Helper: the C SAME-mode slot computation
+     slot = 0xFFFFFA00 + mode * 0x100 + UCAST(8\<rightarrow>32) byte
+  lies in [0, 0x300) when mode \<in> {6,7,8}. Observe that
+     0xFFFFFA00 + mode * 0x100 = (mode - 6) * 0x100    (mod 2\<^sup>3\<^sup>2),
+  so unfolded in nats, slot = (unat mode - 6) * 256 + unat byte, which is
+  in [0, 768) = [0, 0x300) because byte < 256.
+
+  We compute unat slot in the natural-number model, then compare 0x300.
+*)
+lemma unat_same_slot_word:
+  fixes mode :: "32 word" and byte :: "8 word"
+  assumes "unat mode \<in> {6, 7, 8}"
+  shows "unat (0xFFFFFA00 + mode * 0x100 + UCAST(8 \<rightarrow> 32) byte)
+         = (unat mode - 6) * 256 + unat byte"
+proof -
+  have byte_lt': "unat byte < 256"
+    using unat_lt2p[of byte] by simp
+  have byte_unat: "unat (UCAST(8 \<rightarrow> 32) byte) = unat byte"
+  proof -
+    have "unat byte < 2 ^ 32" using byte_lt' by simp
+    thus ?thesis by (simp add: unat_ucast)
+  qed
+  have byte_lt: "unat byte < 256"
+    using unat_lt2p[of byte] by simp
+  have mode_lt_9: "unat mode < 9" using assms by auto
+  have mode_ge_6: "unat mode \<ge> 6" using assms by auto
+
+  \<comment> \<open>mode * 0x100: no wrap since unat mode < 9 < 2^24.\<close>
+  have m100_unat: "unat (mode * 0x100) = unat mode * 256"
+  proof -
+    have "unat mode * unat (0x100 :: 32 word) < 2 ^ 32"
+      using mode_lt_9 by simp
+    thus ?thesis by (simp add: unat_mult_lem[THEN iffD1])
+  qed
+
+  \<comment> \<open>mode * 0x100 < 0x900, so adding 0xFFFFFA00 wraps by exactly 2^32.\<close>
+  have sum1_eq: "unat (0xFFFFFA00 + mode * 0x100)
+                 = (0xFFFFFA00 + unat mode * 256) - 2 ^ 32"
+  proof -
+    have hi_lo: "unat (0xFFFFFA00 :: 32 word) = 0xFFFFFA00"
+      by simp
+    have sum_bound: "0xFFFFFA00 + unat mode * 256 \<ge> 2 ^ 32"
+      using mode_ge_6 by (simp; arith)
+    have sum_under: "0xFFFFFA00 + unat mode * 256 < 2 * 2 ^ 32"
+      using mode_lt_9 by (simp; arith)
+    have "unat (0xFFFFFA00 + mode * 0x100)
+          = (unat (0xFFFFFA00 :: 32 word) + unat (mode * 0x100)) mod 2 ^ 32"
+      by (simp add: unat_word_ariths(1))
+    also have "\<dots> = (0xFFFFFA00 + unat mode * 256) mod 2 ^ 32"
+      by (simp add: hi_lo m100_unat)
+    also have "\<dots> = (0xFFFFFA00 + unat mode * 256) - 2 ^ 32"
+      using sum_bound sum_under by (simp add: mod_nat_eqI)
+    finally show ?thesis .
+  qed
+
+  \<comment> \<open>Final sum + byte: stays well below 2^32, so no further wrap.\<close>
+  have inner_lt: "(0xFFFFFA00 + unat mode * 256) - 2 ^ 32 + unat byte < 2 ^ 32"
+    using mode_lt_9 byte_lt by (simp; arith)
+  have "unat (0xFFFFFA00 + mode * 0x100 + UCAST(8 \<rightarrow> 32) byte)
+        = (unat (0xFFFFFA00 + mode * 0x100) + unat (UCAST(8 \<rightarrow> 32) byte))
+          mod 2 ^ 32"
+    by (simp add: unat_word_ariths(1))
+  also have "\<dots> = ((0xFFFFFA00 + unat mode * 256) - 2 ^ 32 + unat byte) mod 2 ^ 32"
+    by (simp add: sum1_eq byte_unat)
+  also have "\<dots> = (0xFFFFFA00 + unat mode * 256) - 2 ^ 32 + unat byte"
+    using inner_lt by simp
+  also have "\<dots> = (unat mode - 6) * 256 + unat byte"
+    using mode_ge_6 by (simp; arith)
+  finally show ?thesis .
+qed
+
+lemma same_slot_bound:
+  fixes mode :: "32 word" and byte :: "8 word"
+  assumes "unat mode \<in> {6, 7, 8}"
+  shows "0xFFFFFA00 + mode * 0x100 + UCAST(8 \<rightarrow> 32) byte < (0x300 :: 32 word)"
+proof -
+  have byte_lt: "unat byte < 256" using unat_lt2p[of byte] by simp
+  have mode_lt_9: "unat mode < 9" using assms by auto
+  have "unat (0xFFFFFA00 + mode * 0x100 + UCAST(8 \<rightarrow> 32) byte)
+        = (unat mode - 6) * 256 + unat byte"
+    by (rule unat_same_slot_word[OF assms])
+  also have "\<dots> < 768"
+    using mode_lt_9 byte_lt by (simp; arith)
+  finally show ?thesis by (simp add: word_less_nat_alt)
+qed
+
+(*
   AutoCorres lifts `near_arr` / `same_arr` as record fields of
   `lifted_globals`, of array type. They are indexed via `.[unat i]`
   (the Arrays.index abbreviation `arr.[n]`). No heap-pointer
@@ -1130,15 +1217,84 @@ lemma decode_address'_spec:
            done
         apply runs_to_vcg
           \<comment> \<open>4 subgoals: slot < 0x300, np_in < 4, addr mod 0x300 < 0x300, post.\<close>
-        subgoal \<comment> \<open>(1) slot < 0x300 — TODO: 32-bit wrapping arithmetic.\<close>
-          sorry
+        subgoal \<comment> \<open>(1) slot < 0x300 via same_slot_bound.\<close>
+          apply (rule same_slot_bound)
+          apply (simp add: unat_eq_0[symmetric] word_neq_0_conv
+                           word_less_nat_alt
+                           word_unat_eq_iff[of mode 1])
+          apply arith
+          done
         subgoal \<comment> \<open>(2) np_in < 4.\<close>
           using cache_ok
           by (simp add: cache_abs_def s_near_def word_less_nat_alt)
         subgoal \<comment> \<open>(3) addr mod 0x300 < 0x300.\<close>
           by (simp add: word_mod_less_divisor)
         subgoal \<comment> \<open>(4) postcondition.\<close>
-          sorry
+          apply (insert cache_ok cache_wf_ok)
+          apply (subgoal_tac "unat mode \<in> {6, 7, 8}")
+           prefer 2
+           apply (simp add: unat_eq_0[symmetric] word_neq_0_conv
+                            word_less_nat_alt
+                            word_unat_eq_iff[of mode 1])
+           apply arith
+            \<comment> \<open>Extract head of drop.\<close>
+          apply (subgoal_tac "drop (unat pos) (heap_bytes s patch (unat addr_end))
+                              = heap_w8 s (patch +\<^sub>p uint pos)
+                                # drop (Suc (unat pos)) (heap_bytes s patch (unat addr_end))")
+           prefer 2
+           apply (simp only: uint_nat)
+           apply (rule heap_bytes_drop_Cons)
+           apply (simp add: word_less_nat_alt)
+            \<comment> \<open>Unfold decode_address.\<close>
+          apply (simp add: decode_address_def Let_def s_near_def s_same_def
+                           word_less_nat_alt)
+            \<comment> \<open>Rewrite unat slot_w = (unat mode - 6) * 256 + unat byte.\<close>
+          apply (subgoal_tac
+             "unat (0xFFFFFA00 + mode * 0x100
+                    + UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p uint pos)))
+              = (unat mode - 6) * 256 + unat (heap_w8 s (patch +\<^sub>p uint pos))")
+           prefer 2
+           apply (rule unat_same_slot_word)
+           apply fastforce
+            \<comment> \<open>Using cache_abs: same_arr_'' s.[slot_n] = of_nat (same c ! slot_n).\<close>
+          apply (subgoal_tac "(unat mode - 6) * 256
+                              + unat (heap_w8 s (patch +\<^sub>p uint pos))
+                              < same_buckets")
+           prefer 2
+           apply (simp add: same_buckets_def s_same_def)
+           apply (subgoal_tac "unat (heap_w8 s (patch +\<^sub>p uint pos)) < 256")
+            apply arith
+           using unat_lt2p[of "heap_w8 s (patch +\<^sub>p uint pos)"] apply simp
+          apply (subgoal_tac
+             "same_arr_'' s.[(unat mode - 6) * 256
+                             + unat (heap_w8 s (patch +\<^sub>p uint pos))]
+              = word_of_nat (same c ! ((unat mode - 6) * 256
+                                       + unat (heap_w8 s (patch +\<^sub>p uint pos))))")
+           prefer 2
+           apply (simp add: cache_abs_def)
+            \<comment> \<open>Now simp: unat slot_w = slot_n lets same_arr_'' s.[unat slot_w] reduce.\<close>
+          apply simp
+          apply (rule impI)
+            \<comment> \<open>Split into 3 conjuncts.\<close>
+          apply (rule conjI)
+           apply (simp add: unat_mod)
+          apply (rule conjI)
+           apply (simp add: cache_update_def s_near_def cache_abs_def unat_mod
+                            unat_word_ariths(1))
+            \<comment> \<open>cache_abs after array writes. Apply cache_abs_update with
+                w = word_of_nat (same c ! slot_n). Use `subst` targeting the 2nd arg
+                of cache_update on the conclusion.\<close>
+          apply (rule subst[where P = "\<lambda>n. cache_abs _ (cache_update _ n) _",
+                   of "unat ((word_of_nat :: nat \<Rightarrow> 32 word)
+                              (same c ! ((unat mode - 6) * 256
+                                        + unat (heap_w8 s (patch +\<^sub>p uint pos)))))"
+                      "same c ! ((unat mode - 6) * 256
+                                 + unat (heap_w8 s (patch +\<^sub>p uint pos)))"])
+           apply (simp add: unat_of_nat_eq cache_wf_def)
+          apply (rule cache_abs_update[OF cache_ok])
+          using cache_ok apply (simp add: cache_abs_def s_near_def
+                                          word_less_nat_alt)
+          done
         done
       \<comment> \<open>pos \<ge> addr_end: read_byte' returns TRUNC. decode_address returns None
           (varint/byte-read fails). Throw VCD_ERR_TRUNC.\<close>
