@@ -3,3 +3,4 @@ spec/cenc/harness
 spec/cdec/harness
 /true
 *~
+.build-tmp/
