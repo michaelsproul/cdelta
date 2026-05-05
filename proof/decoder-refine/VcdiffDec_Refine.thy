@@ -1573,8 +1573,9 @@ lemma build_code_table'_spec:
           apply (rule word_unat.Rep_inject[THEN iffD1])
           apply (simp add: unat_word_ariths(2))
           done
-           \<comment> \<open>Exit Loop 4 outer: mode = 6. Continue with Loop 5 (ADD+COPY modes 6..8)
-               + Loop 6 (COPY+ADD) + final. TODO.\<close>
+           \<comment> \<open>Exit Loop 4 outer: mode = 6. idx = 163 + 6*12 = 235.
+               Continue with Loop 5 (ADD+COPY modes 6..8, copy_size=4 fixed)
+               + Loop 6 (COPY+ADD, 9 entries) + final modify. TODO.\<close>
         subgoal for x2 t2 sorry
            \<comment> \<open>Body Loop 4 (outer). Runs middle loop (add_size 1..4),
                each middle iter runs inner loop (copy_size 4..6).
