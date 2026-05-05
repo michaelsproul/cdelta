@@ -1309,6 +1309,274 @@ lemma decode_address'_spec:
      done
   done
 
+(* ---------- build_code_table refinement ---------- *)
+
+(*
+  Conversion from three bytes (tag/size/mode) to a half_inst. The tag
+  byte matches the C's OP_* constants:
+    0 = NOOP, 1 = ADD, 2 = RUN, 3 = COPY (mode in mode byte).
+*)
+definition byte_to_hi :: "8 word \<Rightarrow> 8 word \<Rightarrow> 8 word \<Rightarrow> half_inst" where
+  "byte_to_hi tag sz mode =
+     (if tag = 0 then noop_hi
+      else if tag = 1 then add_hi (unat sz)
+      else if tag = 2 then run_hi (unat sz)
+      else if tag = 3 then copy_hi (unat sz) (unat mode)
+      else noop_hi)"
+
+definition entry_of_row :: "(8 word, 6) array \<Rightarrow> half_inst \<times> half_inst" where
+  "entry_of_row row =
+     (byte_to_hi (row .[0]) (row .[1]) (row .[2]),
+      byte_to_hi (row .[3]) (row .[4]) (row .[5]))"
+
+definition code_tbl_matches :: "lifted_globals \<Rightarrow> bool" where
+  "code_tbl_matches s =
+     (\<forall>op < 256. entry_of_row (code_tbl_'' s .[op]) = default_entry op)"
+
+(*
+  Build-code-table contract.
+
+  Postcondition:
+    - returns Result ()
+    - code_tbl_built_'' s' = 1
+    - code_tbl_matches s'
+    - every other field is preserved (near_arr, same_arr, heap_w8,
+      heap_typing, ...). For now we only state the fields we care about.
+*)
+(*
+  Prove each whileLoop separately. Strategy: the body is deterministic
+  and the counter increments by exactly 1; use runs_to_whileLoop_inc_res
+  with F i = counter value at step i, S i = state at step i.
+
+  A state description for each loop needs to say "code_tbl entries
+  in range [start, start + i) match default_entry, other fields
+  preserved, other code_tbl positions unchanged or still zero".
+*)
+
+\<comment> \<open>Zeroed row (all 6 slots are 0).\<close>
+definition all_zero_row :: "(8 word, 6) array \<Rightarrow> bool" where
+  "all_zero_row row = (\<forall>k < 6. row .[k] = 0)"
+
+\<comment> \<open>Zero 6 slots of a row. Use `Suc 0` rather than `1` so later simp steps match.\<close>
+definition zero_row :: "(8 word, 6) array \<Rightarrow> (8 word, 6) array" where
+  "zero_row row = Arrays.update (Arrays.update (Arrays.update
+                      (Arrays.update (Arrays.update (Arrays.update
+                       row 0 0) (Suc 0) 0) 2 0) 3 0) 4 0) 5 0"
+
+\<comment> \<open>Partial: positions [0, n) match default_entry, [n, 256) still all-zero.\<close>
+definition code_tbl_matches_upto :: "lifted_globals \<Rightarrow> nat \<Rightarrow> bool" where
+  "code_tbl_matches_upto s n =
+     ((\<forall>op < n. entry_of_row (code_tbl_'' s .[op]) = default_entry op) \<and>
+      (\<forall>op. n \<le> op \<and> op < 256 \<longrightarrow> all_zero_row (code_tbl_'' s .[op])))"
+
+lemma code_tbl_matches_from_full_upto:
+  "code_tbl_matches_upto s 256 \<Longrightarrow> code_tbl_matches s"
+  by (simp add: code_tbl_matches_upto_def code_tbl_matches_def)
+
+lemma all_zero_zero_row[simp]: "all_zero_row (zero_row row)"
+proof -
+  have "\<forall>k < 6. (zero_row row :: (8 word, 6) array) .[k] = 0"
+  proof (intro allI impI)
+    fix k :: nat
+    assume "k < 6"
+    then consider "k = 0" | "k = 1" | "k = 2" | "k = 3" | "k = 4" | "k = 5"
+      by linarith
+    thus "zero_row row .[k] = 0"
+      by cases (simp_all add: zero_row_def)
+  qed
+  thus ?thesis by (simp add: all_zero_row_def)
+qed
+
+\<comment> \<open>Helper: after zeroing slots 0..5, the row satisfies all_zero_row.\<close>
+lemma zero_all_slots:
+  "all_zero_row (Arrays.update (Arrays.update (Arrays.update (Arrays.update
+                    (Arrays.update (Arrays.update row 0 0) (Suc 0) 0) 2 0) 3 0) 4 0) 5 0)"
+proof -
+  have "\<forall>k < 6. (Arrays.update (Arrays.update (Arrays.update (Arrays.update
+                    (Arrays.update (Arrays.update (row :: (8 word, 6) array) 0 0)
+                     (Suc 0) 0) 2 0) 3 0) 4 0) 5 0) .[k] = 0"
+  proof (intro allI impI)
+    fix k :: nat
+    assume "k < 6"
+    then consider "k = 0" | "k = 1" | "k = 2" | "k = 3" | "k = 4" | "k = 5"
+      by linarith
+    thus "(Arrays.update (Arrays.update (Arrays.update (Arrays.update
+            (Arrays.update (Arrays.update row 0 0) (Suc 0) 0) 2 0) 3 0) 4 0) 5 0) .[k] = 0"
+      by cases simp_all
+  qed
+  thus ?thesis by (simp add: all_zero_row_def)
+qed
+
+\<comment> \<open>Loop 1: zero-initialise all 256 rows — TODO.\<close>
+lemma bct_loop_zero_init:
+  "whileLoop (\<lambda>(i :: 32 word) s. i < 0x100) (\<lambda>i. do {
+      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 0 0)));
+      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 1 0)));
+      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 2 0)));
+      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 3 0)));
+      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 4 0)));
+      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 5 0)));
+      return (i + 1)
+    }) 0 \<bullet> s
+    \<lbrace> \<lambda>r s'. r = Result 0x100 \<and>
+            (\<forall>j < 256. all_zero_row (code_tbl_'' s' .[j])) \<and>
+            near_arr_'' s' = near_arr_'' s \<and>
+            same_arr_'' s' = same_arr_'' s \<and>
+            code_tbl_built_'' s' = code_tbl_built_'' s \<rbrace>"
+  sorry
+
+lemma build_code_table'_spec:
+  "build_code_table' \<bullet> s
+     \<lbrace> \<lambda>r s'. r = Result () \<and>
+             code_tbl_built_'' s' = 1 \<and>
+             code_tbl_matches s' \<and>
+             near_arr_'' s' = near_arr_'' s \<and>
+             same_arr_'' s' = same_arr_'' s \<rbrace>"
+  unfolding build_code_table'_def
+  apply runs_to_vcg
+   \<comment> \<open>Loop 1: zero-init. This is a res_monad (no exceptions).\<close>
+  apply (rule runs_to_whileLoop_res'[
+     where R = "measure (\<lambda>((i :: 32 word), _). 256 - unat i)"
+       and I = "\<lambda>i s'. unat i \<le> 256 \<and>
+                       (\<forall>j < unat i. all_zero_row (code_tbl_'' s' .[j])) \<and>
+                       near_arr_'' s' = near_arr_'' s \<and>
+                       same_arr_'' s' = same_arr_'' s \<and>
+                       code_tbl_built_'' s' = code_tbl_built_'' s"])
+     \<comment> \<open>wf R\<close>
+  subgoal by simp
+     \<comment> \<open>Initial I(0, s)\<close>
+  subgoal by simp
+     \<comment> \<open>Exit: Loop 1 done. Apply runs_to_vcg to pull out the next whileLoop.
+         After runs_to_vcg, the goal has been decomposed into obligations
+         for each subsequent `modify` and each whileLoop.\<close>
+  subgoal for a t
+    apply clarsimp
+    apply runs_to_vcg
+     \<comment> \<open>Loop 2 (ADD, pos 1..18): invariant tracks matches_upto (1 + unat i).
+         Precondition entering: row 0 matches default_entry 0, rows 1..255 zero.\<close>
+    apply (rule runs_to_whileLoop_res'[
+       where R = "measure (\<lambda>((i :: 32 word), _). 18 - unat i)"
+         and I = "\<lambda>i s'. unat i \<le> 18 \<and>
+                         code_tbl_matches_upto s' (1 + unat i) \<and>
+                         near_arr_'' s' = near_arr_'' s \<and>
+                         same_arr_'' s' = same_arr_'' s \<and>
+                         code_tbl_built_'' s' = code_tbl_built_'' s"])
+       \<comment> \<open>wf R\<close>
+    subgoal by simp
+       \<comment> \<open>Initial invariant at i=0: matches_upto (updated state) 1.\<close>
+    subgoal by (simp add: code_tbl_matches_upto_def default_entry_def
+                          entry_of_row_def byte_to_hi_def run_hi_def noop_hi_def
+                          arr_fupdate_same arr_fupdate_other
+                          word_less_nat_alt all_zero_row_def)
+       \<comment> \<open>Exit Loop 2. At this point matches_upto t' 19 holds.
+           The remaining loops (COPY, ADD+COPY 0..5, ADD+COPY 6..8,
+           COPY+ADD) extend matches_upto to 163, 235, 247, 256
+           respectively, then code_tbl_built \<leftarrow> 1. TODO: lengthy but
+           mechanical — each nested loop uses the same runs_to_whileLoop_res'
+           pattern as Loop 2. Omitted for now.\<close>
+    subgoal for a t' sorry
+       \<comment> \<open>Body step for Loop 2.\<close>
+    subgoal for a t'
+      apply clarsimp
+      apply runs_to_vcg
+      subgoal \<comment> \<open>guard: 1 + a < 0x100\<close>
+        by (simp add: word_less_nat_alt unat_word_ariths(1))
+      subgoal \<comment> \<open>unat bound\<close>
+        by (simp add: word_less_nat_alt unat_word_ariths(1))
+      subgoal \<comment> \<open>matches_upto preservation.\<close>
+        apply (subgoal_tac "unat (a + 1) = unat a + 1")
+         prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+        apply (subgoal_tac "unat (1 + a) = 1 + unat a")
+         prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+        apply (subgoal_tac "1 + unat a < CARD(256)")
+         prefer 2 apply (simp add: word_less_nat_alt)
+        apply (simp add: code_tbl_matches_upto_def)
+        apply (intro conjI allI impI)
+        subgoal for op
+          apply (cases "op = 1 + unat a")
+           subgoal
+             \<comment> \<open>Newly written position. Row was all-zero in t' (beyond Suc (unat a)).\<close>
+             apply simp
+             apply (simp add: arr_fupdate_same arr_fupdate_other)
+             apply (subgoal_tac "all_zero_row (code_tbl_'' t' .[Suc (unat a)])")
+              prefer 2
+              apply (drule conjunct2, drule_tac x = "Suc (unat a)" in spec)
+              apply simp
+             apply (cases "unat a = 0")
+              subgoal
+                by (simp add: default_entry_def entry_of_row_def byte_to_hi_def
+                              add_hi_def noop_hi_def unat_ucast all_zero_row_def)
+             subgoal
+               apply (subgoal_tac "1 \<le> unat a \<and> unat a \<le> 17")
+                prefer 2 apply (simp add: word_less_nat_alt)
+               apply (subgoal_tac "default_entry (Suc (unat a)) = (add_hi (unat a), noop_hi)")
+                prefer 2 apply (metis Suc_eq_plus1_left default_entry_add_small)
+               apply (simp add: entry_of_row_def byte_to_hi_def
+                                add_hi_def noop_hi_def unat_ucast
+                                all_zero_row_def)
+               done
+             done
+          subgoal
+            apply (simp add: arr_fupdate_other)
+            done
+          done
+        subgoal for op
+          by (simp add: arr_fupdate_other)
+        done
+      subgoal \<comment> \<open>measure decrease\<close>
+        by (simp add: word_less_nat_alt unat_word_ariths(1))
+      done
+    done
+     \<comment> \<open>Body step: 3 subgoals (unat bound, invariant preservation, measure).\<close>
+  subgoal for a t
+    apply runs_to_vcg
+    subgoal by (simp add: word_less_nat_alt unat_word_ariths(1))
+    subgoal premises prems for j
+    proof (cases "j < unat a")
+      case True
+      have j_lt: "j < CARD(256)" using True prems by (simp add: word_less_nat_alt)
+      have "fupdate (unat a) (\<lambda>v. Arrays.update v 5 0)
+             (fupdate (unat a) (\<lambda>v. Arrays.update v 4 0)
+              (fupdate (unat a) (\<lambda>v. Arrays.update v 3 0)
+               (fupdate (unat a) (\<lambda>v. Arrays.update v 2 0)
+                (fupdate (unat a) (\<lambda>v. Arrays.update v (Suc 0) 0)
+                 (fupdate (unat a) (\<lambda>v. Arrays.update v 0 0)
+                  (code_tbl_'' t)))))) .[j]
+           = code_tbl_'' t .[j]"
+        using True j_lt by (simp add: arr_fupdate_other)
+      thus ?thesis using prems True by simp
+    next
+      case False
+      have unat_a1: "unat (a + 1) = unat a + 1"
+        using prems by (simp add: unat_word_ariths(1) word_less_nat_alt)
+      have j_eq: "j = unat a" using False prems unat_a1 by simp
+      have unat_a_lt: "unat a < 256" using prems by (simp add: word_less_nat_alt)
+      have row_eq: "fupdate (unat a) (\<lambda>v. Arrays.update v 5 0)
+                     (fupdate (unat a) (\<lambda>v. Arrays.update v 4 0)
+                      (fupdate (unat a) (\<lambda>v. Arrays.update v 3 0)
+                       (fupdate (unat a) (\<lambda>v. Arrays.update v 2 0)
+                        (fupdate (unat a) (\<lambda>v. Arrays.update v (Suc 0) 0)
+                         (fupdate (unat a) (\<lambda>v. Arrays.update v 0 0)
+                          (code_tbl_'' t)))))) .[unat a]
+                   = Arrays.update (Arrays.update (Arrays.update (Arrays.update
+                      (Arrays.update (Arrays.update (code_tbl_'' t .[unat a])
+                       0 0) (Suc 0) 0) 2 0) 3 0) 4 0) 5 0"
+        using unat_a_lt by (simp add: arr_fupdate_same)
+      have "all_zero_row (fupdate (unat a) (\<lambda>v. Arrays.update v 5 0)
+                           (fupdate (unat a) (\<lambda>v. Arrays.update v 4 0)
+                            (fupdate (unat a) (\<lambda>v. Arrays.update v 3 0)
+                             (fupdate (unat a) (\<lambda>v. Arrays.update v 2 0)
+                              (fupdate (unat a) (\<lambda>v. Arrays.update v (Suc 0) 0)
+                               (fupdate (unat a) (\<lambda>v. Arrays.update v 0 0)
+                                (code_tbl_'' t))))))
+                           .[unat a])"
+        using row_eq zero_all_slots by simp
+      thus ?thesis using j_eq by simp
+    qed
+    subgoal by (simp add: word_less_nat_alt unat_word_ariths(1))
+    done
+  done
+
 (* ---------- vcdiff_decode main refinement (TODO) ---------- *)
 
 (*
