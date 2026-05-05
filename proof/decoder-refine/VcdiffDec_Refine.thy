@@ -1446,9 +1446,37 @@ lemma build_code_table'_spec:
   subgoal by simp
      \<comment> \<open>Initial I(0, s)\<close>
   subgoal by simp
-     \<comment> \<open>Exit: Loop 1 done. Loops 2..6 + final modify remain. TODO.\<close>
+     \<comment> \<open>Exit: Loop 1 done. Apply runs_to_vcg to pull out the next whileLoop.
+         After runs_to_vcg, the goal has been decomposed into obligations
+         for each subsequent `modify` and each whileLoop.\<close>
   subgoal for a t
-    sorry
+    apply clarsimp
+    apply runs_to_vcg
+     \<comment> \<open>Loop 2 (ADD, pos 1..18): invariant tracks matches_upto (1 + unat i).
+         Precondition entering: row 0 matches default_entry 0, rows 1..255 zero.\<close>
+    apply (rule runs_to_whileLoop_res'[
+       where R = "measure (\<lambda>((i :: 32 word), _). 18 - unat i)"
+         and I = "\<lambda>i s'. unat i \<le> 18 \<and>
+                         code_tbl_matches_upto s' (1 + unat i) \<and>
+                         near_arr_'' s' = near_arr_'' s \<and>
+                         same_arr_'' s' = same_arr_'' s \<and>
+                         code_tbl_built_'' s' = code_tbl_built_'' s"])
+       \<comment> \<open>wf R\<close>
+    subgoal by simp
+       \<comment> \<open>Initial invariant at i=0: matches_upto (updated state) 1.\<close>
+    subgoal by (simp add: code_tbl_matches_upto_def default_entry_def
+                          entry_of_row_def byte_to_hi_def run_hi_def noop_hi_def
+                          arr_fupdate_same arr_fupdate_other
+                          word_less_nat_alt all_zero_row_def)
+       \<comment> \<open>Exit Loop 2 \<Longrightarrow> continue with Loops 3..6 + final modify. TODO.\<close>
+    subgoal for a t' sorry
+       \<comment> \<open>Body step for Loop 2. Writes row (1+a) with tag = 1 (ADD),
+           size = unat a at slot 1.\<close>
+    subgoal for a t'
+      apply clarsimp
+      apply runs_to_vcg
+      sorry
+    done
      \<comment> \<open>Body step: 3 subgoals (unat bound, invariant preservation, measure).\<close>
   subgoal for a t
     apply runs_to_vcg
