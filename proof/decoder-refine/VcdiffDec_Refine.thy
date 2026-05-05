@@ -1520,10 +1520,41 @@ lemma build_code_table'_spec:
              \<comment> \<open>wf R\<close>
           subgoal by simp
              \<comment> \<open>Initial I (20+16*y, 4): need matches_upto 20+16*y.
-                 After outer body modifies, row (19+16*y) is written with (3, 0, y)
-                 matching default_entry (19+16*y) = (copy_hi 0 y, noop_hi).
-                 So matches_upto extends from 19+16*y to 20+16*y.\<close>
-          subgoal sorry
+                 The 3 modifies add (3, 0, y, 0, 0, 0) at row (19+16y)
+                 which matches default_entry (19+16y) = (copy_hi 0 y, noop_hi).\<close>
+          subgoal
+            apply clarsimp
+            apply (subgoal_tac "unat y \<le> 8")
+             prefer 2 apply (simp add: word_less_nat_alt)
+            apply (subgoal_tac "unat (0x13 + y * 0x10) = 19 + unat y * 16")
+             prefer 2 apply (simp add: word_less_nat_alt unat_word_ariths(1)
+                                       unat_word_ariths(2))
+            apply (subgoal_tac "19 + unat y * 16 < CARD(256)")
+             prefer 2 apply simp
+            apply (simp add: code_tbl_matches_upto_def)
+            apply (intro conjI allI impI)
+            subgoal for op
+              apply (cases "op = 19 + unat y * 16")
+               subgoal
+                 apply simp
+                 apply (subgoal_tac "all_zero_row (code_tbl_'' t'' .[19 + unat y * 16])")
+                  prefer 2
+                  apply (simp add: code_tbl_matches_upto_def)
+                  apply (drule conjunct2, drule_tac x = "19 + unat y * 16" in spec)
+                  apply simp
+                 apply (simp add: arr_fupdate_same arr_fupdate_other
+                                  default_entry_copy_varint
+                                  entry_of_row_def byte_to_hi_def
+                                  copy_hi_def noop_hi_def unat_ucast
+                                  all_zero_row_def)
+                 done
+              subgoal
+                apply (simp add: arr_fupdate_other code_tbl_matches_upto_def)
+                done
+              done
+            subgoal for op
+              by (simp add: arr_fupdate_other code_tbl_matches_upto_def)
+            done
              \<comment> \<open>Exit\<close>
           subgoal for x t''' sorry
              \<comment> \<open>Inner body: size \<to> size+1, write next COPY entry.\<close>
