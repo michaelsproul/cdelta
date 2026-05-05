@@ -1564,8 +1564,85 @@ lemma build_code_table'_spec:
                 subgoal by (simp add: word_less_nat_alt)
                 done
               done
-               \<comment> \<open>Body middle loop — TODO (inner copy loop details).\<close>
-            subgoal for x3 t3 sorry
+               \<comment> \<open>Body middle loop: runs inner copy loop (copy_size 4..6)
+                   writing 3 entries, then returns (add_size+1, idx+3).\<close>
+            subgoal for x3 t3
+              apply (cases x3, simp)
+              apply runs_to_vcg
+              subgoal for add_size
+                apply (rule runs_to_whileLoop_res'[
+                   where R = "measure (\<lambda>(p, _). 7 - unat (fst (p :: 32 word \<times> 32 word)))"
+                     and I = "\<lambda>(copy_size :: 32 word, idx :: 32 word) s'.
+                                 4 \<le> unat copy_size \<and> unat copy_size \<le> 7 \<and>
+                                 idx = 0xA3 + y * 0xC + (add_size - 1) * 3
+                                        + (copy_size - 4) \<and>
+                                 code_tbl_matches_upto s' (163 + unat y * 12
+                                                          + (unat add_size - 1) * 3
+                                                          + (unat copy_size - 4)) \<and>
+                                 near_arr_'' s' = near_arr_'' s \<and>
+                                 same_arr_'' s' = same_arr_'' s \<and>
+                                 code_tbl_built_'' s' = code_tbl_built_'' s"])
+                subgoal by simp
+                subgoal by simp
+                \<comment> \<open>Inner exit: copy_size = 7, idx = 0xA3 + y*0xC + (add_size-1)*3 + 3.\<close>
+                subgoal for xi ti
+                  apply (cases xi, simp)
+                  apply runs_to_vcg
+                  subgoal for copy_size
+                    apply clarsimp
+                    apply (subgoal_tac "unat add_size < 5")
+                     prefer 2 apply (simp add: word_less_nat_alt)
+                    apply (subgoal_tac "unat (add_size + 1) = unat add_size + 1")
+                     prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+                    apply (subgoal_tac "unat copy_size = 7")
+                     prefer 2 apply (simp add: word_le_nat_alt word_less_nat_alt)
+                    apply (intro conjI)
+                        subgoal by simp
+                       subgoal by simp
+                      subgoal
+                        apply (rule word_unat.Rep_inject[THEN iffD1])
+                        apply (simp add: unat_word_ariths(1) unat_word_ariths(2))
+                        done
+                     subgoal
+                       apply (subgoal_tac "Suc 0 \<le> unat add_size")
+                        prefer 2 apply simp
+                       apply (subgoal_tac
+                         "163 + unat y * 12 + (unat add_size + 1 - Suc 0) * 3
+                           = 159 + (unat y * 12 + ((unat add_size - Suc 0) * 3 + 7))")
+                        prefer 2 apply simp
+                       apply (simp only:)
+                       done
+                    subgoal by (simp add: word_less_nat_alt)
+                    done
+                  done
+                \<comment> \<open>Inner body: write (1, add_size, 0, 3, copy_size, y) at idx.
+                    After runs_to_vcg, subgoals are: guard, bounds, idx, matches.\<close>
+                subgoal for xi ti
+                  apply (cases xi, simp)
+                  apply runs_to_vcg
+                  subgoal for copy_size \<comment> \<open>guard idx < 256\<close>
+                    apply (subgoal_tac "unat y \<le> 5 \<and> Suc 0 \<le> unat add_size
+                                        \<and> unat add_size \<le> 4 \<and> 4 \<le> unat copy_size
+                                        \<and> unat copy_size < 7")
+                     prefer 2 apply (simp add: word_less_nat_alt)
+                    by (simp add: word_less_nat_alt unat_word_ariths(1) unat_word_ariths(2))
+                  subgoal for copy_size \<comment> \<open>size lower bound 4 \<le> unat (copy_size + 1)\<close>
+                    apply (subgoal_tac "unat copy_size < 7")
+                     prefer 2 apply (simp add: word_less_nat_alt)
+                    by (simp add: unat_word_ariths(1) word_less_nat_alt)
+                  subgoal for copy_size \<comment> \<open>size upper bound unat (copy_size + 1) \<le> 7\<close>
+                    apply (subgoal_tac "unat copy_size < 7")
+                     prefer 2 apply (simp add: word_less_nat_alt)
+                    by (simp add: unat_word_ariths(1) word_less_nat_alt)
+                  subgoal for copy_size \<comment> \<open>matches_upto preservation — TODO\<close>
+                    sorry
+                  subgoal for copy_size \<comment> \<open>measure decrease\<close>
+                    apply (subgoal_tac "unat copy_size < 7")
+                     prefer 2 apply (simp add: word_less_nat_alt)
+                    by (simp add: unat_word_ariths(1) word_less_nat_alt)
+                  done
+                done
+              done
             done
           done
         done
