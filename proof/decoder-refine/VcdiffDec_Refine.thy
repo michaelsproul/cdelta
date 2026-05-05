@@ -1363,6 +1363,16 @@ definition zero_row :: "(8 word, 6) array \<Rightarrow> (8 word, 6) array" where
                       (Arrays.update (Arrays.update (Arrays.update
                        row 0 0) (Suc 0) 0) 2 0) 3 0) 4 0) 5 0"
 
+\<comment> \<open>Partial: positions [0, n) match default_entry, [n, 256) still all-zero.\<close>
+definition code_tbl_matches_upto :: "lifted_globals \<Rightarrow> nat \<Rightarrow> bool" where
+  "code_tbl_matches_upto s n =
+     ((\<forall>op < n. entry_of_row (code_tbl_'' s .[op]) = default_entry op) \<and>
+      (\<forall>op. n \<le> op \<and> op < 256 \<longrightarrow> all_zero_row (code_tbl_'' s .[op])))"
+
+lemma code_tbl_matches_from_full_upto:
+  "code_tbl_matches_upto s 256 \<Longrightarrow> code_tbl_matches s"
+  by (simp add: code_tbl_matches_upto_def code_tbl_matches_def)
+
 lemma all_zero_zero_row[simp]: "all_zero_row (zero_row row)"
 proof -
   have "\<forall>k < 6. (zero_row row :: (8 word, 6) array) .[k] = 0"
@@ -1436,17 +1446,8 @@ lemma build_code_table'_spec:
   subgoal by simp
      \<comment> \<open>Initial I(0, s)\<close>
   subgoal by simp
-     \<comment> \<open>Exit: Loop 1 done. Now continue with the rest of build_code_table'
-         — the remaining 5 whileLoops (ADD, COPY, ADD+COPY 0..5, ADD+COPY 6..8,
-         COPY+ADD) plus the final code_tbl_built := 1.
-
-         Strategy: each subsequent loop writes a contiguous range of
-         positions. Use runs_to_whileLoop_res' per loop with an invariant
-         tracking "already-written positions match default_entry on that
-         range, other positions unchanged from entering this loop".\<close>
+     \<comment> \<open>Exit: Loop 1 done. Loops 2..6 + final modify remain. TODO.\<close>
   subgoal for a t
-    apply clarsimp
-    apply runs_to_vcg
     sorry
      \<comment> \<open>Body step: 3 subgoals (unat bound, invariant preservation, measure).\<close>
   subgoal for a t
