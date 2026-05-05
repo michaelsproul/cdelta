@@ -1564,7 +1564,7 @@ lemma build_code_table'_spec:
                 subgoal by (simp add: word_less_nat_alt)
                 done
               done
-               \<comment> \<open>Body middle loop\<close>
+               \<comment> \<open>Body middle loop — TODO (inner copy loop details).\<close>
             subgoal for x3 t3 sorry
             done
           done
