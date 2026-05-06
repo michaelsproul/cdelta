@@ -2758,6 +2758,31 @@ lemma vcdiff_decode'_hdr_nonok:
     OF vcdiff_decode'_hdr_fail[OF out_len_ok patch_ok len_ok magic0_ok magic1_ok magic2_ok magic3_ok bad_hdr]])
   by simp
 
+lemma near_init_loop_res_w32:
+  "(whileLoop (\<lambda>idx st. unat idx < 4)
+      (\<lambda>idx. do {
+          modify (near_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (4 :: 32 word) \<and> heap_w32 t p = heap_w32 s0 p \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+     where R = "measure (\<lambda>((idx :: 32 word), _). 4 - unat idx)"
+       and I = "\<lambda>idx st. unat idx \<le> 4 \<and> heap_w32 st p = heap_w32 s0 p"])
+  subgoal by simp
+  subgoal by simp
+  subgoal for idx st
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (subst word_unat_eq_iff)
+    apply simp
+    done
+  subgoal for idx st
+    apply runs_to_vcg
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (cases "unat idx")
+     apply (auto simp: unat_word_ariths(1) word_less_nat_alt)
+    done
+  done
+
 (*
   The big one. Top-level Hoare triple:
 
