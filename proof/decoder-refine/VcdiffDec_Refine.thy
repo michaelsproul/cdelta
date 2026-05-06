@@ -2451,6 +2451,75 @@ lemma build_code_table'_spec:
   done
 (* ---------- vcdiff_decode main refinement (TODO) ---------- *)
 
+lemma vcdiff_decode'_short_patch:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and short_patch: "patch_len < 5"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (-1) \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+  unfolding vcdiff_decode'_def
+  apply runs_to_vcg
+  using out_len_ok short_patch
+  apply (auto simp: word_less_nat_alt)
+  done
+
+lemma vcdiff_decode'_magic0_fail:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch 1"
+      and len_ok: "5 \<le> patch_len"
+      and bad_magic0: "uint (heap_w8 s patch) \<noteq> 214"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (-2) \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+  unfolding vcdiff_decode'_def
+  apply runs_to_vcg
+  using out_len_ok patch_ok len_ok bad_magic0
+  apply (auto simp: buf_valid_def word_less_nat_alt word_le_nat_alt)
+  done
+
+lemma vcdiff_decode'_magic1_fail:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch 2"
+      and len_ok: "5 \<le> patch_len"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and bad_magic1: "uint (heap_w8 s (patch +\<^sub>p 1)) \<noteq> 195"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (-2) \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+proof -
+  have patch0_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 0)"
+    using buf_validD[OF patch_ok, of 0] by simp
+  have patch1_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 1)"
+    using buf_validD[OF patch_ok, of 1] by simp
+  show ?thesis
+    unfolding vcdiff_decode'_def
+    apply runs_to_vcg
+    using out_len_ok len_ok magic0_ok bad_magic1 patch0_ok patch1_ok
+    apply (auto simp: word_less_nat_alt word_le_nat_alt)
+    done
+qed
+
+lemma vcdiff_decode'_magic2_fail:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch 3"
+      and len_ok: "5 \<le> patch_len"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and magic1_ok: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+      and bad_magic2: "uint (heap_w8 s (patch +\<^sub>p 2)) \<noteq> 196"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (-2) \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+proof -
+  have patch0_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 0)"
+    using buf_validD[OF patch_ok, of 0] by simp
+  have patch1_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 1)"
+    using buf_validD[OF patch_ok, of 1] by simp
+  have patch2_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 2)"
+    using buf_validD[OF patch_ok, of 2] by simp
+  show ?thesis
+    unfolding vcdiff_decode'_def
+    apply runs_to_vcg
+    using out_len_ok len_ok magic0_ok magic1_ok bad_magic2 patch0_ok patch1_ok patch2_ok
+    apply (auto simp: word_less_nat_alt word_le_nat_alt)
+    done
+qed
+
 (*
   The big one. Top-level Hoare triple:
 
