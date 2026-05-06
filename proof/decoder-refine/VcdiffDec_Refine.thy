@@ -62,6 +62,18 @@ proof -
   thus ?thesis by (simp only: uint_nat)
 qed
 
+lemma buf_valid_heap_w32_update[simp]:
+  "buf_valid (heap_w32_update f s) buf n = buf_valid s buf n"
+  by (simp add: buf_valid_def)
+
+lemma buf_valid_near_arr_update[simp]:
+  "buf_valid (near_arr_''_update f s) buf n = buf_valid s buf n"
+  by (simp add: buf_valid_def)
+
+lemma buf_valid_same_arr_update[simp]:
+  "buf_valid (same_arr_''_update f s) buf n = buf_valid s buf n"
+  by (simp add: buf_valid_def)
+
 (* ---------- Return-code constants ---------- *)
 
 abbreviation VCD_OK  :: "32 signed word" where "VCD_OK  \<equiv> 0"
@@ -125,6 +137,14 @@ lemma heap_bytes_near_arr_update[simp]:
 lemma heap_bytes_same_arr_update[simp]:
   "heap_bytes (same_arr_''_update f s) buf n = heap_bytes s buf n"
   by (simp add: heap_bytes_def)
+
+lemma heap_w32_near_arr_update[simp]:
+  "heap_w32 (near_arr_''_update f s) p = heap_w32 s p"
+  by simp
+
+lemma heap_w32_same_arr_update[simp]:
+  "heap_w32 (same_arr_''_update f s) p = heap_w32 s p"
+  by simp
 
 (* ---------- read_varint refinement ---------- *)
 
