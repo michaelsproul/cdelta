@@ -2,8 +2,9 @@
 
 ## Status (2026-05-06)
 
-Phase B Step 2 (decoder refinement). All leaf helpers and error-case lemmas are
-proved. The main `vcdiff_decode'_spec` theorem is the remaining work.
+Phase B Step 2 (decoder refinement). Leaf helpers, error-case lemmas, and
+instruction loop lemmas (ADD, RUN) are proved. COPY loop (overlapping copy)
+and prefix refinement remain.
 
 ## Completed (current theory state)
 
@@ -18,8 +19,19 @@ In [proof/decoder-refine/VcdiffDec_Refine.thy](../proof/decoder-refine/VcdiffDec
   indicator, window indicator, app-header skip, cache-init paths).
 * Cache-init loop preservation lemmas (`near_init_loop_res_w32_ptr`,
   `same_init_loop_res_w32_ptr`).
+* Phase 1 infrastructure: `bufs_disjoint`, `heap_bytes_update_disjoint`,
+  `heap_bytes_update_outside`, `buf_valid_heap_w8_update_any`,
+  `heap_w32_heap_w8_update`, `ptr_valid_heap_w8_update`, `heap_bytes_extend`.
+* Varint chaining: `varint_decode_loop_suffix`, `varint_decode_suffix`,
+  `varint_decode_drop_rest`, `varint_next_position`, `init_loops_preserve_patch`.
+* Pointer injectivity: `ptr_add_inject`, `ptr_add_inject_nat`.
+* `parse_header_no_app` — proved (header parse correspondence).
+* `parse_window_no_source` — proved (window parse correspondence).
+* **`add_loop_correct`** — proved (ADD instruction inner loop, sorry-free).
+* **`run_loop_correct`** — proved (RUN instruction inner loop, sorry-free).
+* `copy_loop_prefix`, `copy_loop_nth` — proved (helper lemmas for COPY).
 
-Build status: **clean** (`isabelle build -d . -v -o system_log=true -l CdeltaRefine`).
+Build status: **clean** (`isabelle build -d . -v -o system_log=true CdeltaRefine`).
 
 ## Goal
 
