@@ -3900,6 +3900,8 @@ lemma add_loop_correct:
            ptr_valid (heap_typing s) (out +\<^sub>p uint (tgt_pos + of_nat j))"
       and disj: "\<forall>i < unat sz. \<forall>j < patch_n.
            out +\<^sub>p uint (tgt_pos + of_nat i) \<noteq> patch +\<^sub>p int j"
+      and out_inj: "\<forall>i < unat sz. \<forall>j < unat sz.
+           i \<noteq> j \<longrightarrow> out +\<^sub>p uint (tgt_pos + of_nat i) \<noteq> out +\<^sub>p uint (tgt_pos + of_nat j)"
       and no_overflow_data: "unat data_cursor + unat sz < 2 ^ 32"
       and no_overflow_tgt: "unat tgt_pos + unat sz < 2 ^ 32"
       and data_in_range: "unat data_cursor + unat sz \<le> patch_n"
@@ -3915,7 +3917,65 @@ lemma add_loop_correct:
             (\<forall>j < patch_n. heap_w8 t (patch +\<^sub>p int j) = heap_w8 s (patch +\<^sub>p int j)) \<and>
             (\<forall>j < unat sz. heap_w8 t (out +\<^sub>p uint (tgt_pos + of_nat j)) =
                heap_w8 s (patch +\<^sub>p uint (data_cursor + of_nat j))) \<rbrace>"
-  sorry
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((j :: 32 word), _). unat sz - unat j)"
+      and I = "\<lambda>j st. unat j \<le> unat sz
+             \<and> (\<forall>k < patch_n. heap_w8 st (patch +\<^sub>p int k) = heap_w8 s (patch +\<^sub>p int k))
+             \<and> (\<forall>k < unat j. heap_w8 st (out +\<^sub>p uint (tgt_pos + of_nat k)) =
+                  heap_w8 s (patch +\<^sub>p uint (data_cursor + of_nat k)))
+             \<and> heap_typing st = heap_typing s"])
+     subgoal by simp
+    subgoal by (simp add: word_less_nat_alt)
+   subgoal for j st
+     by (clarsimp simp: word_less_nat_alt)
+  subgoal for j st
+    apply runs_to_vcg
+    \<comment> \<open>1. Guard: ptr_valid for patch read\<close>
+           subgoal
+             using data_valid[rule_format, of "unat j"]
+             by (simp add: word_less_nat_alt word_unat.Rep_inverse)
+    \<comment> \<open>2. Guard: ptr_valid for out write\<close>
+          subgoal
+            using out_valid[rule_format, of "unat j"]
+            by (simp add: word_less_nat_alt word_unat.Rep_inverse)
+    \<comment> \<open>3. Bound: unat (j + 1) \<le> unat sz\<close>
+         subgoal using no_overflow_tgt by unat_arith
+
+    \<comment> \<open>4. Patch preservation (equal ptr case - impossible by disj)\<close>
+        subgoal for k
+          using disj[rule_format, of "unat j" k]
+          by (auto simp: word_less_nat_alt word_unat.Rep_inverse)
+    \<comment> \<open>5. Patch preservation (not-equal): direct from IH\<close>
+       subgoal by auto
+    \<comment> \<open>6. Output (equal ptr case): k = unat j, value from patch\<close>
+      subgoal for k
+        apply (subgoal_tac "k = unat j")
+         apply (clarsimp simp: word_unat.Rep_inverse)
+         apply (subgoal_tac "unat (data_cursor + j) < patch_n")
+          apply (simp only: uint_nat)
+         using data_in_range no_overflow_data
+         apply (subgoal_tac "unat (data_cursor + j) = unat data_cursor + unat j")
+          apply (simp add: word_less_nat_alt)
+         apply (simp only: unat_add_lem[symmetric])
+         apply (simp add: word_less_nat_alt)
+        apply (simp add: ptr_add_def word_of_int_uint)
+        apply (drule unat_cong)
+        apply (simp only: unat_of_nat)
+        apply (subgoal_tac "k < 2 ^ LENGTH(32)")
+         apply simp
+        using less_trans unsigned_less[where w="j + 1 :: 32 word" and 'b=32]
+        by simp
+    \<comment> \<open>7. Output (not-equal ptr case): k < unat j, from IH\<close>
+     subgoal for k
+       apply (subgoal_tac "k < unat j")
+        apply auto[1]
+       apply (cases "k = unat j")
+        apply (simp add: word_unat.Rep_inverse)
+       using no_overflow_tgt by unat_arith
+    \<comment> \<open>8. Termination measure\<close>
+    subgoal using no_overflow_tgt by unat_arith
+    done
+  done
 
 end
 
