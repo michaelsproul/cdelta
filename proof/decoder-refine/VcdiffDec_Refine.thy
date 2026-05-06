@@ -166,6 +166,26 @@ lemma heap_bytes_same_arr_update[simp]:
   "heap_bytes (same_arr_''_update f s) buf n = heap_bytes s buf n"
   by (simp add: heap_bytes_def)
 
+lemma heap_w8_heap_w32_update[simp]:
+  "heap_w8 (heap_w32_update f s) p = heap_w8 s p"
+  by simp
+
+lemma heap_w8_near_arr_update[simp]:
+  "heap_w8 (near_arr_''_update f s) p = heap_w8 s p"
+  by simp
+
+lemma heap_w8_same_arr_update[simp]:
+  "heap_w8 (same_arr_''_update f s) p = heap_w8 s p"
+  by simp
+
+lemma heap_w8_code_tbl_update[simp]:
+  "heap_w8 (code_tbl_''_update f s) p = heap_w8 s p"
+  by simp
+
+lemma heap_w8_code_tbl_built_update[simp]:
+  "heap_w8 (code_tbl_built_''_update f s) p = heap_w8 s p"
+  by simp
+
 lemma heap_bytes_code_tbl_update[simp]:
   "heap_bytes (code_tbl_''_update f s) buf n = heap_bytes s buf n"
   by (simp add: heap_bytes_def)
