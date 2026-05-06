@@ -114,6 +114,18 @@ proof -
     by (simp add: read_byte'_spec)
 qed
 
+lemma heap_bytes_heap_w32_update[simp]:
+  "heap_bytes (heap_w32_update f s) buf n = heap_bytes s buf n"
+  by (simp add: heap_bytes_def)
+
+lemma heap_bytes_near_arr_update[simp]:
+  "heap_bytes (near_arr_''_update f s) buf n = heap_bytes s buf n"
+  by (simp add: heap_bytes_def)
+
+lemma heap_bytes_same_arr_update[simp]:
+  "heap_bytes (same_arr_''_update f s) buf n = heap_bytes s buf n"
+  by (simp add: heap_bytes_def)
+
 (* ---------- read_varint refinement ---------- *)
 
 (*
