@@ -4091,6 +4091,74 @@ next
   finally show ?case using n_eq by simp
 qed
 
+(*
+  COPY instruction inner loop correctness.
+
+  The loop copies sz bytes to out[tgt_pos..], where each byte comes from either:
+  - src[src_seg_off + addr + j] when addr + j < src_seg_len (source segment)
+  - out[addr + j - src_seg_len] when addr + j >= src_seg_len (overlapping copy)
+
+  Invariant: after j iterations, the bytes written match copy_loop's output.
+
+  Key parameters:
+  - src_seg: the source segment bytes = heap_bytes s src src_seg_len (at offset src_seg_off)
+  - tgt_pre: the output bytes before this COPY = heap_bytes s out (unat tgt_pos)
+  - addr_nat: natural number address for copy_loop = unat addr
+*)
+lemma copy_loop_correct:
+  fixes sz :: "32 word" and tgt_pos :: "32 word"
+    and addr :: "32 word" and src_seg_len :: "32 word" and src_seg_off :: "32 word"
+    and src :: "8 word ptr" and out :: "8 word ptr"
+    and src_seg :: "8 word list" and tgt_pre :: "8 word list"
+  assumes src_seg_def: "src_seg = heap_bytes s (src +\<^sub>p uint src_seg_off) (unat src_seg_len)"
+      and tgt_pre_def: "tgt_pre = heap_bytes s out (unat tgt_pos)"
+      and sz_pos: "0 < unat sz"
+      and src_valid: "\<forall>j < unat sz.
+           unat (addr + of_nat j) < unat src_seg_len \<longrightarrow>
+           ptr_valid (heap_typing s)
+             (src +\<^sub>p uint (src_seg_off + addr + of_nat j))"
+      and out_read_valid: "\<forall>j < unat sz.
+           \<not> unat (addr + of_nat j) < unat src_seg_len \<longrightarrow>
+           ptr_valid (heap_typing s)
+             (out +\<^sub>p uint (of_nat (unat (addr + of_nat j) - unat src_seg_len)))"
+      and out_write_valid: "\<forall>j < unat sz.
+           ptr_valid (heap_typing s) (out +\<^sub>p uint (tgt_pos + of_nat j))"
+      and disj_src_out: "\<forall>i < unat sz. \<forall>j < src_n.
+           out +\<^sub>p uint (tgt_pos + of_nat i) \<noteq> src +\<^sub>p int j"
+      and disj_patch_out: "\<forall>i < unat sz. \<forall>j < patch_n.
+           out +\<^sub>p uint (tgt_pos + of_nat i) \<noteq> patch +\<^sub>p int j"
+      and out_inj: "\<forall>i < unat tgt_pos + unat sz. \<forall>j < unat tgt_pos + unat sz.
+           i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j"
+      and no_overflow_tgt: "unat tgt_pos + unat sz < 2 ^ 32"
+      and no_overflow_addr: "unat addr + unat sz \<le> unat src_seg_len + unat tgt_pos + unat sz"
+      and addr_bound: "unat addr < unat src_seg_len + unat tgt_pos"
+  shows "(whileLoop (\<lambda>(j :: 32 word) st. j < sz)
+           (\<lambda>j. do {
+              let a = addr + j;
+              (if a < src_seg_len then do {
+                 guard (\<lambda>st. ptr_valid (heap_typing st) (src +\<^sub>p uint (src_seg_off + a)));
+                 b \<leftarrow> gets (\<lambda>st. heap_w8 st (src +\<^sub>p uint (src_seg_off + a)));
+                 guard (\<lambda>st. ptr_valid (heap_typing st) (out +\<^sub>p uint (tgt_pos + j)));
+                 modify (heap_w8_update (\<lambda>h. h(out +\<^sub>p uint (tgt_pos + j) := b)));
+                 return (j + 1)
+               } else do {
+                 let tgt_rel = a - src_seg_len;
+                 guard (\<lambda>st. ptr_valid (heap_typing st) (out +\<^sub>p uint tgt_rel));
+                 b \<leftarrow> gets (\<lambda>st. heap_w8 st (out +\<^sub>p uint tgt_rel));
+                 guard (\<lambda>st. ptr_valid (heap_typing st) (out +\<^sub>p uint (tgt_pos + j)));
+                 modify (heap_w8_update (\<lambda>h. h(out +\<^sub>p uint (tgt_pos + j) := b)));
+                 return (j + 1)
+               })
+           }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result sz \<and>
+            (\<forall>j < patch_n. heap_w8 t (patch +\<^sub>p int j) = heap_w8 s (patch +\<^sub>p int j)) \<and>
+            (\<forall>j < src_n. heap_w8 t (src +\<^sub>p int j) = heap_w8 s (src +\<^sub>p int j)) \<and>
+            (\<forall>k < unat sz.
+               heap_w8 t (out +\<^sub>p uint (tgt_pos + of_nat k)) =
+               copy_loop src_seg tgt_pre (unat addr) (unat sz)
+                 ! (unat tgt_pos + k)) \<rbrace>"
+  sorry
+
 end
 
 end
