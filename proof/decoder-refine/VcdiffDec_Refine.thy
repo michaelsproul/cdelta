@@ -3750,6 +3750,99 @@ next
   qed
 qed
 
+(*
+  The init loops preserve buf_valid AND heap_bytes of the patch buffer.
+  Composition lemma: after near_init + same_init, the patch buffer is
+  still valid and its contents are unchanged.
+*)
+lemma init_loops_preserve_patch:
+  assumes "heap_w8 t = heap_w8 s" and "heap_typing t = heap_typing s"
+  shows "buf_valid t buf n = buf_valid s buf n"
+    and "heap_bytes t buf n = heap_bytes s buf n"
+  using assms by (simp_all add: buf_valid_def heap_bytes_def)
+
+(*
+  varint_decode_loop returns a suffix: the result 'rest' satisfies
+  drop (length bs - length rest) bs = rest.
+*)
+lemma varint_decode_loop_suffix:
+  "varint_decode_loop fuel acc bs = Some (v, rest) \<Longrightarrow> suffix rest bs"
+proof (induction fuel acc bs rule: varint_decode_loop.induct)
+  case (1 acc bs) thus ?case by simp
+next
+  case (2 fuel acc) thus ?case by simp
+next
+  case (3 fuel acc b rest')
+  show ?case
+  proof (cases "b AND 0x80 = 0")
+    case True
+    with 3 show ?thesis
+      by (auto simp: Let_def split: if_splits intro: suffix_ConsI)
+  next
+    case False
+    with 3 show ?thesis
+      by (auto simp: Let_def intro: suffix_ConsI)
+  qed
+qed
+
+lemma varint_decode_suffix:
+  "varint_decode bs = Some (v, rest) \<Longrightarrow> suffix rest bs"
+  unfolding varint_decode_def by (rule varint_decode_loop_suffix)
+
+lemma varint_decode_drop_rest:
+  assumes dec: "varint_decode (drop k bs) = Some (v, rest)"
+  shows "drop (length bs - length rest) bs = rest"
+proof -
+  have suf: "suffix rest (drop k bs)"
+    by (rule varint_decode_suffix[OF dec])
+  then obtain pfx where eq: "drop k bs = pfx @ rest"
+    by (auto simp: suffix_def)
+  have rest_len: "length rest \<le> length (drop k bs)"
+    by (rule varint_decode_length[OF dec])
+  have k_le: "k < length bs"
+  proof (rule ccontr)
+    assume "\<not> k < length bs"
+    hence "drop k bs = []" by simp
+    hence "varint_decode (drop k bs) = None"
+      by (simp add: varint_decode_def numeral_nat)
+    with dec show False by simp
+  qed
+  have dk_len: "length (drop k bs) = length pfx + length rest"
+    using eq by simp
+  have pfx_len: "length pfx = length bs - k - length rest"
+    using dk_len k_le by simp
+  have "rest = drop (length pfx) (drop k bs)"
+    using eq by simp
+  also have "\<dots> = drop (k + length pfx) bs"
+    by (simp add: drop_drop add.commute)
+  also have "k + length pfx = length bs - length rest"
+    using pfx_len k_le rest_len by simp
+  finally show ?thesis by simp
+qed
+
+(*
+  After a varint decode from position pos in the buffer, the next varint
+  can be decoded from the remaining bytes. This connects the position arithmetic.
+*)
+lemma varint_next_position:
+  assumes dec: "varint_decode (drop (unat pos) (heap_bytes s buf (unat (len :: 32 word)))) = Some (v, rest)"
+      and rest_le: "length rest \<le> unat len - unat (pos :: 32 word)"
+      and rest_lt: "length rest < 2 ^ 32"
+      and pos_le: "unat pos \<le> unat len"
+  shows "drop (unat (len - of_nat (length rest) :: 32 word))
+              (heap_bytes s buf (unat len)) = rest"
+proof -
+  have unat_rest: "unat (of_nat (length rest) :: 32 word) = length rest"
+    using rest_lt by (simp add: unat_of_nat_eq)
+  have rest_le_len: "(of_nat (length rest) :: 32 word) \<le> len"
+    using rest_le unat_rest by (simp add: word_le_nat_alt)
+  have "unat (len - of_nat (length rest) :: 32 word) = unat len - length rest"
+    using rest_le_len unat_rest by (simp add: unat_sub)
+  thus ?thesis
+    using varint_decode_drop_rest[OF dec] pos_le
+    by simp
+qed
+
 end
 
 end
