@@ -1,0 +1,7 @@
+model = "gpt-5.5"
+approval_policy = "never"
+personality = "pragmatic"
+sandbox_mode = "danger-full-access"
+
+[features]
+fast_mode = false
