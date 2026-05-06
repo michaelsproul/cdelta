@@ -1,10 +1,10 @@
 # Refinement Layer Progress
 
-## Status (2026-05-06)
+## Status (2026-05-07)
 
-Phase B Step 2 (decoder refinement). Leaf helpers, error-case lemmas, and
-instruction loop lemmas (ADD, RUN) are proved. COPY loop (overlapping copy)
-and prefix refinement remain.
+Phase B Step 2 (decoder refinement). All three instruction loop lemmas
+(ADD, RUN, COPY) are proved sorry-free. Prefix refinement and main loop
+composition remain.
 
 ## Completed (current theory state)
 
@@ -29,7 +29,10 @@ In [proof/decoder-refine/VcdiffDec_Refine.thy](../proof/decoder-refine/VcdiffDec
 * `parse_window_no_source` — proved (window parse correspondence).
 * **`add_loop_correct`** — proved (ADD instruction inner loop, sorry-free).
 * **`run_loop_correct`** — proved (RUN instruction inner loop, sorry-free).
-* `copy_loop_prefix`, `copy_loop_nth` — proved (helper lemmas for COPY).
+* `copy_loop_prefix`, `copy_loop_nth`, `copy_loop_nth_stable`, `copy_loop_nth_src`,
+  `copy_loop_nth_tgt` — proved (helper lemmas for COPY).
+* `copy_loop_overlap_ptr_eq` — proved (word-arithmetic ptr equality for overlapping copy).
+* **`copy_loop_correct`** — proved (COPY instruction inner loop, sorry-free).
 
 Build status: **clean** (`isabelle build -d . -v -o system_log=true CdeltaRefine`).
 
