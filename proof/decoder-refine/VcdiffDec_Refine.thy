@@ -2963,7 +2963,7 @@ proof -
     done
 qed
 
-lemma vcdiff_decode'_win_target_bit_nonok_built_weak:
+lemma vcdiff_decode'_win_target_bit_nonok_built:
   assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
       and code_tbl_ready: "code_tbl_built_'' s \<noteq> 0"
       and patch_ok: "buf_valid s patch 6"
@@ -2976,7 +2976,7 @@ lemma vcdiff_decode'_win_target_bit_nonok_built_weak:
       and app_clear: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 4 = 0"
       and win_bad: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 2 \<noteq> 0"
   shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
-           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<rbrace>"
+           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
 proof -
   have patch0_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 0)"
     using buf_validD[OF patch_ok, of 0] by simp
