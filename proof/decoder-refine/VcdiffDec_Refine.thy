@@ -82,6 +82,26 @@ lemma buf_valid_code_tbl_built_update[simp]:
   "buf_valid (code_tbl_built_''_update f s) buf n = buf_valid s buf n"
   by (simp add: buf_valid_def)
 
+lemma ptr_valid_heap_w32_update[simp]:
+  "ptr_valid (heap_typing (heap_w32_update f s)) p = ptr_valid (heap_typing s) p"
+  by simp
+
+lemma ptr_valid_near_arr_update[simp]:
+  "ptr_valid (heap_typing (near_arr_''_update f s)) p = ptr_valid (heap_typing s) p"
+  by simp
+
+lemma ptr_valid_same_arr_update[simp]:
+  "ptr_valid (heap_typing (same_arr_''_update f s)) p = ptr_valid (heap_typing s) p"
+  by simp
+
+lemma ptr_valid_code_tbl_update[simp]:
+  "ptr_valid (heap_typing (code_tbl_''_update f s)) p = ptr_valid (heap_typing s) p"
+  by simp
+
+lemma ptr_valid_code_tbl_built_update[simp]:
+  "ptr_valid (heap_typing (code_tbl_built_''_update f s)) p = ptr_valid (heap_typing s) p"
+  by simp
+
 (* ---------- Return-code constants ---------- *)
 
 abbreviation VCD_OK  :: "32 signed word" where "VCD_OK  \<equiv> 0"
@@ -2832,6 +2852,68 @@ lemma same_init_loop_res_w32:
     done
   done
 
+lemma near_init_loop_res_w32_ptr:
+  "(whileLoop (\<lambda>idx st. unat idx < 4)
+      (\<lambda>idx. do {
+          modify (near_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (4 :: 32 word)
+          \<and> heap_w32 t p = heap_w32 s0 p
+          \<and> ptr_valid (heap_typing t) q = ptr_valid (heap_typing s0) q
+          \<and> heap_w8 t q = heap_w8 s0 q \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+     where R = "measure (\<lambda>((idx :: 32 word), _). 4 - unat idx)"
+       and I = "\<lambda>idx st. unat idx \<le> 4
+              \<and> heap_w32 st p = heap_w32 s0 p
+              \<and> ptr_valid (heap_typing st) q = ptr_valid (heap_typing s0) q
+              \<and> heap_w8 st q = heap_w8 s0 q"])
+  subgoal by simp
+  subgoal by simp
+  subgoal for idx st
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (subst word_unat_eq_iff)
+    apply simp
+    done
+  subgoal for idx st
+    apply runs_to_vcg
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (cases "unat idx")
+     apply (auto simp: unat_word_ariths(1) word_less_nat_alt)
+    done
+  done
+
+lemma same_init_loop_res_w32_ptr:
+  "(whileLoop (\<lambda>idx st. unat idx < 768)
+      (\<lambda>idx. do {
+          modify (same_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (768 :: 32 word)
+          \<and> heap_w32 t p = heap_w32 s0 p
+          \<and> ptr_valid (heap_typing t) q = ptr_valid (heap_typing s0) q
+          \<and> heap_w8 t q = heap_w8 s0 q \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+     where R = "measure (\<lambda>((idx :: 32 word), _). 768 - unat idx)"
+       and I = "\<lambda>idx st. unat idx \<le> 768
+              \<and> heap_w32 st p = heap_w32 s0 p
+              \<and> ptr_valid (heap_typing st) q = ptr_valid (heap_typing s0) q
+              \<and> heap_w8 st q = heap_w8 s0 q"])
+  subgoal by simp
+  subgoal by simp
+  subgoal for idx st
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (subst word_unat_eq_iff)
+    apply simp
+    done
+  subgoal for idx st
+    apply runs_to_vcg
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (cases "unat idx")
+     apply (auto simp: unat_word_ariths(1) word_less_nat_alt)
+    done
+  done
+
 lemma vcdiff_decode'_win_ind_len5_nonok_built:
   assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
       and code_tbl_ready: "code_tbl_built_'' s \<noteq> 0"
@@ -2864,16 +2946,83 @@ proof -
     apply (auto simp: word_less_nat_alt word_le_nat_alt)
     subgoal
       apply (rule runs_to_weaken[
-        OF near_init_loop_res_w32[where p = out_len]])
+        OF near_init_loop_res_w32_ptr
+          [where p = out_len and q = "patch +\<^sub>p 5"]])
       apply clarsimp
       apply runs_to_vcg
       subgoal
         apply (rule runs_to_weaken[
-          OF same_init_loop_res_w32[where p = out_len]])
+          OF same_init_loop_res_w32_ptr
+            [where p = out_len and q = "patch +\<^sub>p 5"]])
         apply clarsimp
         apply runs_to_vcg
         apply (simp add: read_byte'_spec)
         apply auto
+        done
+      done
+    done
+qed
+
+lemma vcdiff_decode'_win_target_bit_nonok_built_weak:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and code_tbl_ready: "code_tbl_built_'' s \<noteq> 0"
+      and patch_ok: "buf_valid s patch 6"
+      and len_eq: "patch_len = 6"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and magic1_ok: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+      and magic2_ok: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
+      and magic3_ok: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
+      and hdr_ok: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 3 = 0"
+      and app_clear: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 4 = 0"
+      and win_bad: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 2 \<noteq> 0"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<rbrace>"
+proof -
+  have patch0_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 0)"
+    using buf_validD[OF patch_ok, of 0] by simp
+  have patch1_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 1)"
+    using buf_validD[OF patch_ok, of 1] by simp
+  have patch2_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 2)"
+    using buf_validD[OF patch_ok, of 2] by simp
+  have patch3_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 3)"
+    using buf_validD[OF patch_ok, of 3] by simp
+  have patch4_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 4)"
+    using buf_validD[OF patch_ok, of 4] by simp
+  have patch5_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 5)"
+    using buf_validD[OF patch_ok, of 5] by simp
+  show ?thesis
+    unfolding vcdiff_decode'_def
+    apply runs_to_vcg
+    using out_len_ok code_tbl_ready len_eq magic0_ok magic1_ok magic2_ok magic3_ok
+          hdr_ok app_clear win_bad patch0_ok patch1_ok patch2_ok patch3_ok patch4_ok patch5_ok
+    apply (auto simp: word_less_nat_alt word_le_nat_alt)
+    subgoal
+      apply (rule runs_to_weaken[
+        OF near_init_loop_res_w32_ptr
+          [where p = out_len and q = "patch +\<^sub>p 5"]])
+      apply clarsimp
+      apply runs_to_vcg
+      subgoal
+        apply (rule runs_to_weaken[
+          OF same_init_loop_res_w32_ptr
+            [where p = out_len and q = "patch +\<^sub>p 5"]])
+        apply clarsimp
+        apply runs_to_vcg
+        subgoal for taa
+          apply (rule exI[where x =
+            "pr_t_C 6 (UCAST(8 \<rightarrow> 32) (heap_w8 taa (patch +\<^sub>p 5))) VCD_OK"])
+          apply (rule conjI)
+           apply (subst read_byte'_spec[of 5 6 taa patch])
+            subgoal using patch5_ok by simp
+           subgoal by simp
+          apply (intro allI impI)
+          subgoal for va
+            apply simp
+            apply runs_to_vcg
+            using win_bad
+            apply (auto simp: word_less_nat_alt word_le_nat_alt)
+            done
+          done
         done
       done
     done
