@@ -3550,6 +3550,206 @@ proof -
     by (rule runs_to_weaken[OF read_varint'_spec[OF buf_ok pos_ok] goal_post])
 qed
 
+(*
+  Helper: read_byte at a known valid position gives the heap byte.
+  This wraps read_byte'_spec into a runs_to form for composition.
+*)
+lemma read_byte'_chain:
+  assumes "unat pos < unat len"
+      and "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+  shows "read_byte' buf len pos s =
+           Some (pr_t_C (pos + 1) (UCAST(8 \<rightarrow> 32) (heap_w8 s (buf +\<^sub>p uint pos))) VCD_OK)"
+proof -
+  have "pos < len" using assms(1) by (simp add: word_less_nat_alt)
+  thus ?thesis using assms(2) by (simp add: read_byte'_spec)
+qed
+
+(*
+  parse_header correspondence: relates the C's initial byte checks to
+  parse_header on the heap_bytes view.
+
+  Under the no-app-header case (hi & 0x04 == 0), parse_header succeeds
+  and returns `drop 5 patch_bytes`.
+*)
+lemma parse_header_no_app:
+  assumes bytes_def: "bs = heap_bytes s patch (unat patch_len)"
+      and len_ok: "5 \<le> unat patch_len"
+      and magic0: "bs ! 0 = 0xD6"
+      and magic1: "bs ! 1 = 0xC3"
+      and magic2: "bs ! 2 = 0xC4"
+      and magic3: "bs ! 3 = 0x00"
+      and hdr_ok: "bs ! 4 AND 0x03 = 0"
+      and no_app: "bs ! 4 AND 0x04 = 0"
+  shows "parse_header bs = Inl (drop 5 bs)"
+proof -
+  have len_ge: "length bs \<ge> 5" using len_ok by (simp add: bytes_def)
+  obtain b0 bs1 where decomp1: "bs = b0 # bs1" "length bs1 \<ge> 4"
+    using len_ge by (cases bs) auto
+  obtain b1 bs2 where decomp2: "bs1 = b1 # bs2" "length bs2 \<ge> 3"
+    using decomp1(2) by (cases bs1) auto
+  obtain b2 bs3 where decomp3: "bs2 = b2 # bs3" "length bs3 \<ge> 2"
+    using decomp2(2) by (cases bs2) auto
+  obtain b3 bs4 where decomp4: "bs3 = b3 # bs4" "length bs4 \<ge> 1"
+    using decomp3(2) by (cases bs3) auto
+  obtain hi rest5 where decomp5: "bs4 = hi # rest5"
+    using decomp4(2) by (cases bs4) auto
+  have bs_eq: "bs = b0 # b1 # b2 # b3 # hi # rest5"
+    using decomp1(1) decomp2(1) decomp3(1) decomp4(1) decomp5 by simp
+  have b0: "b0 = 0xD6" using magic0 bs_eq by simp
+  have b1: "b1 = 0xC3" using magic1 bs_eq by simp
+  have b2: "b2 = 0xC4" using magic2 bs_eq by simp
+  have b3: "b3 = 0x00" using magic3 bs_eq by simp
+  have hi_hdr: "hi AND 0x03 = 0" using hdr_ok bs_eq by simp
+  have hi_app: "hi AND 0x04 = 0" using no_app bs_eq by simp
+  show ?thesis
+    unfolding parse_header_def bs_eq
+    using b0 b1 b2 b3 hi_hdr hi_app
+    by simp
+qed
+
+(*
+  parse_window correspondence for the no-source case.
+
+  When win_ind has VCD_SOURCE clear (bit 0 = 0) and VCD_TARGET clear (bit 1 = 0),
+  and mask bits clear, parse_window parses:
+    - win_ind byte (already consumed by read_byte)
+    - 0 src_seg_len, 0 src_seg_off (no source)
+    - dlen varint
+    - tgt_len varint
+    - di byte (must be 0)
+    - data_len varint
+    - inst_len varint
+    - addr_len varint
+
+  We express this as: given the byte list starting after the header (i.e. drop 5 bs),
+  if the first byte has certain properties and the varints parse correctly,
+  parse_window returns the expected parsed_window record.
+*)
+lemma parse_window_no_source:
+  assumes win_byte: "pop_byte wbs = Some (win_ind, wbs1)"
+      and no_target: "win_ind AND 0x02 = 0"
+      and mask_ok: "win_ind AND 0xFA = 0"
+      and no_source: "win_ind AND 0x01 = 0"
+      and dlen_ok: "varint_decode wbs1 = Some (dlen, wbs2)"
+      and tgt_ok: "varint_decode wbs2 = Some (tgt_len, wbs3)"
+      and di_pop: "pop_byte wbs3 = Some (di, wbs4)"
+      and di_zero: "di = 0"
+      and data_ok: "varint_decode wbs4 = Some (data_len, wbs5)"
+      and inst_ok: "varint_decode wbs5 = Some (inst_len, wbs6)"
+      and addr_ok: "varint_decode wbs6 = Some (addr_len, wbs7)"
+      and sizes_ok: "data_len + inst_len + addr_len \<le> length wbs7"
+  shows "parse_window wbs = Inl (\<lparr>
+           pw_src_seg_len = 0,
+           pw_src_seg_off = 0,
+           pw_tgt_len = tgt_len,
+           pw_data = take data_len wbs7,
+           pw_inst = take inst_len (drop data_len wbs7),
+           pw_addr = take addr_len (drop (data_len + inst_len) wbs7)
+         \<rparr>, drop (data_len + inst_len + addr_len) wbs7)"
+  unfolding parse_window_def
+  using win_byte no_target mask_ok no_source dlen_ok tgt_ok di_pop di_zero
+        data_ok inst_ok addr_ok sizes_ok
+  by (simp add: pop_byte_def Let_def add.commute add.left_commute
+           split: list.splits option.splits)
+
+(* ---------- Phase 1: Output-write infrastructure ---------- *)
+
+(*
+  Buffer disjointness: no overlap between two pointer regions.
+  Used to show writes to `out` don't affect reads from `patch`/`src`.
+*)
+definition bufs_disjoint :: "8 word ptr \<Rightarrow> nat \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> bool" where
+  "bufs_disjoint p pn q qn =
+     (\<forall>i < pn. \<forall>j < qn. p +\<^sub>p int i \<noteq> q +\<^sub>p int j)"
+
+lemma bufs_disjoint_sym:
+  "bufs_disjoint p pn q qn = bufs_disjoint q qn p pn"
+  unfolding bufs_disjoint_def by (auto simp: eq_commute)
+
+(*
+  Key preservation lemma: writing a byte to a pointer outside a buffer region
+  does not change the heap_bytes view of that region.
+*)
+lemma heap_bytes_update_disjoint:
+  assumes disj: "bufs_disjoint buf n (Ptr (ptr_val ptr)) 1"
+  shows "heap_bytes (heap_w8_update (\<lambda>h. h(ptr := v)) s) buf n =
+         heap_bytes s buf n"
+proof -
+  have "\<forall>i < n. buf +\<^sub>p int i \<noteq> ptr"
+  proof (intro allI impI)
+    fix i assume "i < n"
+    from disj have "buf +\<^sub>p int i \<noteq> Ptr (ptr_val ptr) +\<^sub>p int 0"
+      unfolding bufs_disjoint_def using \<open>i < n\<close> by auto
+    thus "buf +\<^sub>p int i \<noteq> ptr" by simp
+  qed
+  thus ?thesis
+    by (simp add: heap_bytes_def fun_upd_apply)
+qed
+
+(*
+  Simpler version: if the written pointer is NOT in the buffer range,
+  heap_bytes is preserved.
+*)
+lemma heap_bytes_update_outside:
+  assumes "\<forall>i < n. buf +\<^sub>p int i \<noteq> ptr"
+  shows "heap_bytes (heap_w8_update (\<lambda>h. h(ptr := v)) s) buf n =
+         heap_bytes s buf n"
+  using assms by (simp add: heap_bytes_def fun_upd_apply)
+
+(*
+  buf_valid is not affected by heap_w8 updates (it only depends on heap_typing).
+*)
+lemma buf_valid_heap_w8_update_any[simp]:
+  "buf_valid (heap_w8_update f s) buf n = buf_valid s buf n"
+  by (simp add: buf_valid_def)
+
+(*
+  Writing a byte to the heap does not affect heap_w32 reads
+  (type separation between 8-bit and 32-bit heaps).
+*)
+lemma heap_w32_heap_w8_update[simp]:
+  "heap_w32 (heap_w8_update f s) p = heap_w32 s p"
+  by simp
+
+(*
+  ptr_valid is not affected by heap_w8 updates.
+*)
+lemma ptr_valid_heap_w8_update[simp]:
+  "ptr_valid (heap_typing (heap_w8_update f s)) p =
+   ptr_valid (heap_typing s) p"
+  by simp
+
+(*
+  Extending heap_bytes by one position: if we write v at buf +p n,
+  the resulting heap_bytes of length (n+1) is the old heap_bytes of length n
+  appended with [v].
+*)
+lemma heap_bytes_extend:
+  assumes disj: "\<forall>i < n. buf +\<^sub>p int i \<noteq> buf +\<^sub>p int n"
+  shows "heap_bytes (heap_w8_update (\<lambda>h. h(buf +\<^sub>p int n := v)) s) buf (Suc n) =
+         heap_bytes s buf n @ [v]"
+proof (rule nth_equalityI)
+  show "length (heap_bytes (heap_w8_update (\<lambda>h. h(buf +\<^sub>p int n := v)) s) buf (Suc n)) =
+        length (heap_bytes s buf n @ [v])"
+    by simp
+next
+  fix i assume "i < length (heap_bytes (heap_w8_update (\<lambda>h. h(buf +\<^sub>p int n := v)) s) buf (Suc n))"
+  hence i_bound: "i < Suc n" by simp
+  show "heap_bytes (heap_w8_update (\<lambda>h. h(buf +\<^sub>p int n := v)) s) buf (Suc n) ! i =
+        (heap_bytes s buf n @ [v]) ! i"
+  proof (cases "i < n")
+    case True
+    hence ne: "buf +\<^sub>p int i \<noteq> buf +\<^sub>p int n" using disj by auto
+    show ?thesis using True ne
+      by (simp add: heap_bytes_def nth_append fun_upd_apply)
+  next
+    case False
+    hence "i = n" using i_bound by simp
+    thus ?thesis
+      by (simp add: heap_bytes_def nth_append fun_upd_apply)
+  qed
+qed
+
 end
 
 end
