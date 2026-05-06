@@ -3843,6 +3843,80 @@ proof -
     by simp
 qed
 
+(* ---------- Pointer arithmetic helpers ---------- *)
+
+(*
+  Pointer offset injectivity: if two offsets are different within the valid
+  range (< 2^32 for 32-bit pointers), the resulting pointers differ.
+*)
+lemma ptr_add_inject:
+  assumes "i \<noteq> j" "0 \<le> i" "i < 2 ^ 32" "0 \<le> j" "j < 2 ^ 32"
+  shows "(p :: 8 word ptr) +\<^sub>p i \<noteq> p +\<^sub>p j"
+proof
+  assume eq: "p +\<^sub>p i = p +\<^sub>p j"
+  hence "ptr_val p + word_of_int i = ptr_val p + word_of_int j"
+    by (simp add: ptr_add_def)
+  hence weq: "word_of_int i = (word_of_int j :: addr)" by simp
+  have "uint (word_of_int i :: addr) = uint (word_of_int j :: addr)"
+    using weq by simp
+  hence "i mod 2 ^ 32 = j mod 2 ^ 32"
+    by (simp add: uint_word_of_int)
+  hence "i = j" using assms(2,3,4,5) by simp
+  with assms(1) show False by simp
+qed
+
+lemma ptr_add_inject_nat:
+  assumes "i \<noteq> j" "i < 2 ^ 32" "j < 2 ^ 32"
+  shows "(p :: 8 word ptr) +\<^sub>p int i \<noteq> p +\<^sub>p int j"
+  using assms by (intro ptr_add_inject) simp_all
+
+(* ---------- Phase 3: Main loop instruction lemmas ---------- *)
+
+(*
+  ADD instruction inner loop: copies sz bytes from patch[data_cursor..]
+  to out[tgt_pos..]. Proves that the resulting heap_bytes of the output
+  region matches the original output appended with the source bytes.
+
+  Preconditions:
+    - Source bytes readable: buf_valid for patch at the relevant range
+    - Output bytes writable: buf_valid for out at the relevant range
+    - Disjoint: writes to out don't affect reads from patch
+    - No overflow in pointer arithmetic
+
+  Postcondition:
+    - heap_bytes t out (unat tgt_pos + unat sz) =
+        heap_bytes s out (unat tgt_pos) @
+        take (unat sz) (drop (unat data_cursor) (heap_bytes s patch patch_n))
+    - data_cursor and tgt_pos advanced by sz
+    - patch heap_bytes unchanged
+*)
+lemma add_loop_correct:
+  fixes sz :: "32 word" and data_cursor :: "32 word"
+    and tgt_pos :: "32 word" and patch :: "8 word ptr" and out :: "8 word ptr"
+  assumes sz_pos: "0 < unat sz"
+      and data_valid: "\<forall>j < unat sz.
+           ptr_valid (heap_typing s) (patch +\<^sub>p uint (data_cursor + of_nat j))"
+      and out_valid: "\<forall>j < unat sz.
+           ptr_valid (heap_typing s) (out +\<^sub>p uint (tgt_pos + of_nat j))"
+      and disj: "\<forall>i < unat sz. \<forall>j < patch_n.
+           out +\<^sub>p uint (tgt_pos + of_nat i) \<noteq> patch +\<^sub>p int j"
+      and no_overflow_data: "unat data_cursor + unat sz < 2 ^ 32"
+      and no_overflow_tgt: "unat tgt_pos + unat sz < 2 ^ 32"
+      and data_in_range: "unat data_cursor + unat sz \<le> patch_n"
+  shows "(whileLoop (\<lambda>(j :: 32 word) st. j < sz)
+           (\<lambda>j. do {
+              guard (\<lambda>st. ptr_valid (heap_typing st) (patch +\<^sub>p uint (data_cursor + j)));
+              b \<leftarrow> gets (\<lambda>st. heap_w8 st (patch +\<^sub>p uint (data_cursor + j)));
+              guard (\<lambda>st. ptr_valid (heap_typing st) (out +\<^sub>p uint (tgt_pos + j)));
+              modify (heap_w8_update (\<lambda>h. h(out +\<^sub>p uint (tgt_pos + j) := b)));
+              return (j + 1)
+           }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result sz \<and>
+            (\<forall>j < patch_n. heap_w8 t (patch +\<^sub>p int j) = heap_w8 s (patch +\<^sub>p int j)) \<and>
+            (\<forall>j < unat sz. heap_w8 t (out +\<^sub>p uint (tgt_pos + of_nat j)) =
+               heap_w8 s (patch +\<^sub>p uint (data_cursor + of_nat j))) \<rbrace>"
+  sorry
+
 end
 
 end
