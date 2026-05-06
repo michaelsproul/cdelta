@@ -806,6 +806,30 @@ proof -
   finally show ?thesis by (simp add: word_less_nat_alt)
 qed
 
+lemma read_varint'_at_end_nonok:
+  assumes buf_ok: "buf_valid s buf (unat len)"
+  shows "read_varint' buf len len \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and> (\<exists>v. r = Result v \<and> pr_t_C.err_C v \<noteq> VCD_OK) \<rbrace>"
+proof -
+  have le_len: "len \<le> len" by simp
+  have drop_nil: "drop (unat len) (heap_bytes s buf (unat len)) = []"
+    by simp
+  have vd_none: "varint_decode (drop (unat len) (heap_bytes s buf (unat len))) = None"
+  proof -
+    have "varint_decode_loop 5 0 ([] :: byte list) = varint_decode_loop (Suc 4) 0 ([] :: byte list)"
+      by simp
+    also have "\<dots> = None"
+      by (rule varint_decode_loop.simps(2))
+    finally show ?thesis
+      unfolding drop_nil varint_decode_def .
+  qed
+  show ?thesis
+    apply (rule runs_to_weaken[OF read_varint'_spec[OF buf_ok le_len]])
+    using vd_none
+    apply (clarsimp split: option.splits)
+    done
+qed
+
 (*
   AutoCorres lifts `near_arr` / `same_arr` as record fields of
   `lifted_globals`, of array type. They are indexed via `.[unat i]`
