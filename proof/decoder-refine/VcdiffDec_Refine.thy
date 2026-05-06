@@ -1411,24 +1411,27 @@ qed
     byte_to_hi decoding matches default_entry at position N.\<close>
 lemma code_tbl_matches_upto_extend:
   fixes N :: nat
+    and first_byte second_byte third_byte fourth_byte fifth_byte sixth_byte :: "8 word"
   assumes match: "code_tbl_matches_upto s N"
       and N_lt: "N < 256"
-      and def: "default_entry N = (byte_to_hi b0 b1 b2, byte_to_hi b3 b4 b5)"
+      and def: "default_entry N =
+                  (byte_to_hi first_byte second_byte third_byte,
+                   byte_to_hi fourth_byte fifth_byte sixth_byte)"
       and s'_eq: "s' = code_tbl_''_update
-                        (fupdate N (\<lambda>v. Arrays.update v 5 b5) \<circ>
-                         fupdate N (\<lambda>v. Arrays.update v 4 b4) \<circ>
-                         fupdate N (\<lambda>v. Arrays.update v 3 b3) \<circ>
-                         fupdate N (\<lambda>v. Arrays.update v 2 b2) \<circ>
-                         fupdate N (\<lambda>v. Arrays.update v (Suc 0) b1) \<circ>
-                         fupdate N (\<lambda>v. Arrays.update v 0 b0)) s"
+                        (fupdate N (\<lambda>v. Arrays.update v 5 sixth_byte) \<circ>
+                         fupdate N (\<lambda>v. Arrays.update v 4 fifth_byte) \<circ>
+                         fupdate N (\<lambda>v. Arrays.update v 3 fourth_byte) \<circ>
+                         fupdate N (\<lambda>v. Arrays.update v 2 third_byte) \<circ>
+                         fupdate N (\<lambda>v. Arrays.update v (Suc 0) second_byte) \<circ>
+                         fupdate N (\<lambda>v. Arrays.update v 0 first_byte)) s"
   shows "code_tbl_matches_upto s' (Suc N)"
 proof -
   have tbl_other: "\<forall>j < 256. j \<noteq> N \<longrightarrow> code_tbl_'' s' .[j] = code_tbl_'' s .[j]"
     by (clarsimp simp: s'_eq arr_fupdate_other)
   have tbl_N: "code_tbl_'' s' .[N]
                = Arrays.update (Arrays.update (Arrays.update (Arrays.update
-                   (Arrays.update (Arrays.update (code_tbl_'' s .[N]) 0 b0)
-                    (Suc 0) b1) 2 b2) 3 b3) 4 b4) 5 b5"
+                   (Arrays.update (Arrays.update (code_tbl_'' s .[N]) 0 first_byte)
+                    (Suc 0) second_byte) 2 third_byte) 3 fourth_byte) 4 fifth_byte) 5 sixth_byte"
     using N_lt by (simp add: s'_eq arr_fupdate_same)
   have entry_N: "entry_of_row (code_tbl_'' s' .[N]) = default_entry N"
     by (simp add: tbl_N entry_of_row_def def)
@@ -1460,23 +1463,328 @@ proof -
   show ?thesis using upper lower by (simp add: code_tbl_matches_upto_def)
 qed
 
-\<comment> \<open>Loop 1: zero-initialise all 256 rows — TODO.\<close>
-lemma bct_loop_zero_init:
-  "whileLoop (\<lambda>(i :: 32 word) s. i < 0x100) (\<lambda>i. do {
-      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 0 0)));
-      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 1 0)));
-      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 2 0)));
-      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 3 0)));
-      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 4 0)));
-      modify (code_tbl_''_update (fupdate (unat i) (\<lambda>v. Arrays.update v 5 0)));
-      return (i + 1)
-    }) 0 \<bullet> s
-    \<lbrace> \<lambda>r s'. r = Result 0x100 \<and>
-            (\<forall>j < 256. all_zero_row (code_tbl_'' s' .[j])) \<and>
-            near_arr_'' s' = near_arr_'' s \<and>
-            same_arr_'' s' = same_arr_'' s \<and>
-            code_tbl_built_'' s' = code_tbl_built_'' s \<rbrace>"
-  sorry
+lemma default_entry_add_copy_low_exact:
+  assumes "mode \<le> 5" "1 \<le> add_sz" "add_sz \<le> 4" "4 \<le> copy_sz" "copy_sz \<le> 6"
+  shows "default_entry (163 + mode * 12 + (add_sz - 1) * 3 + (copy_sz - 4))
+       = (add_hi add_sz, copy_hi copy_sz mode)"
+proof -
+  let ?op = "163 + mode * 12 + (add_sz - 1) * 3 + (copy_sz - 4)"
+  have add_inner: "add_sz - 1 \<le> 3" using assms by simp
+  have copy_inner: "copy_sz - 4 \<le> 2" using assms by linarith
+  have inner_lt: "(add_sz - 1) * 3 + (copy_sz - 4) < 12"
+    using add_inner copy_inner by linarith
+  have ub234: "?op \<le> 234" using assms inner_lt by linarith
+  have gt162: "?op > 162" by simp
+  have div_eq: "(mode * 12 + ((add_sz - 1) * 3 + (copy_sz - 4))) div 12 = mode"
+    using inner_lt by simp
+  have mod_eq: "(mode * 12 + ((add_sz - 1) * 3 + (copy_sz - 4))) mod 12
+                 = (add_sz - 1) * 3 + (copy_sz - 4)"
+    using inner_lt by simp
+  have inner_div: "((add_sz - 1) * 3 + (copy_sz - 4)) div 3 = add_sz - 1"
+    using copy_inner by simp
+  have inner_mod: "((add_sz - 1) * 3 + (copy_sz - 4)) mod 3 = copy_sz - 4"
+    using copy_inner by simp
+  have add_eq: "add_sz - 1 + 1 = add_sz" using assms by simp
+  have copy_eq: "copy_sz - 4 + 4 = copy_sz" using assms by simp
+  have rel_eq: "?op - 163 = mode * 12 + ((add_sz - 1) * 3 + (copy_sz - 4))"
+    by simp
+  show ?thesis
+    using ub234 gt162 div_eq mod_eq inner_div inner_mod add_eq copy_eq
+    by (auto simp: default_entry_def Let_def rel_eq)
+qed
+
+lemma default_entry_add_copy_high_exact:
+  assumes "6 \<le> mode" "mode \<le> 8" "1 \<le> add_sz" "add_sz \<le> 4"
+  shows "default_entry (235 + (mode - 6) * 4 + (add_sz - 1))
+       = (add_hi add_sz, copy_hi 4 mode)"
+proof -
+  let ?op = "235 + (mode - 6) * 4 + (add_sz - 1)"
+  have mode_inner: "mode - 6 \<le> 2" using assms by linarith
+  have add_inner: "add_sz - 1 \<le> 3" using assms by linarith
+  have ub246: "?op \<le> 246" using mode_inner add_inner by linarith
+  have gt234: "?op > 234" by simp
+  have inner_lt: "add_sz - 1 < 4" using add_inner by simp
+  have div_eq: "((mode - 6) * 4 + (add_sz - 1)) div 4 = mode - 6"
+    using inner_lt by simp
+  have mod_eq: "((mode - 6) * 4 + (add_sz - 1)) mod 4 = add_sz - 1"
+    using inner_lt by simp
+  have mode_eq: "mode - 6 + 6 = mode" using assms by simp
+  have add_eq: "add_sz - 1 + 1 = add_sz" using assms by simp
+  have rel_eq: "?op - 235 = (mode - 6) * 4 + (add_sz - 1)" by simp
+  show ?thesis
+    using ub246 gt234 div_eq mod_eq mode_eq add_eq
+    by (auto simp: default_entry_def Let_def rel_eq)
+qed
+
+lemma code_tbl_matches_upto_add_copy_high_extend:
+  fixes mode add_size :: "32 word"
+    and N :: nat
+  assumes match: "code_tbl_matches_upto s N"
+      and N_eq: "N = 235 + (unat mode - 6) * 4 + (unat add_size - 1)"
+      and mode_lo: "6 \<le> unat mode"
+      and mode_hi: "unat mode \<le> 8"
+      and add_lo: "1 \<le> unat add_size"
+      and add_hi: "unat add_size \<le> 4"
+  shows "code_tbl_matches_upto
+          (code_tbl_''_update
+            (fupdate N (\<lambda>v. Arrays.update v 5 (ucast mode)) \<circ>
+             fupdate N (\<lambda>v. Arrays.update v 4 4) \<circ>
+             fupdate N (\<lambda>v. Arrays.update v 3 3) \<circ>
+             fupdate N (\<lambda>v. Arrays.update v 2 0) \<circ>
+             fupdate N (\<lambda>v. Arrays.update v (Suc 0) (ucast add_size)) \<circ>
+             fupdate N (\<lambda>v. Arrays.update v 0 1)) s)
+          (Suc N)"
+proof -
+  have N_lt: "N < 256"
+    using N_eq mode_lo mode_hi add_lo add_hi by linarith
+  have entry: "default_entry N = (add_hi (unat add_size), copy_hi 4 (unat mode))"
+  proof -
+    have "default_entry (235 + (unat mode - 6) * 4 + (unat add_size - 1))
+        = (add_hi (unat add_size), copy_hi 4 (unat mode))"
+      by (rule default_entry_add_copy_high_exact)
+         (use mode_lo mode_hi add_lo add_hi in simp_all)
+    thus ?thesis using N_eq by simp
+  qed
+  have def: "default_entry N =
+              (byte_to_hi 1 (ucast add_size) 0,
+               byte_to_hi 3 4 (ucast mode))"
+    using entry mode_lo mode_hi add_lo add_hi
+    by (simp add: byte_to_hi_def unat_ucast)
+  show ?thesis
+    by (rule code_tbl_matches_upto_extend[OF match N_lt def refl])
+qed
+
+lemma code_tbl_matches_upto_add_copy_high_step:
+  fixes mode add_size :: "32 word"
+  assumes match: "code_tbl_matches_upto s
+                    (234 + ((unat mode - 6) * 4 + unat add_size))"
+      and mode_lo: "6 \<le> unat mode"
+      and mode_hi: "unat mode \<le> 8"
+      and add_lo: "1 \<le> unat add_size"
+      and add_hi: "unat add_size \<le> 4"
+  shows "code_tbl_matches_upto
+          (code_tbl_''_update
+            (fupdate (234 + ((unat mode - 6) * 4 + unat add_size))
+              (\<lambda>v. Arrays.update v 5 (ucast mode)) \<circ>
+             fupdate (234 + ((unat mode - 6) * 4 + unat add_size))
+              (\<lambda>v. Arrays.update v 4 4) \<circ>
+             fupdate (234 + ((unat mode - 6) * 4 + unat add_size))
+              (\<lambda>v. Arrays.update v 3 3) \<circ>
+             fupdate (234 + ((unat mode - 6) * 4 + unat add_size))
+              (\<lambda>v. Arrays.update v 2 0) \<circ>
+             fupdate (234 + ((unat mode - 6) * 4 + unat add_size))
+              (\<lambda>v. Arrays.update v (Suc 0) (ucast add_size)) \<circ>
+             fupdate (234 + ((unat mode - 6) * 4 + unat add_size))
+              (\<lambda>v. Arrays.update v 0 1)) s)
+          (235 + (unat mode - 6) * 4 + unat add_size)"
+proof -
+  let ?N = "234 + ((unat mode - 6) * 4 + unat add_size)"
+  have N_eq: "?N = 235 + (unat mode - 6) * 4 + (unat add_size - 1)"
+    using add_lo by simp
+  have Suc_eq: "Suc ?N = 235 + (unat mode - 6) * 4 + unat add_size"
+    by simp
+  have step: "code_tbl_matches_upto
+          (code_tbl_''_update
+            (fupdate ?N (\<lambda>v. Arrays.update v 5 (ucast mode)) \<circ>
+             fupdate ?N (\<lambda>v. Arrays.update v 4 4) \<circ>
+             fupdate ?N (\<lambda>v. Arrays.update v 3 3) \<circ>
+             fupdate ?N (\<lambda>v. Arrays.update v 2 0) \<circ>
+             fupdate ?N (\<lambda>v. Arrays.update v (Suc 0) (ucast add_size)) \<circ>
+             fupdate ?N (\<lambda>v. Arrays.update v 0 1)) s)
+          (Suc ?N)"
+    by (rule code_tbl_matches_upto_add_copy_high_extend
+        [OF match N_eq mode_lo mode_hi add_lo add_hi])
+  thus ?thesis using Suc_eq by simp
+qed
+
+lemma code_tbl_matches_upto_add_copy_high_step_nested:
+  fixes mode add_size :: "32 word"
+  assumes match: "code_tbl_matches_upto s
+                    (234 + ((unat mode - 6) * 4 + unat add_size))"
+      and mode_lo: "6 \<le> unat mode"
+      and mode_hi: "unat mode \<le> 8"
+      and add_lo: "1 \<le> unat add_size"
+      and add_hi: "unat add_size \<le> 4"
+  shows "code_tbl_matches_upto
+          (code_tbl_''_update
+            (fupdate (234 + ((unat mode - 6) * 4 + unat add_size))
+              (\<lambda>v. Arrays.update v 5 (ucast mode)) \<circ>
+             (fupdate (234 + ((unat mode - 6) * 4 + unat add_size))
+              (\<lambda>v. Arrays.update v 4 4) \<circ>
+             (fupdate (234 + ((unat mode - 6) * 4 + unat add_size))
+              (\<lambda>v. Arrays.update v 3 3) \<circ>
+             (fupdate (234 + ((unat mode - 6) * 4 + unat add_size))
+              (\<lambda>v. Arrays.update v 2 0) \<circ>
+             (fupdate (234 + ((unat mode - 6) * 4 + unat add_size))
+              (\<lambda>v. Arrays.update v (Suc 0) (ucast add_size)) \<circ>
+              fupdate (234 + ((unat mode - 6) * 4 + unat add_size))
+               (\<lambda>v. Arrays.update v 0 1)))))) s)
+          (235 + (unat mode - 6) * 4 + unat add_size)"
+  using code_tbl_matches_upto_add_copy_high_step[OF assms]
+  by (simp add: o_assoc)
+
+lemma code_tbl_matches_upto_add_copy_low_extend:
+  fixes mode add_size copy_size :: "32 word"
+    and N :: nat
+  assumes match: "code_tbl_matches_upto s N"
+      and N_eq: "N = 163 + unat mode * 12
+                    + (unat add_size - 1) * 3 + (unat copy_size - 4)"
+      and mode_hi: "unat mode \<le> 5"
+      and add_lo: "1 \<le> unat add_size"
+      and add_hi: "unat add_size \<le> 4"
+      and copy_lo: "4 \<le> unat copy_size"
+      and copy_hi: "unat copy_size \<le> 6"
+  shows "code_tbl_matches_upto
+          (code_tbl_''_update
+            (fupdate N (\<lambda>v. Arrays.update v 5 (ucast mode)) \<circ>
+             fupdate N (\<lambda>v. Arrays.update v 4 (ucast copy_size)) \<circ>
+             fupdate N (\<lambda>v. Arrays.update v 3 3) \<circ>
+             fupdate N (\<lambda>v. Arrays.update v 2 0) \<circ>
+             fupdate N (\<lambda>v. Arrays.update v (Suc 0) (ucast add_size)) \<circ>
+             fupdate N (\<lambda>v. Arrays.update v 0 1)) s)
+          (Suc N)"
+proof -
+  have N_lt: "N < 256"
+    using N_eq mode_hi add_lo add_hi copy_lo copy_hi by linarith
+  have entry: "default_entry N =
+                (add_hi (unat add_size), copy_hi (unat copy_size) (unat mode))"
+  proof -
+    have "default_entry (163 + unat mode * 12
+             + (unat add_size - 1) * 3 + (unat copy_size - 4))
+        = (add_hi (unat add_size), copy_hi (unat copy_size) (unat mode))"
+      by (rule default_entry_add_copy_low_exact)
+         (use mode_hi add_lo add_hi copy_lo copy_hi in simp_all)
+    thus ?thesis using N_eq by simp
+  qed
+  have def: "default_entry N =
+              (byte_to_hi 1 (ucast add_size) 0,
+               byte_to_hi 3 (ucast copy_size) (ucast mode))"
+    using entry mode_hi add_lo add_hi copy_lo copy_hi
+    by (simp add: byte_to_hi_def unat_ucast)
+  show ?thesis
+    by (rule code_tbl_matches_upto_extend[OF match N_lt def refl])
+qed
+
+lemma code_tbl_matches_upto_add_copy_low_step_nested:
+  fixes mode add_size copy_size :: "32 word"
+  assumes match: "code_tbl_matches_upto s
+                    (159 + (unat mode * 12
+                       + ((unat add_size - 1) * 3 + unat copy_size)))"
+      and mode_hi: "unat mode \<le> 5"
+      and add_lo: "1 \<le> unat add_size"
+      and add_hi: "unat add_size \<le> 4"
+      and copy_lo: "4 \<le> unat copy_size"
+      and copy_hi: "unat copy_size \<le> 6"
+  shows "code_tbl_matches_upto
+          (code_tbl_''_update
+            (fupdate (159 + (unat mode * 12
+                + ((unat add_size - 1) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v 5 (ucast mode)) \<circ>
+             (fupdate (159 + (unat mode * 12
+                + ((unat add_size - 1) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v 4 (ucast copy_size)) \<circ>
+             (fupdate (159 + (unat mode * 12
+                + ((unat add_size - 1) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v 3 3) \<circ>
+             (fupdate (159 + (unat mode * 12
+                + ((unat add_size - 1) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v 2 0) \<circ>
+             (fupdate (159 + (unat mode * 12
+                + ((unat add_size - 1) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v (Suc 0) (ucast add_size)) \<circ>
+              fupdate (159 + (unat mode * 12
+                + ((unat add_size - 1) * 3 + unat copy_size)))
+               (\<lambda>v. Arrays.update v 0 1)))))) s)
+          (160 + (unat mode * 12
+             + ((unat add_size - 1) * 3 + unat copy_size)))"
+proof -
+  let ?N = "159 + (unat mode * 12
+                  + ((unat add_size - 1) * 3 + unat copy_size))"
+  have N_eq: "?N = 163 + unat mode * 12
+                    + (unat add_size - 1) * 3 + (unat copy_size - 4)"
+    using copy_lo by linarith
+  have Suc_eq: "Suc ?N =
+                160 + (unat mode * 12
+                  + ((unat add_size - 1) * 3 + unat copy_size))"
+    by simp
+  have step: "code_tbl_matches_upto
+          (code_tbl_''_update
+            (fupdate ?N (\<lambda>v. Arrays.update v 5 (ucast mode)) \<circ>
+             (fupdate ?N (\<lambda>v. Arrays.update v 4 (ucast copy_size)) \<circ>
+             (fupdate ?N (\<lambda>v. Arrays.update v 3 3) \<circ>
+             (fupdate ?N (\<lambda>v. Arrays.update v 2 0) \<circ>
+             (fupdate ?N (\<lambda>v. Arrays.update v (Suc 0) (ucast add_size)) \<circ>
+              fupdate ?N (\<lambda>v. Arrays.update v 0 1)))))) s)
+          (Suc ?N)"
+    using code_tbl_matches_upto_add_copy_low_extend
+      [OF match N_eq mode_hi add_lo add_hi copy_lo copy_hi]
+    by (simp add: o_assoc)
+  thus ?thesis using Suc_eq by simp
+qed
+
+lemma code_tbl_matches_upto_add_copy_low_step_vcg:
+  fixes mode add_size copy_size :: "32 word"
+  assumes match: "code_tbl_matches_upto s
+                    (159 + (unat mode * 12
+                       + ((unat add_size - Suc 0) * 3 + unat copy_size)))"
+      and mode_hi: "unat mode \<le> 5"
+      and add_lo: "1 \<le> unat add_size"
+      and add_hi: "unat add_size \<le> 4"
+      and copy_lo: "4 \<le> unat copy_size"
+      and copy_hi: "unat copy_size \<le> 6"
+  shows "code_tbl_matches_upto
+          (code_tbl_''_update
+            (fupdate (159 + (unat mode * 12
+                + ((unat add_size - Suc 0) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v 5 (ucast mode)) \<circ>
+             (fupdate (159 + (unat mode * 12
+                + ((unat add_size - Suc 0) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v 4 (ucast copy_size)) \<circ>
+             (fupdate (159 + (unat mode * 12
+                + ((unat add_size - Suc 0) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v 3 3) \<circ>
+             (fupdate (159 + (unat mode * 12
+                + ((unat add_size - Suc 0) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v 2 0) \<circ>
+             (fupdate (159 + (unat mode * 12
+                + ((unat add_size - Suc 0) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v (Suc 0) (ucast add_size)) \<circ>
+              fupdate (159 + (unat mode * 12
+                + ((unat add_size - Suc 0) * 3 + unat copy_size)))
+               (\<lambda>v. Arrays.update v 0 1)))))) s)
+          (160 + (unat mode * 12
+             + ((unat add_size - Suc 0) * 3 + unat copy_size)))"
+proof -
+  have match': "code_tbl_matches_upto s
+                    (159 + (unat mode * 12
+                       + ((unat add_size - 1) * 3 + unat copy_size)))"
+    using match by simp
+  have step: "code_tbl_matches_upto
+          (code_tbl_''_update
+            (fupdate (159 + (unat mode * 12
+                + ((unat add_size - 1) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v 5 (ucast mode)) \<circ>
+             (fupdate (159 + (unat mode * 12
+                + ((unat add_size - 1) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v 4 (ucast copy_size)) \<circ>
+             (fupdate (159 + (unat mode * 12
+                + ((unat add_size - 1) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v 3 3) \<circ>
+             (fupdate (159 + (unat mode * 12
+                + ((unat add_size - 1) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v 2 0) \<circ>
+             (fupdate (159 + (unat mode * 12
+                + ((unat add_size - 1) * 3 + unat copy_size)))
+              (\<lambda>v. Arrays.update v (Suc 0) (ucast add_size)) \<circ>
+              fupdate (159 + (unat mode * 12
+                + ((unat add_size - 1) * 3 + unat copy_size)))
+               (\<lambda>v. Arrays.update v 0 1)))))) s)
+          (160 + (unat mode * 12
+             + ((unat add_size - 1) * 3 + unat copy_size)))"
+    by (rule code_tbl_matches_upto_add_copy_low_step_nested
+        [OF match' mode_hi add_lo add_hi copy_lo copy_hi])
+  thus ?thesis by simp
+qed
 
 lemma build_code_table'_spec:
   "build_code_table' \<bullet> s
@@ -1576,145 +1884,347 @@ lemma build_code_table'_spec:
            \<comment> \<open>Exit Loop 4 outer: mode = 6. idx = 163 + 6*12 = 235.
                Continue with Loop 5 (ADD+COPY modes 6..8, copy_size=4 fixed)
                + Loop 6 (COPY+ADD, 9 entries) + final modify. TODO.\<close>
-        subgoal for x2 t2 sorry
-           \<comment> \<open>Body Loop 4 (outer). Runs middle loop (add_size 1..4),
-               each middle iter runs inner loop (copy_size 4..6).
-               Total 12 entries per mode iteration.\<close>
-        subgoal for xp s4
+        subgoal for x2 t2
+          apply (cases t2, simp)
           apply clarsimp
+          apply (subgoal_tac "unat b = 6")
+           prefer 2 apply (simp add: word_less_nat_alt word_le_nat_alt)
+          apply simp
           apply runs_to_vcg
-          subgoal for y
+          apply (rule runs_to_whileLoop_res'[
+             where R = "measure (\<lambda>(p, _). 9 - unat (snd (p :: 32 word \<times> 32 word)))"
+               and I = "\<lambda>(idx :: 32 word, mode :: 32 word) s'.
+                           6 \<le> unat mode \<and> unat mode \<le> 9 \<and>
+                           idx = 0xEB + (mode - 6) * 4 \<and>
+                           code_tbl_matches_upto s' (235 + (unat mode - 6) * 4) \<and>
+                           near_arr_'' s' = near_arr_'' s \<and>
+                           same_arr_'' s' = same_arr_'' s \<and>
+                           code_tbl_built_'' s' = code_tbl_built_'' s"])
+          subgoal by simp
+          subgoal
+            apply clarsimp
+            apply (rule word_unat.Rep_inject[THEN iffD1])
+            apply (simp add: unat_word_ariths(1) unat_word_ariths(2))
+            done
+          subgoal for xh th
+            apply (cases th, simp)
+            apply (subgoal_tac "unat b = 9")
+             prefer 2 apply (simp add: word_less_nat_alt word_le_nat_alt)
+            apply simp
+            apply runs_to_vcg
             apply (rule runs_to_whileLoop_res'[
-               where R = "measure (\<lambda>(p, _). 5 - unat (fst (p :: 32 word \<times> 32 word)))"
-                 and I = "\<lambda>(add_size :: 32 word, idx :: 32 word) s'.
-                             1 \<le> unat add_size \<and> unat add_size \<le> 5 \<and>
-                             idx = 0xA3 + y * 0xC + (add_size - 1) * 3 \<and>
-                             code_tbl_matches_upto s' (163 + unat y * 12
-                                                      + (unat add_size - 1) * 3) \<and>
+               where R = "measure (\<lambda>(p, _). 9 - unat (snd (p :: 32 word \<times> 32 word)))"
+                 and I = "\<lambda>(idx :: 32 word, mode :: 32 word) s'.
+                             unat mode \<le> 9 \<and>
+                             idx = 247 + mode \<and>
+                             code_tbl_matches_upto s' (247 + unat mode) \<and>
                              near_arr_'' s' = near_arr_'' s \<and>
                              same_arr_'' s' = same_arr_'' s \<and>
                              code_tbl_built_'' s' = code_tbl_built_'' s"])
-               \<comment> \<open>wf\<close>
             subgoal by simp
-               \<comment> \<open>Initial\<close>
-            subgoal by simp
-               \<comment> \<open>Exit middle loop: add_size = 5, idx = 163+12y+12. After return (idx, y+1).\<close>
-            subgoal for x3 t3
-              apply (cases x3, simp)
+            subgoal
+              apply clarsimp
+              apply (rule word_unat.Rep_inject[THEN iffD1])
+              apply (simp add: unat_word_ariths(1) unat_word_ariths(2))
+              done
+            subgoal for xc tc
+              apply (cases tc, simp)
+              apply (subgoal_tac "unat b = 9")
+               prefer 2 apply (simp add: word_less_nat_alt word_le_nat_alt)
+              apply simp
               apply runs_to_vcg
-              subgoal for ab
-                apply clarsimp
-                apply (subgoal_tac "unat y < 6 \<and> unat (y + 1) = unat y + 1")
+              apply (rule code_tbl_matches_from_full_upto)
+              apply (simp add: code_tbl_matches_upto_def)
+              done
+            subgoal for xc tc
+              apply (cases tc, simp)
+              apply runs_to_vcg
+              subgoal for copy_mode
+                by (simp add: word_less_nat_alt unat_word_ariths(1))
+              subgoal for copy_mode
+                apply (subgoal_tac "unat copy_mode < 9")
+                 prefer 2 apply (simp add: word_less_nat_alt)
+                by (simp add: unat_word_ariths(1) word_less_nat_alt)
+              subgoal for copy_mode
+                apply (subgoal_tac "unat copy_mode < 9")
+                 prefer 2 apply (simp add: word_less_nat_alt)
+                apply (subgoal_tac "unat (copy_mode + 1) = unat copy_mode + 1")
                  prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
-                apply (erule conjE)
-                apply (subgoal_tac "unat ab = 5")
-                 prefer 2 apply (simp add: word_le_nat_alt word_less_nat_alt)
-                apply (intro conjI)
-                   subgoal by simp
+                apply (subgoal_tac "unat (0xF7 + copy_mode) = 247 + unat copy_mode")
+                 prefer 2 apply (simp add: unat_word_ariths(1))
+                apply (simp add: code_tbl_matches_upto_def)
+                apply (intro conjI allI impI)
+                subgoal for op
+                  apply (cases "op = 247 + unat copy_mode")
+                   subgoal
+                     apply simp
+                     apply (simp add: arr_fupdate_same arr_fupdate_other
+                                      entry_of_row_def byte_to_hi_def
+                                      copy_hi_def add_hi_def default_entry_copy_add
+                                      unat_ucast)
+                     done
                   subgoal
-                    apply (rule word_unat.Rep_inject[THEN iffD1])
-                    apply (simp add: unat_word_ariths(2))
+                    apply (simp add: arr_fupdate_other)
                     done
-                 subgoal by clarsimp
-                subgoal by (simp add: word_less_nat_alt)
+                  done
+                subgoal for op
+                  by (simp add: arr_fupdate_other)
+                done
+              subgoal for copy_mode
+                apply (subgoal_tac "unat copy_mode < 9")
+                 prefer 2 apply (simp add: word_less_nat_alt)
+                by (simp add: unat_word_ariths(1) word_less_nat_alt)
+  done
+  done
+          subgoal premises high_prems for outer_mode high_pair high_state
+          proof (cases high_pair)
+            case (Pair idx mode)
+            have mode_lt9: "unat mode < 9"
+              using high_prems Pair by (simp add: word_less_nat_alt)
+            have mode_bounds: "6 \<le> unat mode" "unat mode \<le> 8"
+              using high_prems Pair mode_lt9 by simp_all
+            show ?thesis
+              using high_prems Pair
+              apply simp
+              apply runs_to_vcg
+              apply (rule runs_to_whileLoop_res'[
+                 where R = "measure (\<lambda>(p, _). 5 - unat (fst (p :: 32 word \<times> 32 word)))"
+                   and I = "\<lambda>(add_size :: 32 word, idx' :: 32 word) s'.
+                               1 \<le> unat add_size \<and> unat add_size \<le> 5 \<and>
+                               idx' = 0xEB + (mode - 6) * 4 + (add_size - 1) \<and>
+                               code_tbl_matches_upto s'
+                                 (235 + (unat mode - 6) * 4 + (unat add_size - 1)) \<and>
+                               near_arr_'' s' = near_arr_'' s \<and>
+                               same_arr_'' s' = same_arr_'' s \<and>
+                               code_tbl_built_'' s' = code_tbl_built_'' s"])
+              subgoal by simp
+              subgoal by simp
+              subgoal for xi ti
+                apply (cases xi, simp)
+                apply runs_to_vcg
+                subgoal for add_size
+                  using mode_lt9 mode_bounds
+                  apply clarsimp
+                  apply (subgoal_tac "unat add_size = 5")
+                   prefer 2 apply (simp add: word_less_nat_alt word_le_nat_alt)
+                  apply (subgoal_tac "unat (mode + 1) = unat mode + 1")
+                   prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+                  apply (intro conjI)
+                      subgoal by simp
+                     subgoal by simp
+                    subgoal
+                      apply (rule word_unat.Rep_inject[THEN iffD1])
+                      apply (simp add: unat_word_ariths(1) unat_word_ariths(2))
+                      done
+                   subgoal
+                     apply (subgoal_tac
+                       "239 + (unat mode - 6) * 4 = 235 + (unat mode - 5) * 4")
+                      apply simp
+                     using mode_bounds apply linarith
+                     done
+                  subgoal by (simp add: word_less_nat_alt unat_word_ariths(1))
+                  done
+                done
+              subgoal for xi ti
+                apply (cases xi, simp)
+                apply runs_to_vcg
+                subgoal for add_size
+                  using mode_lt9 mode_bounds
+                  apply (subgoal_tac "unat add_size < 5")
+                   prefer 2 apply (simp add: word_less_nat_alt)
+                  by (simp add: word_less_nat_alt unat_word_ariths(1) unat_word_ariths(2))
+                subgoal for add_size
+                  apply (subgoal_tac "unat add_size < 5")
+                   prefer 2 apply (simp add: word_less_nat_alt)
+                  by (simp add: unat_word_ariths(1) word_less_nat_alt)
+                subgoal for add_size
+                  apply (subgoal_tac "unat add_size < 5")
+                   prefer 2 apply (simp add: word_less_nat_alt)
+                  by (simp add: unat_word_ariths(1) word_less_nat_alt)
+                subgoal for add_size
+                  using mode_lt9 mode_bounds
+                  apply (subgoal_tac "unat add_size < 5")
+                   prefer 2 apply (simp add: word_less_nat_alt)
+                  apply (subgoal_tac "unat (add_size + 1) = unat add_size + 1")
+                   prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+                  apply (subgoal_tac
+                    "unat (0xD2 + (mode * 4 + add_size)) =
+                       235 + (unat mode - 6) * 4 + (unat add_size - 1)")
+                   prefer 2 apply (simp add: unat_word_ariths(1) unat_word_ariths(2))
+                  apply simp
+                  apply (rule code_tbl_matches_upto_add_copy_high_step_nested)
+                      apply simp
+                     apply simp
+                    apply simp
+                   apply simp
+                  apply simp
+                  done
+                subgoal for add_size
+                  apply (subgoal_tac "unat add_size < 5")
+                   prefer 2 apply (simp add: word_less_nat_alt)
+                  by (simp add: unat_word_ariths(1) word_less_nat_alt)
                 done
               done
-               \<comment> \<open>Body middle loop: runs inner copy loop (copy_size 4..6)
-                   writing 3 entries, then returns (add_size+1, idx+3).\<close>
-            subgoal for x3 t3
-              apply (cases x3, simp)
+          qed
+  done
+        subgoal premises low_prems for loop3_mode low_pair low_state
+        proof (cases low_pair)
+          case (Pair idx mode)
+          have mode_lt6: "unat mode < 6"
+            using low_prems Pair by (simp add: word_less_nat_alt)
+          have mode_le5: "unat mode \<le> 5"
+            using mode_lt6 by simp
+          show ?thesis
+            using low_prems Pair
+            apply simp
+            apply runs_to_vcg
+            apply (rule runs_to_whileLoop_res'[
+               where R = "measure (\<lambda>(p, _). 5 - unat (fst (p :: 32 word \<times> 32 word)))"
+                 and I = "\<lambda>(add_size :: 32 word, idx' :: 32 word) s'.
+                             1 \<le> unat add_size \<and> unat add_size \<le> 5 \<and>
+                             idx' = 0xA3 + mode * 0xC + (add_size - 1) * 3 \<and>
+                             code_tbl_matches_upto s'
+                               (163 + unat mode * 12 + (unat add_size - 1) * 3) \<and>
+                             near_arr_'' s' = near_arr_'' s \<and>
+                             same_arr_'' s' = same_arr_'' s \<and>
+                             code_tbl_built_'' s' = code_tbl_built_'' s"])
+            subgoal by simp
+            subgoal by simp
+            subgoal for xi ti
+              apply (cases xi, simp)
               apply runs_to_vcg
               subgoal for add_size
-                apply (rule runs_to_whileLoop_res'[
-                   where R = "measure (\<lambda>(p, _). 7 - unat (fst (p :: 32 word \<times> 32 word)))"
-                     and I = "\<lambda>(copy_size :: 32 word, idx :: 32 word) s'.
-                                 4 \<le> unat copy_size \<and> unat copy_size \<le> 7 \<and>
-                                 idx = 0xA3 + y * 0xC + (add_size - 1) * 3
-                                        + (copy_size - 4) \<and>
-                                 code_tbl_matches_upto s' (163 + unat y * 12
-                                                          + (unat add_size - 1) * 3
-                                                          + (unat copy_size - 4)) \<and>
-                                 near_arr_'' s' = near_arr_'' s \<and>
-                                 same_arr_'' s' = same_arr_'' s \<and>
-                                 code_tbl_built_'' s' = code_tbl_built_'' s"])
-                subgoal by simp
-                subgoal by simp
-                \<comment> \<open>Inner exit: copy_size = 7, idx = 0xA3 + y*0xC + (add_size-1)*3 + 3.\<close>
-                subgoal for xi ti
-                  apply (cases xi, simp)
-                  apply runs_to_vcg
-                  subgoal for copy_size
-                    apply clarsimp
-                    apply (subgoal_tac "unat add_size < 5")
-                     prefer 2 apply (simp add: word_less_nat_alt)
-                    apply (subgoal_tac "unat (add_size + 1) = unat add_size + 1")
-                     prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
-                    apply (subgoal_tac "unat copy_size = 7")
-                     prefer 2 apply (simp add: word_le_nat_alt word_less_nat_alt)
-                    apply (intro conjI)
-                        subgoal by simp
-                       subgoal by simp
-                      subgoal
-                        apply (rule word_unat.Rep_inject[THEN iffD1])
-                        apply (simp add: unat_word_ariths(1) unat_word_ariths(2))
-                        done
-                     subgoal
-                       apply (subgoal_tac "Suc 0 \<le> unat add_size")
-                        prefer 2 apply simp
-                       apply (subgoal_tac
-                         "163 + unat y * 12 + (unat add_size + 1 - Suc 0) * 3
-                           = 159 + (unat y * 12 + ((unat add_size - Suc 0) * 3 + 7))")
-                        prefer 2 apply simp
-                       apply (simp only:)
-                       done
-                    subgoal by (simp add: word_less_nat_alt)
+                using mode_lt6 mode_le5
+                apply clarsimp
+                apply (subgoal_tac "unat add_size = 5")
+                 prefer 2 apply (simp add: word_less_nat_alt word_le_nat_alt)
+                apply (subgoal_tac "unat (mode + 1) = unat mode + 1")
+                 prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+                apply (intro conjI)
+                    subgoal by simp
+                   subgoal
+                     apply (rule word_unat.Rep_inject[THEN iffD1])
+                     apply (simp add: unat_word_ariths(1) unat_word_ariths(2))
+                     done
+                  subgoal
+                    apply (subgoal_tac "163 + (unat mode + 1) * 12 =
+                                        175 + unat mode * 12")
+                     apply simp
+                    apply simp
                     done
-                  done
-                \<comment> \<open>Inner body: write (1, add_size, 0, 3, copy_size, y) at idx.
-                    After runs_to_vcg, subgoals are: guard, bounds, idx, matches.\<close>
-                subgoal for xi ti
-                  apply (cases xi, simp)
-                  apply runs_to_vcg
-                  subgoal for copy_size \<comment> \<open>guard idx < 256\<close>
-                    apply (subgoal_tac "unat y \<le> 5 \<and> Suc 0 \<le> unat add_size
-                                        \<and> unat add_size \<le> 4 \<and> 4 \<le> unat copy_size
-                                        \<and> unat copy_size < 7")
-                     prefer 2 apply (simp add: word_less_nat_alt)
-                    by (simp add: word_less_nat_alt unat_word_ariths(1) unat_word_ariths(2))
-                  subgoal for copy_size \<comment> \<open>size lower bound 4 \<le> unat (copy_size + 1)\<close>
-                    apply (subgoal_tac "unat copy_size < 7")
-                     prefer 2 apply (simp add: word_less_nat_alt)
-                    by (simp add: unat_word_ariths(1) word_less_nat_alt)
-                  subgoal for copy_size \<comment> \<open>size upper bound unat (copy_size + 1) \<le> 7\<close>
-                    apply (subgoal_tac "unat copy_size < 7")
-                     prefer 2 apply (simp add: word_less_nat_alt)
-                    by (simp add: unat_word_ariths(1) word_less_nat_alt)
-                  subgoal for copy_size \<comment> \<open>matches_upto preservation — TODO\<close>
-                    sorry
-                  subgoal for copy_size \<comment> \<open>measure decrease\<close>
-                    apply (subgoal_tac "unat copy_size < 7")
-                     prefer 2 apply (simp add: word_less_nat_alt)
-                    by (simp add: unat_word_ariths(1) word_less_nat_alt)
-                  done
+                 subgoal by simp
                 done
               done
+            subgoal for xi ti
+              apply (cases xi, simp)
+              apply runs_to_vcg
+              apply (rule runs_to_whileLoop_res'[
+                 where R = "measure (\<lambda>(p, _). 7 - unat (fst (p :: 32 word \<times> 32 word)))"
+                   and I = "\<lambda>(copy_size :: 32 word, idx' :: 32 word) s'.
+                               4 \<le> unat copy_size \<and> unat copy_size \<le> 7 \<and>
+                               idx' = 0xA3 + mode * 0xC + (fst xi - 1) * 3
+                                      + (copy_size - 4) \<and>
+                               code_tbl_matches_upto s'
+                                 (163 + unat mode * 12 + (unat (fst xi) - 1) * 3
+                                      + (unat copy_size - 4)) \<and>
+                               near_arr_'' s' = near_arr_'' s \<and>
+                               same_arr_'' s' = same_arr_'' s \<and>
+                               code_tbl_built_'' s' = code_tbl_built_'' s"])
+              subgoal by simp
+              subgoal by simp
+              subgoal for xci tci
+                apply (cases tci, simp)
+                apply runs_to_vcg
+                subgoal
+                  apply clarsimp
+                  apply (subgoal_tac "unat (fst xi) < 5")
+                   prefer 2 apply (simp add: word_less_nat_alt)
+                  apply (subgoal_tac "unat (fst xi + 1) = unat (fst xi) + 1")
+                   prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+                  apply (subgoal_tac "unat (fst tci) = 7")
+                   prefer 2 apply (simp add: word_le_nat_alt word_less_nat_alt)
+                  apply (intro conjI)
+                      subgoal by simp
+                     subgoal by simp
+                    subgoal
+                      apply (rule word_unat.Rep_inject[THEN iffD1])
+                      apply (simp add: unat_word_ariths(1) unat_word_ariths(2))
+                      done
+                   subgoal
+                     apply (subgoal_tac
+                       "163 + unat mode * 12 + (unat (fst xi) + 1 - Suc 0) * 3
+                        = 159 + (unat mode * 12
+                           + ((unat (fst xi) - Suc 0) * 3 + 7))")
+                      apply simp
+                     apply simp
+                     done
+                  subgoal by (simp add: word_less_nat_alt)
+                  done
+                done
+              subgoal premises copy_prems for xci tci
+              proof (cases tci)
+                case (Pair copy_size copy_idx)
+                show ?thesis
+                  using copy_prems Pair mode_le5
+                  apply simp
+                  apply runs_to_vcg
+                  subgoal
+                    apply (subgoal_tac "unat (fst xi) < 5")
+                     prefer 2 apply (simp add: word_less_nat_alt)
+                    apply (subgoal_tac "unat copy_size < 7")
+                     prefer 2 apply (simp add: word_less_nat_alt)
+                    by (simp add: word_less_nat_alt unat_word_ariths(1) unat_word_ariths(2))
+                  subgoal
+                    apply (subgoal_tac "unat copy_size < 7")
+                     prefer 2 apply (simp add: word_less_nat_alt)
+                    by (simp add: unat_word_ariths(1) word_less_nat_alt)
+                  subgoal
+                    apply (subgoal_tac "unat copy_size < 7")
+                     prefer 2 apply (simp add: word_less_nat_alt)
+                    by (simp add: unat_word_ariths(1) word_less_nat_alt)
+                  subgoal
+                    apply (subgoal_tac "unat (fst xi) < 5")
+                     prefer 2 apply (simp add: word_less_nat_alt)
+                    apply (subgoal_tac "unat copy_size < 7")
+                     prefer 2 apply (simp add: word_less_nat_alt)
+                    apply (subgoal_tac "unat (copy_size + 1) = unat copy_size + 1")
+                     prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
+                    apply (subgoal_tac
+                      "unat (0x9F + (mode * 0xC + ((fst xi - 1) * 3 + copy_size))) =
+                         159 + (unat mode * 12
+                           + ((unat (fst xi) - 1) * 3 + unat copy_size))")
+                     prefer 2 apply (simp add: unat_word_ariths(1) unat_word_ariths(2))
+                    apply simp
+                    apply (rule code_tbl_matches_upto_add_copy_low_step_vcg
+                      [where mode=mode and add_size=xci and copy_size=copy_size])
+                         apply simp
+                        apply simp
+                       apply simp
+                      apply simp
+                     apply simp
+                    apply simp
+                    done
+                  subgoal
+                    apply (subgoal_tac "unat copy_size < 7")
+                     prefer 2 apply (simp add: word_less_nat_alt)
+                    by (simp add: unat_word_ariths(1) word_less_nat_alt)
+                  done
+              qed
+              done
             done
-          done
-        done
+        qed
+  done
          \<comment> \<open>Body Loop 3 (outer). First writes the size-0 entry at idx = 19+mode*16,
              then runs the inner size-loop for sizes 4..18.\<close>
       subgoal for x t''
         apply clarsimp
         apply runs_to_vcg
-           \<comment> \<open>Guard idx < 0x100: true since idx = 19 + mode*16 and mode \<le> 8.\<close>
         subgoal for y
           apply (subgoal_tac "unat y < 9")
            prefer 2 apply (simp add: word_less_nat_alt)
           apply (simp add: word_less_nat_alt unat_word_ariths(1)
                            unat_word_ariths(2))
           done
-           \<comment> \<open>Inner loop: sizes 4..18 write 15 more entries.
-               Initial (idx, size) = (20+16*y, 4). Final (35+16*y, 19).\<close>
         subgoal for y
           apply (rule runs_to_whileLoop_res'[
              where R = "measure (\<lambda>(p, _). 19 - unat (snd (p :: 32 word \<times> 32 word)))"
@@ -1725,11 +2235,7 @@ lemma build_code_table'_spec:
                            near_arr_'' s' = near_arr_'' s \<and>
                            same_arr_'' s' = same_arr_'' s \<and>
                            code_tbl_built_'' s' = code_tbl_built_'' s"])
-             \<comment> \<open>wf R\<close>
           subgoal by simp
-             \<comment> \<open>Initial I (20+16*y, 4): need matches_upto 20+16*y.
-                 The 3 modifies add (3, 0, y, 0, 0, 0) at row (19+16y)
-                 which matches default_entry (19+16y) = (copy_hi 0 y, noop_hi).\<close>
           subgoal
             apply clarsimp
             apply (subgoal_tac "unat y \<le> 8")
@@ -1763,7 +2269,6 @@ lemma build_code_table'_spec:
             subgoal for op
               by (simp add: arr_fupdate_other code_tbl_matches_upto_def)
             done
-             \<comment> \<open>Exit inner loop.\<close>
           subgoal for x t'''
             apply (cases x, simp)
             apply runs_to_vcg
@@ -1783,26 +2288,21 @@ lemma build_code_table'_spec:
              subgoal by clarsimp
             subgoal by (simp add: word_less_nat_alt)
             done
-             \<comment> \<open>Inner body: size \<to> size+1, write next COPY entry.\<close>
           subgoal for x t'''
             apply clarsimp
             apply runs_to_vcg
-              \<comment> \<open>(1) guard\<close>
             subgoal for ya
               apply (subgoal_tac "unat ya \<le> 18 \<and> unat y \<le> 8")
                prefer 2 apply (simp add: word_less_nat_alt)
               by (simp add: word_less_nat_alt unat_word_ariths(1) unat_word_ariths(2))
-              \<comment> \<open>(2) 4 \<le> unat (ya + 1)\<close>
             subgoal for ya
               apply (subgoal_tac "unat ya < 19")
                prefer 2 apply (simp add: word_less_nat_alt)
               by (simp add: unat_word_ariths(1) word_less_nat_alt)
-              \<comment> \<open>(3) unat (ya + 1) \<le> 19\<close>
             subgoal for ya
               apply (subgoal_tac "unat ya < 19")
                prefer 2 apply (simp add: word_less_nat_alt)
               by (simp add: unat_word_ariths(1) word_less_nat_alt)
-              \<comment> \<open>(4) matches_upto preservation\<close>
             subgoal for ya
               apply (subgoal_tac "unat ya \<le> 18 \<and> 4 \<le> unat ya \<and> unat y \<le> 8")
                prefer 2 apply (simp add: word_less_nat_alt)
@@ -1841,7 +2341,6 @@ lemma build_code_table'_spec:
               subgoal for op
                 by (simp add: arr_fupdate_other)
               done
-              \<comment> \<open>(5) measure decrease\<close>
             subgoal for ya
               apply (subgoal_tac "unat ya < 19")
                prefer 2 apply (simp add: word_less_nat_alt)
@@ -1854,11 +2353,11 @@ lemma build_code_table'_spec:
     subgoal for a t'
       apply clarsimp
       apply runs_to_vcg
-      subgoal \<comment> \<open>guard: 1 + a < 0x100\<close>
+      subgoal
         by (simp add: word_less_nat_alt unat_word_ariths(1))
-      subgoal \<comment> \<open>unat bound\<close>
+      subgoal
         by (simp add: word_less_nat_alt unat_word_ariths(1))
-      subgoal \<comment> \<open>matches_upto preservation.\<close>
+      subgoal
         apply (subgoal_tac "unat (a + 1) = unat a + 1")
          prefer 2 apply (simp add: unat_word_ariths(1) word_less_nat_alt)
         apply (subgoal_tac "unat (1 + a) = 1 + unat a")
@@ -1870,7 +2369,6 @@ lemma build_code_table'_spec:
         subgoal for op
           apply (cases "op = 1 + unat a")
            subgoal
-             \<comment> \<open>Newly written position. Row was all-zero in t' (beyond Suc (unat a)).\<close>
              apply simp
              apply (simp add: arr_fupdate_same arr_fupdate_other)
              apply (subgoal_tac "all_zero_row (code_tbl_'' t' .[Suc (unat a)])")
@@ -1898,11 +2396,11 @@ lemma build_code_table'_spec:
         subgoal for op
           by (simp add: arr_fupdate_other)
         done
-      subgoal \<comment> \<open>measure decrease\<close>
+      subgoal
         by (simp add: word_less_nat_alt unat_word_ariths(1))
       done
     done
-     \<comment> \<open>Body step: 3 subgoals (unat bound, invariant preservation, measure).\<close>
+     \<comment> \<open>Body step: zero-initialise the current row and advance the index.\<close>
   subgoal for a t
     apply runs_to_vcg
     subgoal by (simp add: word_less_nat_alt unat_word_ariths(1))
@@ -1951,7 +2449,6 @@ lemma build_code_table'_spec:
     subgoal by (simp add: word_less_nat_alt unat_word_ariths(1))
     done
   done
-
 (* ---------- vcdiff_decode main refinement (TODO) ---------- *)
 
 (*
