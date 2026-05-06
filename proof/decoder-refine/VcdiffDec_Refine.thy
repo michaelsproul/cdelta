@@ -2645,6 +2645,47 @@ proof -
     done
 qed
 
+lemma vcdiff_decode'_appheader_len5_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch 5"
+      and len_eq: "patch_len = 5"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and magic1_ok: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+      and magic2_ok: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
+      and magic3_ok: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
+      and hdr_ok: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 3 = 0"
+      and app_set: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 4 \<noteq> 0"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+proof -
+  have patch0_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 0)"
+    using buf_validD[OF patch_ok, of 0] by simp
+  have patch1_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 1)"
+    using buf_validD[OF patch_ok, of 1] by simp
+  have patch2_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 2)"
+    using buf_validD[OF patch_ok, of 2] by simp
+  have patch3_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 3)"
+    using buf_validD[OF patch_ok, of 3] by simp
+  have patch4_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 4)"
+    using buf_validD[OF patch_ok, of 4] by simp
+  have buf_upd: "buf_valid (heap_w32_update (\<lambda>h. h(out_len := 0)) s) patch 5"
+    using patch_ok by simp
+  show ?thesis
+    unfolding vcdiff_decode'_def
+    apply runs_to_vcg
+    using out_len_ok len_eq magic0_ok magic1_ok magic2_ok magic3_ok hdr_ok app_set
+          patch0_ok patch1_ok patch2_ok patch3_ok patch4_ok
+    apply (auto simp: word_less_nat_alt word_le_nat_alt)
+    subgoal
+      apply (rule runs_to_weaken[
+        OF read_varint'_at_end_nonok
+         [where s = "heap_w32_update (\<lambda>h. h(out_len := 0)) s" and buf = patch and len = 5]])
+      subgoal using buf_upd by simp
+      apply (clarsimp simp: len_eq)
+      done
+    done
+qed
+
 (*
   The big one. Top-level Hoare triple:
 
