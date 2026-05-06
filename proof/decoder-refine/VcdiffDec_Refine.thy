@@ -3308,37 +3308,247 @@ next
     done
 qed
 
+(* ---------- Phase 2: Header + window parse refinement ---------- *)
+
 (*
-  The big one. Top-level Hoare triple:
-
-    {{ ptr_valid patch_len; ptr_valid src_len; ptr_valid out_cap;
-       ptr_valid out_len; buffer preconds; disjoint_buffers;
-       src_len, patch_len, out_cap < 2^32 }}
-      vcdiff_decode' patch patch_len src src_len out out_cap out_len
-    {{ λrv s'.
-        case decode_spec (heap_bytes s patch (unat patch_len))
-                         (heap_bytes s src (unat src_len)) of
-          Inl tgt ⇒
-            rv = Result VCD_OK \<and>
-            heap_bytes s' out (length tgt) = tgt \<and>
-            heap_w32 s' out_len = of_nat (length tgt) \<and>
-            (pointers outside [out..length tgt), out_len, near_arr, same_arr
-              unchanged)
-        | Inr _ ⇒ rv ≠ Result VCD_OK }}
-
-  Proof structure (top-down):
-    1. Header parse (magic, 0x00, Hdr_Indicator): 30 lines, mechanical.
-    2. Adler-32 skip and window header: another 30 lines, calls read_varint'.
-    3. Main while loop over inst_cursor < inst_end.
-    4. Cache re-init + code_tbl build precondition.
-    5. Size-consistency post-checks (tgt_pos = tgt_len etc).
-
-  The main loop invariant ties the C's (data_cursor, inst_cursor,
-  addr_cursor, tgt_pos, near_ptr, near_arr, same_arr) to the spec's
-  decode_loop state via encode_window_loop_decode_loop.
-
-  Effort: ~2 weeks, dominated by the main-loop invariant.
+  cache_abs_init: after the near/same init loops zero out the arrays,
+  the C state corresponds to cache_init with near_ptr = 0.
 *)
+lemma cache_abs_init_zero:
+  assumes near_zero: "\<forall>i < (4::nat). near_arr_'' s .[i] = (0 :: 32 word)"
+      and same_zero: "\<forall>i < (768::nat). same_arr_'' s .[i] = (0 :: 32 word)"
+  shows "cache_abs s cache_init 0"
+proof (unfold cache_abs_def, intro conjI)
+  show "length (near cache_init) = s_near"
+    by (simp add: cache_init_def s_near_def)
+  show "length (same cache_init) = same_buckets"
+    by (simp add: cache_init_def same_buckets_def s_same_def)
+  show "unat (0 :: 32 word) < s_near"
+    by (simp add: s_near_def)
+  show "near_ptr cache_init = unat (0 :: 32 word)"
+    by (simp add: cache_init_def)
+  show "\<forall>i < s_near. near_arr_'' s .[i] = of_nat (near cache_init ! i)"
+  proof (intro allI impI)
+    fix i :: nat assume "i < s_near"
+    hence "i < 4" by (simp add: s_near_def)
+    have near_is_rep: "near cache_init = replicate 4 (0::nat)"
+      by (simp add: cache_init_def s_near_def)
+    have "near cache_init ! i = 0"
+      using \<open>i < 4\<close>
+      by (simp only: near_is_rep nth_replicate)
+    thus "near_arr_'' s .[i] = of_nat (near cache_init ! i)"
+      using near_zero \<open>i < 4\<close> by simp
+  qed
+  show "\<forall>i < same_buckets. same_arr_'' s .[i] = of_nat (same cache_init ! i)"
+  proof (intro allI impI)
+    fix i :: nat assume "i < same_buckets"
+    hence "i < 768" by (simp add: same_buckets_def s_same_def)
+    have len_same: "length (same cache_init) = 768"
+      by (simp add: cache_init_def same_buckets_def s_same_def)
+    have same_is_rep: "same cache_init = replicate 768 (0::nat)"
+      by (simp add: cache_init_def same_buckets_def s_same_def)
+    have "same cache_init ! i = 0"
+      using \<open>i < 768\<close>
+      by (simp only: same_is_rep nth_replicate)
+    thus "same_arr_'' s .[i] = of_nat (same cache_init ! i)"
+      using same_zero \<open>i < 768\<close> by simp
+  qed
+qed
+
+(*
+  Near-init loop: stronger postcondition that guarantees all slots are zero.
+*)
+lemma near_init_loop_zeros:
+  "(whileLoop (\<lambda>idx st. unat idx < 4)
+      (\<lambda>idx. do {
+          modify (near_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (4 :: 32 word)
+          \<and> (\<forall>i < (4::nat). near_arr_'' t .[i] = (0 :: 32 word))
+          \<and> heap_w8 t = heap_w8 s0
+          \<and> heap_w32 t = heap_w32 s0
+          \<and> same_arr_'' t = same_arr_'' s0
+          \<and> code_tbl_'' t = code_tbl_'' s0
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+     where R = "measure (\<lambda>((idx :: 32 word), _). 4 - unat idx)"
+       and I = "\<lambda>idx st. unat idx \<le> 4
+              \<and> (\<forall>i < unat idx. near_arr_'' st .[i] = (0 :: 32 word))
+              \<and> heap_w8 st = heap_w8 s0
+              \<and> heap_w32 st = heap_w32 s0
+              \<and> same_arr_'' st = same_arr_'' s0
+              \<and> code_tbl_'' st = code_tbl_'' s0
+              \<and> code_tbl_built_'' st = code_tbl_built_'' s0
+              \<and> heap_typing st = heap_typing s0"])
+  subgoal by simp
+  subgoal by simp
+  subgoal for idx st
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (subst word_unat_eq_iff)
+    apply simp
+    done
+  subgoal for idx st
+    apply runs_to_vcg
+    apply (simp_all add: word_less_nat_alt unat_word_ariths(1))
+    subgoal for i
+      apply (cases "i = unat idx")
+       apply simp
+      apply (subgoal_tac "i < unat idx")
+       apply simp
+      apply (simp add: less_Suc_eq)
+      done
+    done
+  done
+
+(*
+  Same-init loop: stronger postcondition that guarantees all slots are zero.
+*)
+lemma same_init_loop_zeros:
+  "(whileLoop (\<lambda>idx st. unat idx < 768)
+      (\<lambda>idx. do {
+          modify (same_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (768 :: 32 word)
+          \<and> (\<forall>i < (768::nat). same_arr_'' t .[i] = (0 :: 32 word))
+          \<and> heap_w8 t = heap_w8 s0
+          \<and> heap_w32 t = heap_w32 s0
+          \<and> near_arr_'' t = near_arr_'' s0
+          \<and> code_tbl_'' t = code_tbl_'' s0
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+     where R = "measure (\<lambda>((idx :: 32 word), _). 768 - unat idx)"
+       and I = "\<lambda>idx st. unat idx \<le> 768
+              \<and> (\<forall>i < unat idx. same_arr_'' st .[i] = (0 :: 32 word))
+              \<and> heap_w8 st = heap_w8 s0
+              \<and> heap_w32 st = heap_w32 s0
+              \<and> near_arr_'' st = near_arr_'' s0
+              \<and> code_tbl_'' st = code_tbl_'' s0
+              \<and> code_tbl_built_'' st = code_tbl_built_'' s0
+              \<and> heap_typing st = heap_typing s0"])
+  subgoal by simp
+  subgoal by simp
+  subgoal for idx st
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (subst word_unat_eq_iff)
+    apply simp
+    done
+  subgoal for idx st
+    apply runs_to_vcg
+    apply (simp_all add: word_less_nat_alt unat_word_ariths(1))
+    subgoal for i
+      apply (cases "i = unat idx")
+       apply simp
+      apply (subgoal_tac "i < unat idx")
+       apply simp
+      apply (simp add: less_Suc_eq)
+      done
+    done
+  done
+
+(*
+  Header parse prefix refinement (no-source, no-app-header, code_tbl built).
+
+  This is the simplest success-path scenario. Shows that the C decoder
+  reaches the main while-loop entry with cursors matching parse_window.
+
+  Assumptions on the patch buffer:
+    - Magic: D6 C3 C4 00
+    - Hdr_Indicator: low 2 bits clear, bit 2 clear (no app header)
+    - win_ind: VCD_SOURCE clear (0x01 bit = 0), VCD_TARGET clear, mask clear
+    - Varints for dlen, tgt_len, di=0, data_len, inst_len, addr_len all parse
+    - No Adler32 (win_ind bit 2 = 0)
+    - Section sizes consistent: data_len + inst_len + addr_len fits in remaining
+
+  Under these, after header parsing, the C state has:
+    - data_cursor, inst_cursor, addr_cursor pointing into the patch buffer
+    - tgt_pos = 0
+    - near_ptr = 0
+    - near_arr all zero, same_arr all zero (cache_abs cache_init 0)
+    - code_tbl_matches holds
+    - heap_bytes of patch and src unchanged
+*)
+
+(*
+  Helper: read_varint' applied to a specific position in the patch buffer,
+  used to chain multiple varint reads.
+*)
+lemma rest_len_le:
+  assumes "varint_decode (drop k bs) = Some (nv, rest)"
+  shows "length rest \<le> length bs - k"
+proof -
+  have "length rest \<le> length (drop k bs)"
+    by (rule varint_decode_length[OF assms])
+  thus ?thesis by simp
+qed
+
+lemma read_varint'_chain:
+  assumes buf_ok: "buf_valid s buf (unat len)"
+      and pos_ok: "pos \<le> len"
+      and decode_ok: "varint_decode (drop (unat pos) (heap_bytes s buf (unat len)))
+                     = Some (nv, rest)"
+      and nv_fits: "nv < 2 ^ 32"
+  shows "read_varint' buf len pos \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and>
+                  r = Result (pr_t_C (len - of_nat (length rest))
+                                     (of_nat nv) VCD_OK) \<and>
+                  pos \<le> len - of_nat (length rest) \<and>
+                  len - of_nat (length rest) \<le> len \<rbrace>"
+proof -
+  let ?new_pos = "len - of_nat (length rest) :: 32 word"
+  have rest_le_input: "length rest \<le> length (drop (unat pos) (heap_bytes s buf (unat len)))"
+    by (rule varint_decode_length[OF decode_ok])
+  hence rest_le_len: "length rest \<le> unat len"
+    by simp
+  have rest_lt_2p32: "length rest < 2 ^ 32"
+    using rest_le_len unat_lt2p[of len] by simp
+  have unat_rest_word: "unat (of_nat (length rest) :: 32 word) = length rest"
+    using rest_lt_2p32 by (simp add: unat_of_nat_eq)
+  have rest_word_le_len: "(of_nat (length rest) :: 32 word) \<le> len"
+    using rest_le_len unat_rest_word by (simp add: word_le_nat_alt)
+  have unat_new_pos: "unat ?new_pos = unat len - length rest"
+    using rest_word_le_len unat_rest_word by (simp add: unat_sub)
+  have goal_post: "\<And>r t.
+    t = s \<and> (\<exists>v. r = Result v \<and>
+         pos \<le> pr_t_C.pos_C v \<and> pr_t_C.pos_C v \<le> len \<and>
+         (case varint_decode (drop (unat pos) (heap_bytes s buf (unat len))) of
+            Some (nv, rest) \<Rightarrow> pr_t_C.err_C v = VCD_OK \<and>
+               unat (pr_t_C.pos_C v) = unat len - length rest \<and>
+               nv = unat (pr_t_C.val_C v)
+          | None \<Rightarrow> pr_t_C.err_C v \<noteq> VCD_OK))
+    \<Longrightarrow> t = s \<and> r = Result (pr_t_C ?new_pos (of_nat nv) VCD_OK) \<and>
+        pos \<le> ?new_pos \<and> ?new_pos \<le> len"
+  proof -
+    fix r t
+    assume H: "t = s \<and> (\<exists>v. r = Result v \<and>
+         pos \<le> pr_t_C.pos_C v \<and> pr_t_C.pos_C v \<le> len \<and>
+         (case varint_decode (drop (unat pos) (heap_bytes s buf (unat len))) of
+            Some (nv, rest) \<Rightarrow> pr_t_C.err_C v = VCD_OK \<and>
+               unat (pr_t_C.pos_C v) = unat len - length rest \<and>
+               nv = unat (pr_t_C.val_C v)
+          | None \<Rightarrow> pr_t_C.err_C v \<noteq> VCD_OK))"
+    from H obtain v where ts: "t = s" and rv: "r = Result v"
+      and pv_le: "pos \<le> pr_t_C.pos_C v" and pv_le_len: "pr_t_C.pos_C v \<le> len"
+      and err_ok: "pr_t_C.err_C v = VCD_OK"
+      and pos_unat: "unat (pr_t_C.pos_C v) = unat len - length rest"
+      and nv_unat: "nv = unat (pr_t_C.val_C v)"
+      using decode_ok by (auto split: option.splits)
+    have pos_eq: "pr_t_C.pos_C v = ?new_pos"
+      using pos_unat unat_new_pos by (simp add: word_unat_eq_iff)
+    have val_eq: "pr_t_C.val_C v = of_nat nv"
+      using nv_unat nv_fits by (simp add: word_unat_eq_iff unat_of_nat_eq)
+    have v_eq: "v = pr_t_C ?new_pos (of_nat nv) VCD_OK"
+      using pos_eq val_eq err_ok by (cases v) simp
+    show "t = s \<and> r = Result (pr_t_C ?new_pos (of_nat nv) VCD_OK) \<and>
+          pos \<le> ?new_pos \<and> ?new_pos \<le> len"
+      using ts rv v_eq pv_le pv_le_len pos_eq by simp
+  qed
+  show ?thesis
+    by (rule runs_to_weaken[OF read_varint'_spec[OF buf_ok pos_ok] goal_post])
+qed
 
 end
 
