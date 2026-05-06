@@ -4041,6 +4041,56 @@ lemma run_loop_correct:
     done
   done
 
+(*
+  COPY instruction inner loop: copies sz bytes where each source byte
+  comes from either src[src_seg_off + a] (if a < src_seg_len) or
+  out[a - src_seg_len] (overlapping copy from already-written output).
+
+  The loop invariant tracks:
+  - Patch/src heaps unchanged (writes only go to out[tgt_pos..])
+  - Output bytes written so far match copy_loop semantics
+  - heap_typing preserved
+
+  This is the hardest instruction because the source for each byte can
+  be a previously-written output byte (overlapping copy).
+*)
+
+(* copy_loop preserves the prefix *)
+lemma copy_loop_prefix:
+  "i < length tgt \<Longrightarrow> copy_loop src tgt addr n ! i = tgt ! i"
+  by (induct n arbitrary: tgt addr) (simp_all add: nth_append)
+
+(* Helper: copy_loop_nth characterization for indexing into the result *)
+lemma copy_loop_nth:
+  assumes "k < n"
+  shows "copy_loop src tgt addr n ! (length tgt + k) =
+         combined_byte src (copy_loop src tgt addr k) (addr + k)"
+  using assms
+proof (induct k arbitrary: tgt addr n)
+  case 0
+  then obtain n' where n_eq: "n = Suc n'" by (cases n) simp_all
+  show ?case
+    unfolding n_eq by (simp add: copy_loop_prefix nth_append)
+next
+  case (Suc k)
+  then obtain n' where n_eq: "n = Suc n'" by (cases n) simp_all
+  have step: "copy_loop src tgt addr (Suc n') =
+              copy_loop src (tgt @ [combined_byte src tgt addr]) (addr + 1) n'"
+    by simp
+  have "copy_loop src tgt addr (Suc n') ! (length tgt + Suc k)
+      = copy_loop src (tgt @ [combined_byte src tgt addr]) (addr + 1) n'
+        ! (length (tgt @ [combined_byte src tgt addr]) + k)"
+    by simp
+  also have "\<dots> = combined_byte src
+                    (copy_loop src (tgt @ [combined_byte src tgt addr]) (addr + 1) k)
+                    (addr + 1 + k)"
+    using Suc.hyps[where tgt="tgt @ [combined_byte src tgt addr]"
+                     and addr="addr + 1" and n=n']
+          Suc.prems n_eq by simp
+  also have "addr + 1 + k = addr + Suc k" by simp
+  finally show ?case using n_eq by simp
+qed
+
 end
 
 end
