@@ -2686,6 +2686,78 @@ proof -
     done
 qed
 
+lemma vcdiff_decode'_short_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and short_patch: "patch_len < 5"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+  apply (rule runs_to_weaken[OF vcdiff_decode'_short_patch[OF out_len_ok short_patch]])
+  by simp
+
+lemma vcdiff_decode'_magic0_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch 1"
+      and len_ok: "5 \<le> patch_len"
+      and bad_magic0: "uint (heap_w8 s patch) \<noteq> 214"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+  apply (rule runs_to_weaken[OF vcdiff_decode'_magic0_fail[OF out_len_ok patch_ok len_ok bad_magic0]])
+  by simp
+
+lemma vcdiff_decode'_magic1_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch 2"
+      and len_ok: "5 \<le> patch_len"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and bad_magic1: "uint (heap_w8 s (patch +\<^sub>p 1)) \<noteq> 195"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF vcdiff_decode'_magic1_fail[OF out_len_ok patch_ok len_ok magic0_ok bad_magic1]])
+  by simp
+
+lemma vcdiff_decode'_magic2_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch 3"
+      and len_ok: "5 \<le> patch_len"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and magic1_ok: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+      and bad_magic2: "uint (heap_w8 s (patch +\<^sub>p 2)) \<noteq> 196"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF vcdiff_decode'_magic2_fail[OF out_len_ok patch_ok len_ok magic0_ok magic1_ok bad_magic2]])
+  by simp
+
+lemma vcdiff_decode'_magic3_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch 4"
+      and len_ok: "5 \<le> patch_len"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and magic1_ok: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+      and magic2_ok: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
+      and bad_magic3: "uint (heap_w8 s (patch +\<^sub>p 3)) \<noteq> 0"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF vcdiff_decode'_magic3_fail[OF out_len_ok patch_ok len_ok magic0_ok magic1_ok magic2_ok bad_magic3]])
+  by simp
+
+lemma vcdiff_decode'_hdr_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch 5"
+      and len_ok: "5 \<le> patch_len"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and magic1_ok: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+      and magic2_ok: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
+      and magic3_ok: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
+      and bad_hdr: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 3 \<noteq> 0"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF vcdiff_decode'_hdr_fail[OF out_len_ok patch_ok len_ok magic0_ok magic1_ok magic2_ok magic3_ok bad_hdr]])
+  by simp
+
 (*
   The big one. Top-level Hoare triple:
 
