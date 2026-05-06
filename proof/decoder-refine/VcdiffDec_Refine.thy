@@ -3977,6 +3977,70 @@ lemma add_loop_correct:
     done
   done
 
+(*
+  RUN instruction inner loop: fills sz bytes of out[tgt_pos..] with
+  a single byte `fill`. Simpler than ADD since the source is a constant.
+
+  Postcondition:
+    - All output bytes in [tgt_pos, tgt_pos + sz) equal fill
+    - patch heap unchanged
+*)
+lemma run_loop_correct:
+  fixes sz :: "32 word" and tgt_pos :: "32 word"
+    and fill :: "8 word" and out :: "8 word ptr"
+  assumes sz_pos: "0 < unat sz"
+      and out_valid: "\<forall>j < unat sz.
+           ptr_valid (heap_typing s) (out +\<^sub>p uint (tgt_pos + of_nat j))"
+      and disj: "\<forall>i < unat sz. \<forall>j < patch_n.
+           out +\<^sub>p uint (tgt_pos + of_nat i) \<noteq> patch +\<^sub>p int j"
+      and out_inj: "\<forall>i < unat sz. \<forall>j < unat sz.
+           i \<noteq> j \<longrightarrow> out +\<^sub>p uint (tgt_pos + of_nat i) \<noteq> out +\<^sub>p uint (tgt_pos + of_nat j)"
+      and no_overflow_tgt: "unat tgt_pos + unat sz < 2 ^ 32"
+  shows "(whileLoop (\<lambda>(j :: 32 word) st. j < sz)
+           (\<lambda>j. do {
+              guard (\<lambda>st. ptr_valid (heap_typing st) (out +\<^sub>p uint (tgt_pos + j)));
+              modify (heap_w8_update (\<lambda>h. h(out +\<^sub>p uint (tgt_pos + j) := fill)));
+              return (j + 1)
+           }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result sz \<and>
+            (\<forall>j < patch_n. heap_w8 t (patch +\<^sub>p int j) = heap_w8 s (patch +\<^sub>p int j)) \<and>
+            (\<forall>j < unat sz. heap_w8 t (out +\<^sub>p uint (tgt_pos + of_nat j)) = fill) \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((j :: 32 word), _). unat sz - unat j)"
+      and I = "\<lambda>j st. unat j \<le> unat sz
+             \<and> (\<forall>k < patch_n. heap_w8 st (patch +\<^sub>p int k) = heap_w8 s (patch +\<^sub>p int k))
+             \<and> (\<forall>k < unat j. heap_w8 st (out +\<^sub>p uint (tgt_pos + of_nat k)) = fill)
+             \<and> heap_typing st = heap_typing s"])
+     subgoal by simp
+    subgoal by (simp add: word_less_nat_alt)
+   subgoal for j st
+     by (clarsimp simp: word_less_nat_alt)
+  subgoal for j st
+    apply runs_to_vcg
+    \<comment> \<open>1. Guard: ptr_valid for out write\<close>
+        subgoal
+          using out_valid[rule_format, of "unat j"]
+          by (simp add: word_less_nat_alt word_unat.Rep_inverse)
+    \<comment> \<open>2. Bound: unat (j+1) \<le> unat sz\<close>
+       subgoal using no_overflow_tgt by unat_arith
+    \<comment> \<open>3. Patch preservation (equal ptr - impossible by disj)\<close>
+      subgoal for k
+        using disj[rule_format, of "unat j" k]
+        by (auto simp: word_less_nat_alt word_unat.Rep_inverse)
+    \<comment> \<open>4. Patch preservation (not-equal - trivial from IH)\<close>
+     subgoal by auto
+    \<comment> \<open>5. Output correct (not-equal ptr): k < unat j from IH\<close>
+    subgoal for k
+      apply (subgoal_tac "k < unat j")
+       apply auto[1]
+      apply (cases "k = unat j")
+       apply (simp add: word_unat.Rep_inverse)
+      using no_overflow_tgt by unat_arith
+   \<comment> \<open>6. Termination measure\<close>
+    subgoal using no_overflow_tgt by unat_arith
+    done
+  done
+
 end
 
 end
