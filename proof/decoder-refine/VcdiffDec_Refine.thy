@@ -4157,7 +4157,23 @@ lemma copy_loop_correct:
                heap_w8 t (out +\<^sub>p uint (tgt_pos + of_nat k)) =
                copy_loop src_seg tgt_pre (unat addr) (unat sz)
                  ! (unat tgt_pos + k)) \<rbrace>"
-  sorry
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((j :: 32 word), _). unat sz - unat j)"
+      and I = "\<lambda>j st. unat j \<le> unat sz
+             \<and> (\<forall>k < patch_n. heap_w8 st (patch +\<^sub>p int k) = heap_w8 s (patch +\<^sub>p int k))
+             \<and> (\<forall>k < src_n. heap_w8 st (src +\<^sub>p int k) = heap_w8 s (src +\<^sub>p int k))
+             \<and> (\<forall>k < unat j.
+                  heap_w8 st (out +\<^sub>p uint (tgt_pos + of_nat k)) =
+                  copy_loop src_seg tgt_pre (unat addr) (unat j)
+                    ! (unat tgt_pos + k))
+             \<and> heap_typing st = heap_typing s"])
+     subgoal by simp
+    subgoal by (simp add: word_less_nat_alt)
+   subgoal for j st
+     by (clarsimp simp: word_less_nat_alt)
+  subgoal for j st
+    sorry
+  done
 
 end
 
