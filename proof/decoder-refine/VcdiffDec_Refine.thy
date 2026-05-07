@@ -4765,6 +4765,31 @@ lemma same_init_preserves_patch_heap:
   done
 
 (*
+  State transfer for read_varint'_chain: if the new state t has the same
+  buf_valid and heap_bytes as s, then read_varint'_chain applies to t.
+*)
+lemma read_varint'_chain_transfer:
+  assumes buf_ok: "buf_valid s buf (unat len)"
+      and pos_ok: "pos \<le> len"
+      and decode_ok: "varint_decode (drop (unat pos) (heap_bytes s buf (unat len)))
+                     = Some (nv, rest)"
+      and nv_fits: "nv < 2 ^ 32"
+      and buf_eq: "buf_valid t buf (unat len)"
+      and heap_eq: "heap_bytes t buf (unat len) = heap_bytes s buf (unat len)"
+  shows "read_varint' buf len pos \<bullet> t
+           \<lbrace> \<lambda>r t'. t' = t \<and>
+                  r = Result (pr_t_C (len - of_nat (length rest))
+                                     (of_nat nv) VCD_OK) \<and>
+                  pos \<le> len - of_nat (length rest) \<and>
+                  len - of_nat (length rest) \<le> len \<rbrace>"
+proof -
+  have decode_t: "varint_decode (drop (unat pos) (heap_bytes t buf (unat len)))
+                  = Some (nv, rest)"
+    using decode_ok heap_eq by simp
+  show ?thesis by (rule read_varint'_chain[OF buf_eq pos_ok decode_t nv_fits])
+qed
+
+(*
   Varint chain helper: if varint_decode on drop k bs = Some (v, rest),
   and rest = drop (length bs - length rest) bs, then
   read_varint' at C position (patch_len - of_nat (length (drop k bs)))
@@ -4986,9 +5011,12 @@ proof -
             apply simp
             apply runs_to_vcg
             using win_no_target win_mask_ok win_no_source
-            apply (auto simp: word_less_nat_alt word_le_nat_alt)
-            \<comment> \<open>After win_ind checks pass (no source branch), we reach the dlen varint.
-                At this point we need to provide the result of read_varint' at pos 6.\<close>
+            apply (auto simp: word_less_nat_alt word_le_nat_alt)[]
+            \<comment> \<open>After win_ind checks pass (no source branch), we have the full
+                continuation of vcdiff_decode' as a runs_to goal. We need to step
+                through the remaining reads + main loop + post-checks.
+                This constitutes the bulk of the prefix + main loop proof.
+                We split it as: runs_to_vcg decomposes the monadic term step by step.\<close>
             sorry
           done
         done
