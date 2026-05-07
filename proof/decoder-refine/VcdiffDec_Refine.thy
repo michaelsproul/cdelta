@@ -6228,6 +6228,44 @@ lemma byte_to_hi_tag_isz:
       else 0)"
   by (simp add: byte_to_hi_def noop_hi_def add_hi_def run_hi_def copy_hi_def)
 
+(*
+  Overflow safety under the invariant: if sz fits within the data section
+  (sz \<le> data_end - data_cursor) and the data section ends within patch,
+  then there's no overflow in data_cursor + sz.
+*)
+lemma inv_no_overflow_data:
+  fixes data_cursor :: "32 word" and data_end :: "32 word" and sz :: "32 word"
+  assumes inv: "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg
+                  data_cursor inst_cursor addr_cursor tgt_pos np t"
+      and sz_fits: "unat sz \<le> unat data_end - unat data_cursor"
+  shows "unat data_cursor + unat sz < 2 ^ 32"
+proof -
+  note invD = decode_loop_invD[OF inv]
+  have bd: "unat data_cursor + unat sz \<le> unat data_end"
+    using sz_fits invD(6) by (simp add: word_le_nat_alt)
+  have "unat (data_end :: 32 word) < 2 ^ 32"
+    using unat_lt2p[where x = data_end] by simp
+  thus ?thesis using bd by simp
+qed
+
+(*
+  Overflow safety for tgt: if tgt_pos + sz \<le> tgt_len and tgt_len < 2^32,
+  then tgt_pos + sz doesn't overflow.
+*)
+lemma inv_no_overflow_tgt:
+  assumes inv: "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg
+                  data_cursor inst_cursor addr_cursor tgt_pos np t"
+      and sz_fits: "unat tgt_pos + unat sz \<le> tgt_len"
+  shows "unat tgt_pos + unat sz < 2 ^ 32"
+proof -
+  note invD = decode_loop_invD[OF inv]
+  have "unat tgt_pos + unat sz \<le> tgt_len" using sz_fits .
+  also have "tgt_len < 2 ^ 32" using invD(18) .
+  finally show ?thesis .
+qed
+
 end
 
 end
