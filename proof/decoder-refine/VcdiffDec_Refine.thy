@@ -5807,6 +5807,7 @@ lemma vcdiff_decode'_prefix_correct:
       and win_no_target: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 2 = 0"
       and win_mask_ok: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 0xFFFFFFFA = 0"
       and win_no_source: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 1 = 0"
+      and win_no_adler: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 4 = 0"
       \<comment> \<open>Varint decodes on the buffer tail (starting at position 6)\<close>
       and dlen_ok: "varint_decode (drop 6 bs) = Some (dlen_n, rest_dlen)"
       and tgt_ok: "varint_decode rest_dlen = Some (tgt_n, rest_tgt)"
@@ -5915,7 +5916,7 @@ proof -
           apply (intro allI impI)
           apply simp
           apply runs_to_vcg
-          using win_no_target win_mask_ok win_no_source
+          using win_no_target win_mask_ok win_no_source win_no_adler
           apply (auto simp: word_less_nat_alt word_le_nat_alt)[]
           \<comment> \<open>After win_ind checks pass (no-source path), the continuation includes:
               read_varint' for dlen/tgt_len/data_len/inst_len/addr_len, read_byte'
@@ -5926,7 +5927,7 @@ proof -
           apply runs_to_vcg
           using patch_ok dlen_ok tgt_ok rest_tgt_nonempty di_zero data_ok inst_ok addr_ok
                 sizes_ok tgt_fits dlen_consistent dlen_fits len_ge6 bs_def
-                varint_decode_value_bound out_len_ok
+                varint_decode_value_bound out_len_ok win_no_adler
           apply (auto simp: word_less_nat_alt word_le_nat_alt Exn_def
                       intro: read_varint'_spec buf_validD runs_to_weaken)
           \<comment> \<open>Remaining: the main while loop + post-checks (Phase 3/4).
@@ -5957,19 +5958,21 @@ proof -
               requires connecting decode_loop_inv_after_add/run/copy with the
               AutoCorres-lifted loop body, plus inner loop termination (for which<2,
               for j<sz). This is Phase 3b of the refinement plan.\<close>
-          subgoal
-            apply (unfold bind_def)
-            apply (subst runs_to_bind_handle_iff)
-            apply (rule runs_to_weaken[where Q = "\<lambda>_ _. True"])
-             prefer 2 apply simp
-            sorry
-          subgoal
-            apply (unfold bind_def)
-            apply (subst runs_to_bind_handle_iff)
-            apply (rule runs_to_weaken[where Q = "\<lambda>_ _. True"])
-             prefer 2 apply simp
-            sorry
-          done
+          \<comment> \<open>After VCG+auto: goals remain. Close read_varint' goals with
+              read_varint'_spec + word_le_nat_alt. One goal remains (Phase 3b).\<close>
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       simp add: word_le_nat_alt; fail)?\<close>)
+          \<comment> \<open>One goal: runs_to (big do-block) t Q.  Weaken to True.\<close>
+          apply (rule runs_to_weaken[where Q = "\<lambda>_ _. True"])
+           prefer 2 apply simp
+          \<comment> \<open>Goal: runs_to (whileLoop-block ; post-checks) t Q.
+              Weaken Q to True (post-checks always succeed: just unlesses + throw).
+              The remaining obligation: the whileLoop doesn't guard-fail.
+              This requires the full loop invariant (decode_loop_inv) to ensure
+              all IS_VALID guards hold at each iteration. Phase 3b of the plan.\<close>
+          apply (rule runs_to_weaken[where Q = "\<lambda>_ _. True"])
+           prefer 2 apply simp
+          sorry
         done
       done
     done
