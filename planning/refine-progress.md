@@ -3,10 +3,11 @@
 ## Status (2026-05-07)
 
 Phase B Step 2 (decoder refinement). All three instruction loop lemmas
-(ADD, RUN, COPY) are proved sorry-free. Prefix refinement through to the
-main while-loop entry is proved (sorry at loop body). Main loop invariant
-defined (Phase 3a complete); invariant preservation lemmas stated with
-sorry (Phase 3c in progress).
+(ADD, RUN, COPY) are proved sorry-free. All three invariant preservation
+lemmas (decode_loop_inv_after_add/run/copy) are proved sorry-free.
+Prefix refinement through to the main while-loop entry is proved (sorry
+at loop body). Main loop invariant defined (Phase 3a complete); Phase 3c
+(invariant preservation) is complete. Phase 3b (loop body proof) is next.
 
 ## Completed (current theory state)
 
@@ -53,9 +54,13 @@ In [proof/decoder-refine/VcdiffDec_Refine.thy](../proof/decoder-refine/VcdiffDec
 * `inv_inst_pop_byte` — proved (connects pop_byte on spec list to C heap read).
 * `code_tbl_matches_lookup` — proved (entry_of_row = default_entry under code_tbl_matches).
 * `cursor_advance_drop` — proved (cursor+1 drop = Suc cursor drop).
-* `decode_loop_inv_after_add` — stated (sorry, invariant preserved after ADD).
-* `decode_loop_inv_after_run` — stated (sorry, invariant preserved after RUN).
-* `decode_loop_inv_after_copy` — stated (sorry, invariant preserved after COPY).
+* **`decode_loop_inv_after_add`** — proved (sorry-free, invariant preserved after ADD).
+* **`decode_loop_inv_after_run`** — proved (sorry-free, invariant preserved after RUN).
+* **`decode_loop_inv_after_copy`** — proved (sorry-free, invariant preserved after COPY).
+* `decode_loop_inv_advance_inst` — proved (invariant after reading one opcode byte).
+* `decode_loop_inv_advance_inst_n` — proved (invariant after varint read in inst section).
+* `buf_valid_mono` — proved (buf_valid with smaller length).
+* `inv_inst_varint_bridge` — proved (connects heap_bytes t patch to abstract inst_rem).
 
 Build status: **clean** (`isabelle build -d . -v -o system_log=true CdeltaRefine`).
 
