@@ -6102,6 +6102,64 @@ proof -
     using invD(21) by simp
 qed
 
+(*
+  buf_valid is monotone: if all pointers in [0..n) are valid and m \<le> n,
+  then all pointers in [0..m) are valid.
+*)
+lemma buf_valid_mono:
+  assumes "buf_valid s buf n" and "m \<le> n"
+  shows "buf_valid s buf m"
+  using assms by (auto simp: buf_valid_def)
+
+(*
+  Under the invariant, reading a varint from the inst section corresponds
+  to varint_decode on ds_inst_rem. This bridges read_varint'_spec
+  (which operates on heap_bytes s0 patch (unat inst_end) from inst_cursor)
+  with the abstract ds_inst_rem in the invariant.
+
+  Key fact: ds_inst_rem = drop (unat inst_cursor) (take (unat inst_end) (heap_bytes s0 patch patch_n))
+  and read_varint' operates on drop (unat inst_cursor) (heap_bytes t patch (unat inst_end)).
+  These are equal because:
+    - heap_bytes t patch (unat inst_end) = take (unat inst_end) (heap_bytes t patch patch_n)
+      (by take/map commutation when unat inst_end \<le> patch_n)
+    - heap_bytes t patch k = heap_bytes s0 patch k (patch heap unchanged)
+*)
+lemma inv_inst_varint_bridge:
+  assumes inv: "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg
+                  data_cursor inst_cursor addr_cursor tgt_pos np t"
+  shows "drop (unat inst_cursor) (heap_bytes t patch (unat inst_end))
+       = drop (unat inst_cursor) (take (unat inst_end) (heap_bytes s0 patch patch_n))"
+proof -
+  note invD = decode_loop_invD[OF inv]
+  have ie_le: "unat inst_end \<le> patch_n" using invD(11) .
+  have patch_eq: "\<forall>i < patch_n. heap_w8 t (patch +\<^sub>p int i) = heap_w8 s0 (patch +\<^sub>p int i)"
+    using invD(1) .
+  have "heap_bytes t patch (unat inst_end) = take (unat inst_end) (heap_bytes s0 patch patch_n)"
+  proof (rule nth_equalityI)
+    show "length (heap_bytes t patch (unat inst_end))
+        = length (take (unat inst_end) (heap_bytes s0 patch patch_n))"
+      using ie_le by simp
+  next
+    fix i assume "i < length (heap_bytes t patch (unat inst_end))"
+    hence i_lt: "i < unat inst_end" by simp
+    have "heap_bytes t patch (unat inst_end) ! i = heap_w8 t (patch +\<^sub>p int i)"
+      using i_lt by (simp add: heap_bytes_nth)
+    also have "... = heap_w8 s0 (patch +\<^sub>p int i)"
+      using patch_eq i_lt ie_le by auto
+    also have "... = heap_bytes s0 patch patch_n ! i"
+    proof -
+      have "i < patch_n" using i_lt ie_le by simp
+      thus ?thesis by (simp add: heap_bytes_nth)
+    qed
+    also have "... = take (unat inst_end) (heap_bytes s0 patch patch_n) ! i"
+      using i_lt by (simp add: nth_take)
+    finally show "heap_bytes t patch (unat inst_end) ! i
+               = take (unat inst_end) (heap_bytes s0 patch patch_n) ! i" .
+  qed
+  thus ?thesis by simp
+qed
+
 end
 
 end
