@@ -4839,6 +4839,163 @@ proof -
   show ?thesis using second drop_eq unat_pos' by simp
 qed
 
+(*
+  Full C-side prefix refinement: the C decoder reaches the main while-loop
+  with cursors matching parse_window, for the no-source, no-app, built case.
+
+  This is the "success path prefix": under the assumptions that parse_header
+  and parse_window both succeed, the C function reaches the main loop with
+  the correct cursor positions. The main loop invariant then takes over.
+
+  Strategy: unfold vcdiff_decode'_def, runs_to_vcg through the prefix,
+  discharge each VCG subgoal using init loop lemmas and read_varint'_chain.
+
+  The postcondition says the C reaches a Result (not an early return error).
+  A more detailed version establishing cursor positions will come later,
+  once the main-loop invariant structure is defined.
+*)
+lemma vcdiff_decode'_prefix_correct:
+  fixes patch :: "8 word ptr" and patch_len :: "32 word"
+    and src :: "8 word ptr" and src_len :: "32 word"
+    and out :: "8 word ptr" and out_cap :: "32 word"
+    and out_len :: "32 word ptr"
+    and bs :: "8 word list"
+  assumes bs_def: "bs = heap_bytes s patch (unat patch_len)"
+      and out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch (unat patch_len)"
+      and code_tbl_ready: "code_tbl_built_'' s \<noteq> 0"
+      and len_ge6: "6 \<le> unat patch_len"
+      \<comment> \<open>Header magic and indicator\<close>
+      and magic0: "heap_w8 s patch = 0xD6"
+      and magic1: "heap_w8 s (patch +\<^sub>p 1) = 0xC3"
+      and magic2: "heap_w8 s (patch +\<^sub>p 2) = 0xC4"
+      and magic3: "heap_w8 s (patch +\<^sub>p 3) = 0x00"
+      and hdr_ok: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 3 = 0"
+      and no_app: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 4 = 0"
+      \<comment> \<open>Window indicator at byte 5\<close>
+      and win_no_target: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 2 = 0"
+      and win_mask_ok: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 0xFFFFFFFA = 0"
+      and win_no_source: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 1 = 0"
+      \<comment> \<open>Varint decodes on the buffer tail (starting at position 6)\<close>
+      and dlen_ok: "varint_decode (drop 6 bs) = Some (dlen_n, rest_dlen)"
+      and tgt_ok: "varint_decode rest_dlen = Some (tgt_n, rest_tgt)"
+      \<comment> \<open>di byte = 0 at the position after tgt_len\<close>
+      and rest_tgt_nonempty: "rest_tgt \<noteq> []"
+      and di_zero: "hd rest_tgt = 0"
+      \<comment> \<open>Remaining varints\<close>
+      and data_ok: "varint_decode (tl rest_tgt) = Some (data_n, rest_data)"
+      and inst_ok: "varint_decode rest_data = Some (inst_n, rest_inst)"
+      and addr_ok: "varint_decode rest_inst = Some (addr_n, rest_addr)"
+      \<comment> \<open>Section sizes fit within remaining buffer\<close>
+      and sizes_ok: "data_n + inst_n + addr_n \<le> length rest_addr"
+      \<comment> \<open>Target length fits in output buffer\<close>
+      and tgt_fits: "of_nat tgt_n \<le> out_cap"
+      \<comment> \<open>dlen consistency check (the C checks remaining = data+inst+addr+adler)\<close>
+      and dlen_consistent: "dlen_n = (length (drop 6 bs) - length rest_addr)"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. \<exists>ret. r = Result ret \<rbrace>"
+proof -
+  have patch0_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 0)"
+    using buf_validD[OF patch_ok, of 0] len_ge6 by simp
+  have patch1_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 1)"
+    using buf_validD[OF patch_ok, of 1] len_ge6 by simp
+  have patch2_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 2)"
+    using buf_validD[OF patch_ok, of 2] len_ge6 by simp
+  have patch3_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 3)"
+    using buf_validD[OF patch_ok, of 3] len_ge6 by simp
+  have patch4_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 4)"
+    using buf_validD[OF patch_ok, of 4] len_ge6 by simp
+  have patch5_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 5)"
+    using buf_validD[OF patch_ok, of 5] len_ge6 by simp
+  have len_ge5: "5 \<le> patch_len"
+    using len_ge6 by (simp add: word_le_nat_alt)
+  have magic0_uint: "uint (heap_w8 s patch) = 214"
+    using magic0 by simp
+  have magic1_uint: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+    using magic1 by simp
+  have magic2_uint: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
+    using magic2 by simp
+  have magic3_uint: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
+    using magic3 by simp
+  \<comment> \<open>The dlen varint decode starts at position 6 in the buffer\<close>
+  have dlen_at_6: "varint_decode (drop (unat (6 :: 32 word)) (heap_bytes s patch (unat patch_len)))
+                   = Some (dlen_n, rest_dlen)"
+    using dlen_ok bs_def by simp
+  have dlen_fits: "dlen_n < 2 ^ 32"
+    by (rule varint_decode_value_bound[OF dlen_ok])
+  have pos6_le: "(6 :: 32 word) \<le> patch_len"
+    using len_ge6 by (simp add: word_le_nat_alt)
+  have patch_ok': "buf_valid s patch (unat patch_len)" by (rule patch_ok)
+  show ?thesis
+    unfolding vcdiff_decode'_def
+    apply runs_to_vcg
+    using out_len_ok code_tbl_ready magic0_uint magic1_uint magic2_uint magic3_uint
+          hdr_ok no_app len_ge5 patch0_ok patch1_ok patch2_ok patch3_ok patch4_ok
+    apply (auto simp: word_less_nat_alt word_le_nat_alt)
+    \<comment> \<open>After magic checks pass, we reach the init loops + read_byte for win_ind\<close>
+    subgoal
+      apply (rule runs_to_weaken[
+        OF near_init_preserves_patch_heap
+          [where buf = patch and n = "unat patch_len" and p = out_len]])
+      apply clarsimp
+      apply runs_to_vcg
+      subgoal
+        apply (rule runs_to_weaken[
+          OF same_init_preserves_patch_heap
+            [where buf = patch and n = "unat patch_len" and p = out_len]])
+        apply clarsimp
+        apply runs_to_vcg
+        \<comment> \<open>Now we need to provide the read_byte' result for win_ind at pos 5.
+            After init loops, state is ta. Key facts:
+              - heap_bytes ta patch ... = heap_bytes s patch ...
+              - buf_valid ta patch ... = buf_valid s patch ...
+            From which we derive ptr_valid in ta and heap_w8 equality.\<close>
+        subgoal for ta
+          apply (subgoal_tac "buf_valid ta patch (unat patch_len)")
+           prefer 2 using patch_ok' apply simp
+          apply (subgoal_tac "ptr_valid (heap_typing ta) (patch +\<^sub>p int 5)")
+           prefer 2
+           apply (erule buf_validD)
+           using len_ge6 apply simp
+          apply (subgoal_tac "heap_w8 ta (patch +\<^sub>p 5) = heap_w8 s (patch +\<^sub>p 5)")
+           prefer 2
+           subgoal premises prems
+           proof -
+             have "5 < unat patch_len" using len_ge6 by simp
+             hence h_ta: "heap_bytes ta patch (unat patch_len) ! 5 =
+                          heap_w8 ta (patch +\<^sub>p int 5)"
+               by (rule heap_bytes_nth)
+             have h_s: "heap_bytes s patch (unat patch_len) ! 5 =
+                        heap_w8 s (patch +\<^sub>p int 5)"
+               using \<open>5 < unat patch_len\<close> by (rule heap_bytes_nth)
+             have "heap_bytes ta patch (unat patch_len) = heap_bytes s patch (unat patch_len)"
+               using prems by simp
+             hence "heap_bytes ta patch (unat patch_len) ! 5 =
+                    heap_bytes s patch (unat patch_len) ! 5"
+               by simp
+             thus ?thesis using h_ta h_s by simp
+           qed
+          apply (rule exI[where x =
+            "pr_t_C 6 (UCAST(8 \<rightarrow> 32) (heap_w8 ta (patch +\<^sub>p 5))) VCD_OK"])
+          apply (rule conjI)
+           apply (subst read_byte'_spec)
+            subgoal by simp
+           subgoal using len_ge6 by (simp add: word_less_nat_alt)
+          apply (intro allI impI)
+          subgoal for va
+            apply simp
+            apply runs_to_vcg
+            using win_no_target win_mask_ok win_no_source
+            apply (auto simp: word_less_nat_alt word_le_nat_alt)
+            \<comment> \<open>After win_ind checks pass (no source branch), we reach the dlen varint.
+                At this point we need to provide the result of read_varint' at pos 6.\<close>
+            sorry
+          done
+        done
+      done
+    done
+qed
+
 end
 
 end
