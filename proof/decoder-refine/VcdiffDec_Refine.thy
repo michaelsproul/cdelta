@@ -6291,6 +6291,30 @@ lemma resolve_size_varint:
   shows "resolve_size h bs = varint_decode bs"
   using assms by (simp add: resolve_size_def)
 
+(*
+  Under the invariant, the length of ds_data_rem equals data_end - data_cursor.
+  This connects the C's bounds check (sz > data_end - data_cursor) to the
+  spec's check (sz > length (ds_data_rem st)).
+*)
+lemma inv_data_rem_length:
+  assumes inv: "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg
+                  data_cursor inst_cursor addr_cursor tgt_pos np t"
+  shows "length (drop (unat data_cursor) (take (unat data_end) (heap_bytes s0 patch patch_n)))
+       = unat data_end - unat data_cursor"
+proof -
+  note invD = decode_loop_invD[OF inv]
+  show ?thesis using invD(10) invD(6) by (simp add: word_le_nat_alt)
+qed
+
+lemma inv_tgt_length:
+  assumes inv: "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg
+                  data_cursor inst_cursor addr_cursor tgt_pos np t"
+  shows "length (heap_bytes t out (unat tgt_pos)) = unat tgt_pos"
+  by simp
+
+
 end
 
 end
