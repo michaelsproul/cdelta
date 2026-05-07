@@ -5967,11 +5967,73 @@ proof -
            prefer 2 apply simp
           \<comment> \<open>Goal: runs_to (whileLoop-block ; post-checks) t Q.
               Weaken Q to True (post-checks always succeed: just unlesses + throw).
-              The remaining obligation: the whileLoop doesn't guard-fail.
-              This requires the full loop invariant (decode_loop_inv) to ensure
-              all IS_VALID guards hold at each iteration. Phase 3b of the plan.\<close>
+              The remaining obligation: the main decode loop doesn't guard-fail.
+              Phase 3b of the plan.\<close>
           apply (rule runs_to_weaken[where Q = "\<lambda>_ _. True"])
            prefer 2 apply simp
+          \<comment> \<open>Goal: runs_to (bind_handle (whileLoop C B init) cont handler) t True.
+              Convert to succeeds form. The continuation and handler always succeed
+              (they are just unlesses + modify + throw_exception_or_result).
+              Use succeeds_bind_handle to reduce to succeeds(whileLoop).\<close>
+          apply (subst succeeds_runs_to_iff[symmetric])
+          apply (unfold bind_def)
+          apply (subst succeeds_bind_handle)
+          \<comment> \<open>Goal: succeeds (bind_handle (whileLoop ...) cont handler) t.
+              simp with succeeds_bind_handle decomposes into:
+                succeeds(f) ∧ ∀results. succeeds(continuation)
+              The continuation always succeeds (just throws). Focus on the whileLoop.\<close>
+          apply (simp add: succeeds_bind_handle
+                      split: exception_or_result_splits)
+          apply (intro conjI allI impI)
+          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when
+                            split: exception_or_result_splits; fail)?\<close>)
+          apply (all \<open>(subst succeeds_runs_to_iff;
+                       rule runs_to_weaken[OF read_varint'_spec];
+                       simp add: word_le_nat_alt; fail)?\<close>)
+          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when
+                            split: exception_or_result_splits; fail)?\<close>)
+          \<comment> \<open>Remaining goals: iterate one more round of simp/read_varint' handling\<close>
+          apply (all \<open>(subst succeeds_runs_to_iff;
+                       rule runs_to_weaken[OF read_varint'_spec];
+                       simp add: word_le_nat_alt; fail)?\<close>)
+          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
+                            split: exception_or_result_splits; fail)?\<close>)
+          apply (all \<open>(subst succeeds_runs_to_iff;
+                       rule runs_to_weaken[OF read_varint'_spec];
+                       simp add: word_le_nat_alt; fail)?\<close>)
+          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
+                            split: exception_or_result_splits; fail)?\<close>)
+          apply (all \<open>(subst succeeds_runs_to_iff;
+                       rule runs_to_weaken[OF read_varint'_spec];
+                       simp add: word_le_nat_alt; fail)?\<close>)
+          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
+                            split: exception_or_result_splits; fail)?\<close>)
+          \<comment> \<open>Handle any remaining runs_to (read_varint') goals and succeeds(whileLoop)\<close>
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       simp add: word_le_nat_alt; fail)?\<close>)
+          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
+                            split: exception_or_result_splits; fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       simp add: word_le_nat_alt; fail)?\<close>)
+          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
+                            split: exception_or_result_splits; fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       simp add: word_le_nat_alt; fail)?\<close>)
+          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
+                            split: exception_or_result_splits; fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       simp add: word_le_nat_alt; fail)?\<close>)
+          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
+                            split: exception_or_result_splits; fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       simp add: word_le_nat_alt; fail)?\<close>)
+          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
+                            split: exception_or_result_splits; fail)?\<close>)
+          \<comment> \<open>Remaining: succeeds(outer-whileLoop-computation) s'n.
+              The whileLoop is the instruction decode loop + for-which + inner loops.
+              To prove it doesn't fail, use whileLoop_ne_Failure coinductively with
+              decode_loop_inv ensuring all IS_VALID guards hold at each iteration.
+              This is Phase 3b — the full loop body correctness proof.\<close>
           sorry
         done
       done
