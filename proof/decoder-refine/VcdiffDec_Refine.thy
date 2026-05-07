@@ -6315,6 +6315,51 @@ lemma inv_tgt_length:
   by simp
 
 
+(*
+  When exec_half for IADD succeeds on the abstract state, the numeric
+  conditions match what the C needs for the ADD dispatch.
+  Specifically: sz \<le> length data_rem and tgt_pos + sz \<le> tgt_len.
+*)
+lemma exec_half_add_conditions:
+  assumes "ity h = IADD"
+      and "exec_half h sz src_seg src_seg_len tgt_len st = Inl st'"
+  shows "sz \<le> length (ds_data_rem st)"
+    and "length (ds_tgt st) + sz \<le> tgt_len"
+    and "ds_data_rem st' = drop sz (ds_data_rem st)"
+    and "ds_tgt st' = ds_tgt st @ take sz (ds_data_rem st)"
+    and "ds_inst_rem st' = ds_inst_rem st"
+    and "ds_addr_rem st' = ds_addr_rem st"
+    and "ds_cache st' = ds_cache st"
+  using assms by (auto simp: exec_half_def split: if_splits)
+
+lemma exec_half_run_conditions:
+  assumes "ity h = IRUN"
+      and "exec_half h sz src_seg src_seg_len tgt_len st = Inl st'"
+  shows "ds_data_rem st \<noteq> []"
+    and "length (ds_tgt st) + sz \<le> tgt_len"
+    and "ds_data_rem st' = tl (ds_data_rem st)"
+    and "ds_tgt st' = ds_tgt st @ replicate sz (hd (ds_data_rem st))"
+    and "ds_inst_rem st' = ds_inst_rem st"
+    and "ds_addr_rem st' = ds_addr_rem st"
+    and "ds_cache st' = ds_cache st"
+  using assms by (auto simp: exec_half_def pop_byte_def split: if_splits list.splits)
+
+lemma exec_half_copy_conditions:
+  assumes "ity h = ICOPY mode"
+      and "exec_half h sz src_seg src_seg_len tgt_len st = Inl st'"
+  shows "\<exists>addr rest c'.
+           decode_address (ds_cache st) mode (src_seg_len + length (ds_tgt st)) (ds_addr_rem st)
+             = Some (addr, rest, c') \<and>
+           addr < src_seg_len + length (ds_tgt st) \<and>
+           length (ds_tgt st) + sz \<le> tgt_len \<and>
+           ds_addr_rem st' = rest \<and>
+           ds_cache st' = c' \<and>
+           ds_tgt st' = copy_loop src_seg (ds_tgt st) addr sz \<and>
+           ds_data_rem st' = ds_data_rem st \<and>
+           ds_inst_rem st' = ds_inst_rem st"
+  using assms
+  by (auto simp: exec_half_def Let_def split: if_splits option.splits prod.splits)
+
 end
 
 end
