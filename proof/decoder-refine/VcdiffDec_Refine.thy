@@ -5939,6 +5939,92 @@ proof -
     done
 qed
 
+(*
+  Invariant preservation after inst_cursor advance (opcode read).
+  When we read one byte from inst_cursor, the invariant is preserved
+  with inst_cursor+1 (ds_inst_rem drops one byte).
+*)
+lemma decode_loop_inv_advance_inst:
+  assumes inv: "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg
+                  data_cursor inst_cursor addr_cursor tgt_pos np t"
+      and ic_lt: "unat inst_cursor < unat inst_end"
+      and no_overflow: "unat inst_cursor + 1 < 2 ^ 32"
+  shows "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+           data_end inst_end addr_end src_seg
+           data_cursor (inst_cursor + 1) addr_cursor tgt_pos np t"
+proof -
+  note invD = decode_loop_invD[OF inv]
+  obtain dst :: dec_state and c :: cache where
+    dst_inst: "ds_inst_rem dst =
+      drop (unat inst_cursor) (take (unat inst_end) (heap_bytes s0 patch patch_n))" and
+    dst_data: "ds_data_rem dst =
+      drop (unat data_cursor) (take (unat data_end) (heap_bytes s0 patch patch_n))" and
+    dst_addr: "ds_addr_rem dst =
+      drop (unat addr_cursor) (take (unat addr_end) (heap_bytes s0 patch patch_n))" and
+    dst_tgt: "ds_tgt dst = heap_bytes t out (unat tgt_pos)" and
+    dst_cache: "ds_cache dst = c" and
+    cache_ok: "cache_abs t c np" and
+    cwf: "cache_wf c"
+    using inv unfolding decode_loop_inv_def by blast
+  have unat_ic1: "unat (inst_cursor + 1 :: 32 word) = Suc (unat inst_cursor)"
+    using no_overflow by (simp add: unat_word_ariths(1))
+  have ic1_le: "inst_cursor + 1 \<le> inst_end"
+  proof -
+    have "Suc (unat inst_cursor) \<le> unat inst_end" using ic_lt by simp
+    thus ?thesis using unat_ic1 by (simp add: word_le_nat_alt)
+  qed
+  \<comment> \<open>New inst_rem drops one more byte\<close>
+  have new_inst: "drop (unat (inst_cursor + 1))
+      (take (unat inst_end) (heap_bytes s0 patch patch_n))
+    = tl (ds_inst_rem dst)"
+  proof -
+    have drop_tl: "\<And>n (xs :: 'z list). drop (Suc n) xs = tl (drop n xs)"
+      by (simp add: drop_Suc tl_drop)
+    have "drop (Suc (unat inst_cursor))
+        (take (unat inst_end) (heap_bytes s0 patch patch_n))
+      = tl (drop (unat inst_cursor)
+        (take (unat inst_end) (heap_bytes s0 patch patch_n)))"
+      by (rule drop_tl)
+    thus ?thesis using unat_ic1 dst_inst by simp
+  qed
+  \<comment> \<open>Construct new witness with inst_rem = tl (old inst_rem)\<close>
+  let ?new_dst = "dst \<lparr> ds_inst_rem := tl (ds_inst_rem dst) \<rparr>"
+  show ?thesis
+    unfolding decode_loop_inv_def
+    apply (rule exI[where x = "?new_dst"])
+    apply (rule exI[where x = c])
+    apply (intro conjI)
+    using new_inst apply simp
+    using dst_data apply simp
+    using dst_addr apply simp
+    using dst_tgt apply simp
+    using dst_cache apply simp
+    using cache_ok apply simp
+    using cwf apply simp
+    using invD(1) apply simp
+    using invD(2) apply simp
+    using invD(3) apply simp
+    using invD(4) apply simp
+    using invD(5) apply simp
+    using invD(6) apply simp
+    using ic1_le apply simp
+    using invD(8) apply simp
+    using invD(9) apply simp
+    using invD(10) apply simp
+    using invD(11) apply simp
+    using invD(12) apply simp
+    using invD(13) apply simp
+    using invD(14) apply simp
+    using invD(15) apply simp
+    using invD(16) apply simp
+    using invD(17) apply simp
+    using invD(18) apply simp
+    using invD(19) apply simp
+    using invD(20) apply simp
+    using invD(21) by simp
+qed
+
 end
 
 end
