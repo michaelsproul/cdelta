@@ -5951,9 +5951,12 @@ proof -
               then prove the outer whileLoop terminates.\<close>
           \<comment> \<open>2 remaining goals: do-blocks (whileLoop + post-checks).
               Decompose with runs_to_bind_handle_iff, weaken to True.
-              Remaining obligation: the outer whileLoop terminates.
-              This requires showing all guards pass (via decode_loop_inv) and
-              the measure decreases (inst_cursor advances each iteration).\<close>
+              The sorry covers the outer decode whileLoop termination.
+              To close it, apply runs_to_whileLoop_exn with decode_loop_inv
+              as invariant and measure (inst_end - inst_cursor). The body proof
+              requires connecting decode_loop_inv_after_add/run/copy with the
+              AutoCorres-lifted loop body, plus inner loop termination (for which<2,
+              for j<sz). This is Phase 3b of the refinement plan.\<close>
           subgoal
             apply (unfold bind_def)
             apply (subst runs_to_bind_handle_iff)
