@@ -5431,10 +5431,176 @@ lemma decode_loop_inv_after_run:
       and typing_preserved: "heap_typing t' = heap_typing t"
       and cache_preserved: "near_arr_'' t' = near_arr_'' t"
                            "same_arr_'' t' = same_arr_'' t"
+      and code_tbl_preserved: "code_tbl_'' t' = code_tbl_'' t"
   shows "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
            data_end inst_end addr_end src_seg
            (data_cursor + 1) inst_cursor addr_cursor (tgt_pos + sz) np t'"
-  sorry
+proof -
+  note invD = decode_loop_invD[OF inv]
+  obtain dst :: dec_state and c :: cache where
+    dst_inst: "ds_inst_rem dst =
+      drop (unat inst_cursor) (take (unat inst_end) (heap_bytes s0 patch patch_n))" and
+    dst_data: "ds_data_rem dst =
+      drop (unat data_cursor) (take (unat data_end) (heap_bytes s0 patch patch_n))" and
+    dst_addr: "ds_addr_rem dst =
+      drop (unat addr_cursor) (take (unat addr_end) (heap_bytes s0 patch patch_n))" and
+    dst_tgt: "ds_tgt dst = heap_bytes t out (unat tgt_pos)" and
+    dst_cache: "ds_cache dst = c" and
+    cache_ok: "cache_abs t c np" and
+    cwf: "cache_wf c"
+    using inv unfolding decode_loop_inv_def by blast
+  \<comment> \<open>Cursor arithmetic\<close>
+  have unat_dc1: "unat (data_cursor + 1 :: 32 word) = unat data_cursor + 1"
+    using no_overflow_data by (simp add: unat_word_ariths(1))
+  have unat_tp_sz: "unat (tgt_pos + sz) = unat tgt_pos + unat sz"
+    using no_overflow_tgt by (simp add: unat_word_ariths(1))
+  \<comment> \<open>data_rem has at least one element (fill_read gives cursor < end)\<close>
+  have data_rem_len: "length (ds_data_rem dst) = unat data_end - unat data_cursor"
+    using dst_data invD(10) invD(6) by (simp add: word_le_nat_alt)
+  have data_rem_nonempty: "0 < length (ds_data_rem dst)"
+    using fill_read data_rem_len invD(6) by (simp add: word_le_nat_alt)
+  \<comment> \<open>The fill byte is the head of ds_data_rem\<close>
+  have fill_is_hd: "fill = hd (ds_data_rem dst)"
+  proof -
+    have "hd (ds_data_rem dst) = ds_data_rem dst ! 0"
+      using data_rem_nonempty by (simp add: hd_conv_nth)
+    also have "... = (drop (unat data_cursor) (take (unat data_end) (heap_bytes s0 patch patch_n))) ! 0"
+      using dst_data by simp
+    also have "... = (take (unat data_end) (heap_bytes s0 patch patch_n)) ! (unat data_cursor)"
+    proof -
+      have "unat data_cursor < length (take (unat data_end) (heap_bytes s0 patch patch_n))"
+        using fill_read invD(10) by simp
+      thus ?thesis by (simp add: nth_drop)
+    qed
+    also have "... = (heap_bytes s0 patch patch_n) ! (unat data_cursor)"
+      using fill_read by (simp add: nth_take)
+    also have "... = heap_w8 s0 (patch +\<^sub>p int (unat data_cursor))"
+    proof -
+      have "unat data_cursor < patch_n" using fill_read invD(10) by simp
+      thus ?thesis by (simp add: heap_bytes_nth)
+    qed
+    finally show ?thesis using fill_eq by simp
+  qed
+  \<comment> \<open>New data_rem: advance by 1\<close>
+  have drop_tl: "\<And>n (xs :: 'z list). drop (Suc n) xs = tl (drop n xs)"
+    by (simp add: drop_Suc tl_drop)
+  have new_data_rem: "drop (unat (data_cursor + 1))
+      (take (unat data_end) (heap_bytes s0 patch patch_n))
+    = tl (ds_data_rem dst)"
+  proof -
+    let ?xs = "take (unat data_end) (heap_bytes s0 patch patch_n)"
+    have eq1: "unat (data_cursor + 1 :: 32 word) = Suc (unat data_cursor)"
+      using no_overflow_data unat_dc1 by simp
+    have "drop (Suc (unat data_cursor)) ?xs = tl (drop (unat data_cursor) ?xs)"
+      by (rule drop_tl)
+    thus ?thesis using eq1 dst_data by simp
+  qed
+  \<comment> \<open>New output: heap_bytes t' out (unat tgt_pos + unat sz) = old_tgt @ replicate sz fill\<close>
+  have new_tgt: "heap_bytes t' out (unat tgt_pos + unat sz)
+    = ds_tgt dst @ replicate (unat sz) fill"
+  proof (rule nth_equalityI)
+    show "length (heap_bytes t' out (unat tgt_pos + unat sz))
+        = length (ds_tgt dst @ replicate (unat sz) fill)"
+      using dst_tgt by simp
+  next
+    fix i assume i_bound: "i < length (heap_bytes t' out (unat tgt_pos + unat sz))"
+    hence i_lt: "i < unat tgt_pos + unat sz" by simp
+    show "heap_bytes t' out (unat tgt_pos + unat sz) ! i
+        = (ds_tgt dst @ replicate (unat sz) fill) ! i"
+    proof (cases "i < unat tgt_pos")
+      case True
+      have "heap_bytes t' out (unat tgt_pos + unat sz) ! i = heap_w8 t' (out +\<^sub>p int i)"
+        using i_lt by (simp add: heap_bytes_nth)
+      also have "... = heap_w8 t (out +\<^sub>p int i)"
+        using out_prefix_preserved True by auto
+      also have "... = heap_bytes t out (unat tgt_pos) ! i"
+        using True by (simp add: heap_bytes_nth)
+      also have "... = ds_tgt dst ! i" using dst_tgt by simp
+      finally show ?thesis using True dst_tgt by (simp add: nth_append)
+    next
+      case False
+      hence i_ge: "unat tgt_pos \<le> i" by simp
+      let ?j = "i - unat tgt_pos"
+      have j_lt: "?j < unat sz" using i_lt i_ge by simp
+      have "heap_bytes t' out (unat tgt_pos + unat sz) ! i = heap_w8 t' (out +\<^sub>p int i)"
+        using i_lt by (simp add: heap_bytes_nth)
+      also have "... = heap_w8 t' (out +\<^sub>p uint (tgt_pos + of_nat ?j))"
+      proof -
+        have unat_eq: "unat (tgt_pos + of_nat ?j :: 32 word) = i"
+        proof -
+          have "unat tgt_pos + ?j = i" using i_ge by simp
+          moreover have "i < 2 ^ 32" using i_lt no_overflow_tgt by simp
+          ultimately show ?thesis by (simp add: unat_word_ariths(1) unat_of_nat)
+        qed
+        show ?thesis by (simp only: ptr_add_def uint_nat unat_eq of_int_of_nat_eq)
+      qed
+      also have "... = fill" using run_result j_lt by auto
+      finally have lhs: "heap_bytes t' out (unat tgt_pos + unat sz) ! i = fill" .
+      have "(ds_tgt dst @ replicate (unat sz) fill) ! i = replicate (unat sz) fill ! ?j"
+        using i_ge dst_tgt by (simp add: nth_append)
+      also have "... = fill" using j_lt by simp
+      finally show ?thesis using lhs by simp
+    qed
+  qed
+  \<comment> \<open>cache_abs preserved\<close>
+  have cache_abs': "cache_abs t' c np"
+    using cache_ok cache_preserved by (simp add: cache_abs_def)
+  have code_tbl': "code_tbl_matches t'"
+    using invD(13) code_tbl_preserved by (simp add: code_tbl_matches_def)
+  have bv_patch: "buf_valid t' patch patch_n"
+    using invD(3) typing_preserved by (simp add: buf_valid_def)
+  have bv_src: "buf_valid t' src src_n"
+    using invD(4) typing_preserved by (simp add: buf_valid_def)
+  have bv_out: "buf_valid t' out tgt_len"
+    using invD(5) typing_preserved by (simp add: buf_valid_def)
+  have typing_s0: "heap_typing t' = heap_typing s0"
+    using typing_preserved invD(14) by simp
+  \<comment> \<open>data_cursor + 1 \<le> data_end\<close>
+  have dc_bound: "data_cursor + 1 \<le> data_end"
+  proof -
+    have "unat data_cursor + 1 \<le> unat data_end"
+      using fill_read by simp
+    thus ?thesis using unat_dc1 by (simp add: word_le_nat_alt)
+  qed
+  have tp_bound: "unat (tgt_pos + sz) \<le> tgt_len"
+    using sz_fits_tgt unat_tp_sz by simp
+  \<comment> \<open>Construct witness: data_rem becomes tl, tgt gets replicated fill\<close>
+  let ?new_dst = "dst \<lparr> ds_data_rem := tl (ds_data_rem dst),
+                        ds_tgt := ds_tgt dst @ replicate (unat sz) fill \<rparr>"
+  show ?thesis
+    unfolding decode_loop_inv_def
+    apply (rule exI[where x = "?new_dst"])
+    apply (rule exI[where x = c])
+    apply (intro conjI)
+    using dst_inst apply simp
+    using new_data_rem unat_dc1 apply simp
+    using dst_addr apply simp
+    using new_tgt unat_tp_sz apply simp
+    using dst_cache apply simp
+    using cache_abs' apply simp
+    using cwf apply simp
+    using patch_preserved apply simp
+    using src_preserved apply simp
+    using bv_patch apply simp
+    using bv_src apply simp
+    using bv_out apply simp
+    using dc_bound apply simp
+    using invD(7) apply simp
+    using invD(8) apply simp
+    using tp_bound apply simp
+    using invD(10) apply simp
+    using invD(11) apply simp
+    using invD(12) apply simp
+    using code_tbl' apply simp
+    using typing_s0 apply simp
+    using invD(15) apply simp
+    using invD(16) apply simp
+    using invD(17) apply simp
+    using invD(18) apply simp
+    using invD(19) apply simp
+    using invD(20) apply simp
+    using invD(21) by simp
+qed
 
 (*
   COPY half-instruction: invariant preservation.
