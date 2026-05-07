@@ -5929,11 +5929,53 @@ proof -
                 varint_decode_value_bound out_len_ok
           apply (auto simp: word_less_nat_alt word_le_nat_alt Exn_def
                       intro: read_varint'_spec buf_validD runs_to_weaken)
-          \<comment> \<open>Remaining: the main while loop + post-checks (Phase 3/4).\<close>
-          apply (runs_to_vcg;
-                 (auto simp: word_less_nat_alt word_le_nat_alt Exn_def
-                       intro: read_varint'_spec buf_validD runs_to_weaken)?)
-          sorry
+          \<comment> \<open>Remaining: the main while loop + post-checks (Phase 3/4).
+              The postcondition is True (termination/safety only).
+              VCG decomposes bind + bind_handle but gets stuck on exception-
+              monad do-blocks. The root issue: runs_to_vcg's bind_handle rule
+              doesn't match when bind_def folds bind_handle into a do-notation
+              abbreviation, OR the tuple pattern blocks unification.
+              New strategy: DON'T unfold bind_def. Keep everything abstract.
+              Apply VCG which decomposes bind_handle goals.
+              The 2 remaining goals are do-blocks; try applying the VCG rules
+              with explicit split_tuple annotation.\<close>
+          apply (all \<open>clarsimp?\<close>)
+          apply (all \<open>runs_to_vcg\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          apply runs_to_vcg
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          \<comment> \<open>2 goals remain. Each is a do-block (bind_handle wrapping
+              the whileLoop with its continuation).
+              Strategy: decompose with runs_to_bind_handle, then weaken the
+              whileLoop's postcondition to True, then apply whileLoop_exn.\<close>
+          \<comment> \<open>2 remaining goals are do-blocks in the exception monad.
+              Their head is the whileLoop bound to the post-checks.
+              The postcondition is True (termination only).
+              Key strategy: use runs_to_vcg which knows runs_to_bind_handle,
+              but it requires the continuation lambda to not use case_prod.
+              Solution: unfold bind_def to get bind_handle visible, then use
+              the [split_tuple] variant or the exception_monad variant.
+              Actually, let's just use the iff variant as a subst.\<close>
+          \<comment> \<open>2 remaining goals: do-blocks in exception monad (whileLoop + post-checks).
+              Decomposition: unfold bind_def to expose bind_handle, then use
+              runs_to_bind_handle_iff to split into whileLoop + continuation.
+              Weaken continuation to True, then prove whileLoop terminates.
+              The remaining sorry is just the outer whileLoop termination.\<close>
+          subgoal
+            apply (unfold bind_def)
+            apply (subst runs_to_bind_handle_iff)
+            apply (rule runs_to_weaken[where Q = "\<lambda>_ _. True"])
+             prefer 2 apply simp
+            sorry
+          subgoal
+            apply (unfold bind_def)
+            apply (subst runs_to_bind_handle_iff)
+            apply (rule runs_to_weaken[where Q = "\<lambda>_ _. True"])
+             prefer 2 apply simp
+            sorry
+          done
         done
       done
     done
