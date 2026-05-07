@@ -3,8 +3,9 @@
 ## Status (2026-05-07)
 
 Phase B Step 2 (decoder refinement). All three instruction loop lemmas
-(ADD, RUN, COPY) are proved sorry-free. Prefix refinement and main loop
-composition remain.
+(ADD, RUN, COPY) are proved sorry-free. Prefix refinement through to the
+main while-loop entry is proved (sorry at loop body). Main loop invariant
+and post-checks remain.
 
 ## Completed (current theory state)
 
@@ -33,6 +34,15 @@ In [proof/decoder-refine/VcdiffDec_Refine.thy](../proof/decoder-refine/VcdiffDec
   `copy_loop_nth_tgt` — proved (helper lemmas for COPY).
 * `copy_loop_overlap_ptr_eq` — proved (word-arithmetic ptr equality for overlapping copy).
 * **`copy_loop_correct`** — proved (COPY instruction inner loop, sorry-free).
+* `near_init_preserves_patch_heap`, `same_init_preserves_patch_heap` — proved
+  (init loops preserve heap_bytes, buf_valid, heap_w32, code_tbl_built).
+* `read_varint'_chain_transfer` — proved (state-transfer variant of varint chain).
+* `varint_decode_value_bound` — proved (varint results < 2^32).
+* **`vcdiff_decode'_prefix_correct`** — partial proof (sorry at while-loop body).
+  Handles: magic checks, init loops, win_ind read + checks (no-source path),
+  full varint read chain (dlen, tgt_len, di, data_len, inst_len, addr_len),
+  bounds checks, cursor arithmetic. Uses `runs_to_vcg` + `auto` with
+  `read_varint'_spec`/`buf_validD`/`runs_to_weaken` as intro rules.
 
 Build status: **clean** (`isabelle build -d . -v -o system_log=true CdeltaRefine`).
 

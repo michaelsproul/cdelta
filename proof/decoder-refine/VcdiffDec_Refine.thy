@@ -5020,9 +5020,13 @@ proof -
           apply runs_to_vcg
           using patch_ok dlen_ok tgt_ok rest_tgt_nonempty di_zero data_ok inst_ok addr_ok
                 sizes_ok tgt_fits dlen_consistent dlen_fits len_ge6 bs_def
-                varint_decode_value_bound
+                varint_decode_value_bound out_len_ok
           apply (auto simp: word_less_nat_alt word_le_nat_alt Exn_def
                       intro: read_varint'_spec buf_validD runs_to_weaken)
+          \<comment> \<open>Remaining: the main while loop + post-checks (Phase 3/4).\<close>
+          apply (runs_to_vcg;
+                 (auto simp: word_less_nat_alt word_le_nat_alt Exn_def
+                       intro: read_varint'_spec buf_validD runs_to_weaken)?)
           sorry
         done
       done
