@@ -61,8 +61,16 @@ In [proof/decoder-refine/VcdiffDec_Refine.thy](../proof/decoder-refine/VcdiffDec
 * `decode_loop_inv_advance_inst_n` — proved (invariant after varint read in inst section).
 * `buf_valid_mono` — proved (buf_valid with smaller length).
 * `inv_inst_varint_bridge` — proved (connects heap_bytes t patch to abstract inst_rem).
+* `code_tbl_matches_first_half`, `code_tbl_matches_second_half` — proved
+  (extract half_inst from code table array under code_tbl_matches).
+* `byte_to_hi_tag_ity`, `byte_to_hi_tag_isz` — proved (map raw bytes to inst_type/size).
+* `inv_no_overflow_data`, `inv_no_overflow_tgt` — proved (overflow safety under invariant).
+* `resolve_size_length`, `resolve_size_nonzero`, `resolve_size_varint` — proved
+  (properties of resolve_size connecting to C's conditional varint read).
+* `inv_data_rem_length`, `inv_tgt_length` — proved (numeric length correspondences).
 
 Build status: **clean** (`isabelle build -d . -v -o system_log=true CdeltaRefine`).
+Only 1 sorry remains (in `vcdiff_decode'_prefix_correct`, covering the main while loop).
 
 ## Goal
 
