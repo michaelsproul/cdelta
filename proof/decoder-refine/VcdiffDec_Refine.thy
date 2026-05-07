@@ -6025,6 +6025,83 @@ proof -
     using invD(21) by simp
 qed
 
+(*
+  General invariant preservation: advance inst_cursor by n (for varint reads).
+  The invariant is preserved with inst_cursor + of_nat n, dropping n from inst_rem.
+*)
+lemma decode_loop_inv_advance_inst_n:
+  fixes n :: nat
+  assumes inv: "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg
+                  data_cursor inst_cursor addr_cursor tgt_pos np t"
+      and n_fits: "unat inst_cursor + n \<le> unat inst_end"
+      and no_overflow: "unat inst_cursor + n < 2 ^ 32"
+  shows "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+           data_end inst_end addr_end src_seg
+           data_cursor (inst_cursor + of_nat n) addr_cursor tgt_pos np t"
+proof -
+  note invD = decode_loop_invD[OF inv]
+  obtain dst :: dec_state and c :: cache where
+    dst_inst: "ds_inst_rem dst =
+      drop (unat inst_cursor) (take (unat inst_end) (heap_bytes s0 patch patch_n))" and
+    dst_data: "ds_data_rem dst =
+      drop (unat data_cursor) (take (unat data_end) (heap_bytes s0 patch patch_n))" and
+    dst_addr: "ds_addr_rem dst =
+      drop (unat addr_cursor) (take (unat addr_end) (heap_bytes s0 patch patch_n))" and
+    dst_tgt: "ds_tgt dst = heap_bytes t out (unat tgt_pos)" and
+    dst_cache: "ds_cache dst = c" and
+    cache_ok: "cache_abs t c np" and
+    cwf: "cache_wf c"
+    using inv unfolding decode_loop_inv_def by blast
+  have unat_icn: "unat (inst_cursor + of_nat n :: 32 word) = unat inst_cursor + n"
+    using no_overflow by (simp add: unat_word_ariths(1) unat_of_nat)
+  have icn_le: "inst_cursor + of_nat n \<le> inst_end"
+    using n_fits unat_icn by (simp add: word_le_nat_alt)
+  have new_inst: "drop (unat (inst_cursor + of_nat n))
+      (take (unat inst_end) (heap_bytes s0 patch patch_n))
+    = drop n (ds_inst_rem dst)"
+  proof -
+    let ?xs = "take (unat inst_end) (heap_bytes s0 patch patch_n)"
+    have "drop n (drop (unat inst_cursor) ?xs) = drop (n + unat inst_cursor) ?xs"
+      by (rule drop_drop)
+    thus ?thesis using unat_icn dst_inst by (simp add: add.commute)
+  qed
+  let ?new_dst = "dst \<lparr> ds_inst_rem := drop n (ds_inst_rem dst) \<rparr>"
+  show ?thesis
+    unfolding decode_loop_inv_def
+    apply (rule exI[where x = "?new_dst"])
+    apply (rule exI[where x = c])
+    apply (intro conjI)
+    using new_inst apply simp
+    using dst_data apply simp
+    using dst_addr apply simp
+    using dst_tgt apply simp
+    using dst_cache apply simp
+    using cache_ok apply simp
+    using cwf apply simp
+    using invD(1) apply simp
+    using invD(2) apply simp
+    using invD(3) apply simp
+    using invD(4) apply simp
+    using invD(5) apply simp
+    using invD(6) apply simp
+    using icn_le apply simp
+    using invD(8) apply simp
+    using invD(9) apply simp
+    using invD(10) apply simp
+    using invD(11) apply simp
+    using invD(12) apply simp
+    using invD(13) apply simp
+    using invD(14) apply simp
+    using invD(15) apply simp
+    using invD(16) apply simp
+    using invD(17) apply simp
+    using invD(18) apply simp
+    using invD(19) apply simp
+    using invD(20) apply simp
+    using invD(21) by simp
+qed
+
 end
 
 end
