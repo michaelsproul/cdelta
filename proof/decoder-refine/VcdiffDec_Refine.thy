@@ -6344,6 +6344,11 @@ lemma exec_half_run_conditions:
     and "ds_cache st' = ds_cache st"
   using assms by (auto simp: exec_half_def pop_byte_def split: if_splits list.splits)
 
+lemma exec_half_noop:
+  assumes "ity h = NOOP"
+  shows "exec_half h sz src_seg src_seg_len tgt_len st = Inl st"
+  using assms by (simp add: exec_half_def)
+
 lemma exec_half_copy_conditions:
   assumes "ity h = ICOPY mode"
       and "exec_half h sz src_seg src_seg_len tgt_len st = Inl st'"
