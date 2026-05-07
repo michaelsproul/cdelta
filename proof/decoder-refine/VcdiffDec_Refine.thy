@@ -4864,6 +4864,164 @@ proof -
   show ?thesis using second drop_eq unat_pos' by simp
 qed
 
+(* ---------- Phase 3: Main decode loop invariant ---------- *)
+
+(*
+  The main decode loop invariant relates the C state (cursors, heap, cache arrays)
+  to the pure spec's dec_state after some number of iterations.
+
+  Parameters:
+    s0      — initial state (before the loop; patch/src heap reference)
+    patch, patch_n — patch buffer base and size
+    src, src_n     — source buffer base and size
+    out            — output buffer base
+    src_seg_off, src_seg_len — source segment within src
+    tgt_len        — expected target length (nat, from the varint)
+    data_end, inst_end, addr_end — section end cursors (fixed)
+    src_seg — precomputed source segment bytes (from src)
+
+  Loop variables (5-tuple carried by the whileLoop):
+    data_cursor, inst_cursor, addr_cursor — current read positions
+    tgt_pos    — bytes written to output so far
+    near_ptr   — cache rotation index
+
+  The invariant says: there exists an abstract dec_state `dst` such that
+  the remaining bytes in the patch (between cursor and end) equal the
+  remaining abstract fields, the output built so far equals ds_tgt, and
+  the cache arrays correspond to ds_cache.
+
+  Because patch/src heaps are unchanged (writes only go to out), we can
+  express the remaining byte slices via drop/take on the original heap_bytes.
+*)
+definition decode_loop_inv ::
+  "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> nat \<Rightarrow>
+   32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   byte list \<Rightarrow>
+   32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   lifted_globals \<Rightarrow> bool" where
+  "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+     data_end inst_end addr_end src_seg
+     data_cursor inst_cursor addr_cursor tgt_pos np t =
+   (\<exists>dst :: dec_state. \<exists>c :: cache.
+      ds_inst_rem dst =
+        drop (unat inst_cursor) (take (unat inst_end) (heap_bytes s0 patch patch_n)) \<and>
+      ds_data_rem dst =
+        drop (unat data_cursor) (take (unat data_end) (heap_bytes s0 patch patch_n)) \<and>
+      ds_addr_rem dst =
+        drop (unat addr_cursor) (take (unat addr_end) (heap_bytes s0 patch patch_n)) \<and>
+      ds_tgt dst = heap_bytes t out (unat tgt_pos) \<and>
+      ds_cache dst = c \<and>
+      cache_abs t c np \<and>
+      cache_wf c \<and>
+      \<comment> \<open>Heap preservation: patch and src unchanged from initial state\<close>
+      (\<forall>i < patch_n. heap_w8 t (patch +\<^sub>p int i) = heap_w8 s0 (patch +\<^sub>p int i)) \<and>
+      (\<forall>i < src_n. heap_w8 t (src +\<^sub>p int i) = heap_w8 s0 (src +\<^sub>p int i)) \<and>
+      \<comment> \<open>Buffer validity preserved\<close>
+      buf_valid t patch patch_n \<and>
+      buf_valid t src src_n \<and>
+      buf_valid t out tgt_len \<and>
+      \<comment> \<open>Cursor bounds\<close>
+      data_cursor \<le> data_end \<and>
+      inst_cursor \<le> inst_end \<and>
+      addr_cursor \<le> addr_end \<and>
+      unat tgt_pos \<le> tgt_len \<and>
+      \<comment> \<open>Section ends within patch buffer\<close>
+      unat data_end \<le> patch_n \<and>
+      unat inst_end \<le> patch_n \<and>
+      unat addr_end \<le> patch_n \<and>
+      \<comment> \<open>Code table still valid\<close>
+      code_tbl_matches t \<and>
+      \<comment> \<open>heap_typing unchanged (needed for ptr_valid preservation)\<close>
+      heap_typing t = heap_typing s0 \<and>
+      \<comment> \<open>Output pointer disjoint from patch and src\<close>
+      (\<forall>i < tgt_len. \<forall>j < patch_n. out +\<^sub>p int i \<noteq> patch +\<^sub>p int j) \<and>
+      (\<forall>i < tgt_len. \<forall>j < src_n. out +\<^sub>p int i \<noteq> src +\<^sub>p int j) \<and>
+      \<comment> \<open>Output pointer injectivity\<close>
+      (\<forall>i < tgt_len. \<forall>j < tgt_len. i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j) \<and>
+      \<comment> \<open>No arithmetic overflow\<close>
+      tgt_len < 2 ^ 32 \<and>
+      unat src_seg_off + unat src_seg_len \<le> src_n \<and>
+      unat src_seg_off + unat src_seg_len < 2 ^ 32 \<and>
+      \<comment> \<open>Source segment definition\<close>
+      src_seg = heap_bytes s0 (src +\<^sub>p uint src_seg_off) (unat src_seg_len))"
+
+(*
+  Key structural lemma: the invariant at the loop entry (initial state).
+  After the prefix sets up cursors, the invariant holds with:
+    - inst_cursor = inst_pos (start of instruction section)
+    - data_cursor = data_pos (start of data section)
+    - addr_cursor = addr_pos (start of addr section)
+    - tgt_pos = 0
+    - near_ptr = 0
+    - cache = cache_init
+*)
+lemma decode_loop_inv_init:
+  assumes heap_eq: "\<forall>i < patch_n. heap_w8 t (patch +\<^sub>p int i) = heap_w8 s0 (patch +\<^sub>p int i)"
+      and src_eq: "\<forall>i < src_n. heap_w8 t (src +\<^sub>p int i) = heap_w8 s0 (src +\<^sub>p int i)"
+      and patch_valid: "buf_valid t patch patch_n"
+      and src_valid: "buf_valid t src src_n"
+      and out_valid: "buf_valid t out tgt_len"
+      and cache_init_abs: "cache_abs t cache_init 0"
+      and cursor_bounds: "data_cursor \<le> data_end" "inst_cursor \<le> inst_end"
+                         "addr_cursor \<le> addr_end" "unat (0 :: 32 word) \<le> tgt_len"
+      and end_bounds: "unat data_end \<le> patch_n" "unat inst_end \<le> patch_n"
+                      "unat addr_end \<le> patch_n"
+      and code_tbl_ok: "code_tbl_matches t"
+      and typing_eq: "heap_typing t = heap_typing s0"
+      and out_disj_patch: "\<forall>i < tgt_len. \<forall>j < patch_n. out +\<^sub>p int i \<noteq> patch +\<^sub>p int j"
+      and out_disj_src: "\<forall>i < tgt_len. \<forall>j < src_n. out +\<^sub>p int i \<noteq> src +\<^sub>p int j"
+      and out_inj: "\<forall>i < tgt_len. \<forall>j < tgt_len. i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j"
+      and tgt_len_fits: "tgt_len < 2 ^ 32"
+      and src_seg_bounds: "unat src_seg_off + unat src_seg_len \<le> src_n"
+                          "unat src_seg_off + unat src_seg_len < 2 ^ 32"
+      and src_seg_eq: "src_seg = heap_bytes s0 (src +\<^sub>p uint src_seg_off) (unat src_seg_len)"
+  shows "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+           data_end inst_end addr_end src_seg
+           data_cursor inst_cursor addr_cursor 0 0 t"
+proof -
+  let ?pb = "heap_bytes s0 patch patch_n"
+  have wf: "cache_wf cache_init"
+  proof (unfold cache_wf_def, intro conjI allI impI)
+    show "length (near cache_init) = s_near"
+      by (simp add: cache_init_def s_near_def)
+    show "length (same cache_init) = same_buckets"
+      by (simp add: cache_init_def same_buckets_def s_same_def)
+    show "AddressCache.near_ptr cache_init < s_near"
+      by (simp add: cache_init_def s_near_def)
+    fix i :: nat assume "i < s_near"
+    hence "i < length (near cache_init)" by (simp add: cache_init_def s_near_def)
+    hence "near cache_init ! i \<in> set (near cache_init)" by (rule nth_mem)
+    moreover have "set (near cache_init) = {0}" by (simp add: cache_init_def s_near_def)
+    ultimately show "near cache_init ! i < 2 ^ 32" by simp
+  next
+    fix i :: nat assume "i < same_buckets"
+    hence "i < length (same cache_init)"
+      by (simp add: cache_init_def same_buckets_def s_same_def)
+    hence "same cache_init ! i \<in> set (same cache_init)" by (rule nth_mem)
+    moreover have "set (same cache_init) = {0}"
+      by (simp add: cache_init_def same_buckets_def s_same_def set_replicate_conv_if)
+    ultimately show "same cache_init ! i < 2 ^ 32" by simp
+  qed
+  have tgt0: "heap_bytes t out (unat (0 :: 32 word)) = []"
+    by (simp add: heap_bytes_def)
+  show ?thesis
+    unfolding decode_loop_inv_def
+    apply (rule exI[where x = "\<lparr> ds_data_rem =
+         drop (unat data_cursor) (take (unat data_end) ?pb),
+       ds_inst_rem =
+         drop (unat inst_cursor) (take (unat inst_end) ?pb),
+       ds_addr_rem =
+         drop (unat addr_cursor) (take (unat addr_end) ?pb),
+       ds_cache = cache_init,
+       ds_tgt = [] \<rparr>"])
+    apply (rule exI[where x = "cache_init"])
+    using heap_eq src_eq patch_valid src_valid out_valid cache_init_abs
+          cursor_bounds end_bounds code_tbl_ok typing_eq out_disj_patch out_disj_src
+          out_inj tgt_len_fits src_seg_bounds src_seg_eq wf tgt0
+    by simp
+qed
+
 (*
   Full C-side prefix refinement: the C decoder reaches the main while-loop
   with cursors matching parse_window, for the no-source, no-app, built case.
