@@ -5023,6 +5023,60 @@ proof -
 qed
 
 (*
+  Key lemma: reading a byte at inst_cursor in the C corresponds to pop_byte
+  on ds_inst_rem in the invariant.
+*)
+lemma inv_pop_byte_cursor:
+  assumes "unat cursor < unat end_pos"
+      and "unat (end_pos :: 32 word) \<le> n"
+  shows "drop (unat cursor) (take (unat end_pos) (heap_bytes s0 buf n))
+         = heap_w8 s0 (buf +\<^sub>p int (unat cursor))
+           # drop (Suc (unat cursor)) (take (unat end_pos) (heap_bytes s0 buf n))"
+proof -
+  let ?bs = "heap_bytes s0 buf n"
+  let ?tbs = "take (unat end_pos) ?bs"
+  have len: "length ?tbs = unat end_pos" using assms(2) by simp
+  have idx_lt: "unat cursor < length ?tbs" using assms(1) len by simp
+  have drop_cons: "?tbs ! (unat cursor) # drop (Suc (unat cursor)) ?tbs = drop (unat cursor) ?tbs"
+    by (rule Cons_nth_drop_Suc[OF idx_lt])
+  hence drop_eq: "drop (unat cursor) ?tbs = ?tbs ! (unat cursor) # drop (Suc (unat cursor)) ?tbs"
+    by simp
+  have nth_eq: "?tbs ! (unat cursor) = ?bs ! (unat cursor)"
+    using assms(1,2) by simp
+  have byte_eq: "?bs ! (unat cursor) = heap_w8 s0 (buf +\<^sub>p int (unat cursor))"
+    using assms(1,2) by (simp add: heap_bytes_nth)
+  show ?thesis using drop_eq nth_eq byte_eq by simp
+qed
+
+(*
+  Relating cursor advancement to drop on the abstract byte list.
+  When we advance inst_cursor by 1 (after reading a byte), the remaining
+  instruction bytes become drop (Suc (unat inst_cursor)) (take ...).
+*)
+lemma cursor_advance_drop:
+  fixes cursor :: "32 word" and end_pos :: "32 word"
+  assumes "unat cursor < unat end_pos"
+      and "unat end_pos \<le> n"
+      and "unat cursor + 1 < 2 ^ 32"
+  shows "drop (unat (cursor + 1)) (take (unat end_pos) (heap_bytes s0 buf n))
+         = drop (Suc (unat cursor)) (take (unat end_pos) (heap_bytes s0 buf n))"
+proof -
+  have "unat (cursor + 1 :: 32 word) = Suc (unat cursor)"
+    using assms(3) by (simp add: unat_word_ariths(1))
+  thus ?thesis by simp
+qed
+
+(*
+  The drop/take length: length of remaining bytes equals end - cursor.
+*)
+lemma remaining_bytes_length:
+  assumes "unat cursor \<le> unat end_pos"
+      and "unat end_pos \<le> n"
+  shows "length (drop (unat cursor) (take (unat end_pos) (heap_bytes s0 buf n)))
+         = unat end_pos - unat cursor"
+  using assms by simp
+
+(*
   Full C-side prefix refinement: the C decoder reaches the main while-loop
   with cursors matching parse_window, for the no-source, no-app, built case.
 
