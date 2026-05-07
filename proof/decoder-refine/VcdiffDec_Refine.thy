@@ -6266,6 +6266,31 @@ proof -
   finally show ?thesis .
 qed
 
+(*
+  resolve_size always returns a suffix: length rest \<le> length bs.
+*)
+lemma resolve_size_length:
+  assumes "resolve_size h bs = Some (sz, rest)"
+  shows "length rest \<le> length bs"
+  using assms varint_decode_length
+  by (auto simp: resolve_size_def split: if_splits)
+
+(*
+  resolve_size with non-zero isz returns the input unchanged.
+*)
+lemma resolve_size_nonzero:
+  assumes "isz h \<noteq> 0 \<or> ity h = NOOP"
+  shows "resolve_size h bs = Some (isz h, bs)"
+  using assms by (auto simp: resolve_size_def)
+
+(*
+  resolve_size with zero isz and non-NOOP delegates to varint_decode.
+*)
+lemma resolve_size_varint:
+  assumes "isz h = 0" and "ity h \<noteq> NOOP"
+  shows "resolve_size h bs = varint_decode bs"
+  using assms by (simp add: resolve_size_def)
+
 end
 
 end
