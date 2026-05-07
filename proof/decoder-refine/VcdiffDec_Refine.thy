@@ -5946,23 +5946,14 @@ proof -
           apply runs_to_vcg
           apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
                        fail)?\<close>)
-          \<comment> \<open>2 goals remain. Each is a do-block (bind_handle wrapping
-              the whileLoop with its continuation).
-              Strategy: decompose with runs_to_bind_handle, then weaken the
-              whileLoop's postcondition to True, then apply whileLoop_exn.\<close>
-          \<comment> \<open>2 remaining goals are do-blocks in the exception monad.
-              Their head is the whileLoop bound to the post-checks.
-              The postcondition is True (termination only).
-              Key strategy: use runs_to_vcg which knows runs_to_bind_handle,
-              but it requires the continuation lambda to not use case_prod.
-              Solution: unfold bind_def to get bind_handle visible, then use
-              the [split_tuple] variant or the exception_monad variant.
-              Actually, let's just use the iff variant as a subst.\<close>
-          \<comment> \<open>2 remaining goals: do-blocks in exception monad (whileLoop + post-checks).
-              Decomposition: unfold bind_def to expose bind_handle, then use
-              runs_to_bind_handle_iff to split into whileLoop + continuation.
-              Weaken continuation to True, then prove whileLoop terminates.
-              The remaining sorry is just the outer whileLoop termination.\<close>
+          \<comment> \<open>2 remaining goals: do-blocks (whileLoop + post-checks).
+              Decompose with runs_to_bind_handle_iff, weaken to True,
+              then prove the outer whileLoop terminates.\<close>
+          \<comment> \<open>2 remaining goals: do-blocks (whileLoop + post-checks).
+              Decompose with runs_to_bind_handle_iff, weaken to True.
+              Remaining obligation: the outer whileLoop terminates.
+              This requires showing all guards pass (via decode_loop_inv) and
+              the measure decreases (inst_cursor advances each iteration).\<close>
           subgoal
             apply (unfold bind_def)
             apply (subst runs_to_bind_handle_iff)
