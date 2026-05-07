@@ -4946,6 +4946,34 @@ definition decode_loop_inv ::
       \<comment> \<open>Source segment definition\<close>
       src_seg = heap_bytes s0 (src +\<^sub>p uint src_seg_off) (unat src_seg_len))"
 
+lemma decode_loop_invD:
+  assumes "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+             data_end inst_end addr_end src_seg
+             data_cursor inst_cursor addr_cursor tgt_pos np t"
+  shows "\<forall>i < patch_n. heap_w8 t (patch +\<^sub>p int i) = heap_w8 s0 (patch +\<^sub>p int i)"
+    and "\<forall>i < src_n. heap_w8 t (src +\<^sub>p int i) = heap_w8 s0 (src +\<^sub>p int i)"
+    and "buf_valid t patch patch_n"
+    and "buf_valid t src src_n"
+    and "buf_valid t out tgt_len"
+    and "data_cursor \<le> data_end"
+    and "inst_cursor \<le> inst_end"
+    and "addr_cursor \<le> addr_end"
+    and "unat tgt_pos \<le> tgt_len"
+    and "unat data_end \<le> patch_n"
+    and "unat inst_end \<le> patch_n"
+    and "unat addr_end \<le> patch_n"
+    and "code_tbl_matches t"
+    and "heap_typing t = heap_typing s0"
+    and "\<forall>i < tgt_len. \<forall>j < patch_n. out +\<^sub>p int i \<noteq> patch +\<^sub>p int j"
+    and "\<forall>i < tgt_len. \<forall>j < src_n. out +\<^sub>p int i \<noteq> src +\<^sub>p int j"
+    and "\<forall>i < tgt_len. \<forall>j < tgt_len. i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j"
+    and "tgt_len < 2 ^ 32"
+    and "unat src_seg_off + unat src_seg_len \<le> src_n"
+    and "unat src_seg_off + unat src_seg_len < 2 ^ 32"
+    and "src_seg = heap_bytes s0 (src +\<^sub>p uint src_seg_off) (unat src_seg_len)"
+  using assms by (auto simp: decode_loop_inv_def)
+
+
 (*
   Key structural lemma: the invariant at the loop entry (initial state).
   After the prefix sets up cursors, the invariant holds with:
@@ -5115,10 +5143,96 @@ qed
 *)
 
 (*
-  COPY half-instruction correspondence: exec_half for ICOPY calls
-  decode_address then copy_loop. The C does decode_address' then the
-  copy inner loop. combine decode_address'_spec + copy_loop_correct.
+  ADD half-instruction: invariant preservation.
+  When exec_half for IADD succeeds, it advances data_cursor by sz and
+  tgt_pos by sz. The spec drops sz from ds_data_rem and appends those
+  bytes to ds_tgt. The C's add_loop_correct shows the heap matches.
+
+  This lemma says: after the ADD inner loop finishes (per add_loop_correct),
+  the invariant is restored with updated cursors.
 *)
+lemma decode_loop_inv_after_add:
+  fixes sz :: "32 word"
+  assumes inv: "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg
+                  data_cursor inst_cursor addr_cursor tgt_pos np t"
+      and sz_pos: "0 < unat sz"
+      and sz_fits_data: "unat sz \<le> unat data_end - unat data_cursor"
+      and sz_fits_tgt: "unat tgt_pos + unat sz \<le> tgt_len"
+      and no_overflow_data: "unat data_cursor + unat sz < 2 ^ 32"
+      and no_overflow_tgt: "unat tgt_pos + unat sz < 2 ^ 32"
+      \<comment> \<open>After the add loop: heap state t' has the ADD bytes written\<close>
+      and patch_preserved: "\<forall>j < patch_n. heap_w8 t' (patch +\<^sub>p int j) = heap_w8 s0 (patch +\<^sub>p int j)"
+      and src_preserved: "\<forall>j < src_n. heap_w8 t' (src +\<^sub>p int j) = heap_w8 s0 (src +\<^sub>p int j)"
+      and add_result: "\<forall>j < unat sz. heap_w8 t' (out +\<^sub>p uint (tgt_pos + of_nat j)) =
+                         heap_w8 s0 (patch +\<^sub>p uint (data_cursor + of_nat j))"
+      and out_prefix_preserved: "\<forall>i < unat tgt_pos. heap_w8 t' (out +\<^sub>p int i) = heap_w8 t (out +\<^sub>p int i)"
+      and typing_preserved: "heap_typing t' = heap_typing t"
+      and cache_preserved: "near_arr_'' t' = near_arr_'' t"
+                           "same_arr_'' t' = same_arr_'' t"
+  shows "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+           data_end inst_end addr_end src_seg
+           (data_cursor + sz) inst_cursor addr_cursor (tgt_pos + sz) np t'"
+  sorry
+
+(*
+  RUN half-instruction: invariant preservation.
+*)
+lemma decode_loop_inv_after_run:
+  fixes sz :: "32 word" and fill :: "8 word"
+  assumes inv: "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg
+                  data_cursor inst_cursor addr_cursor tgt_pos np t"
+      and sz_pos: "0 < unat sz"
+      and fill_read: "unat data_cursor < unat data_end"
+      and sz_fits_tgt: "unat tgt_pos + unat sz \<le> tgt_len"
+      and no_overflow_tgt: "unat tgt_pos + unat sz < 2 ^ 32"
+      and no_overflow_data: "unat data_cursor + 1 < 2 ^ 32"
+      \<comment> \<open>After the run loop\<close>
+      and patch_preserved: "\<forall>j < patch_n. heap_w8 t' (patch +\<^sub>p int j) = heap_w8 s0 (patch +\<^sub>p int j)"
+      and src_preserved: "\<forall>j < src_n. heap_w8 t' (src +\<^sub>p int j) = heap_w8 s0 (src +\<^sub>p int j)"
+      and run_result: "\<forall>j < unat sz. heap_w8 t' (out +\<^sub>p uint (tgt_pos + of_nat j)) = fill"
+      and fill_eq: "fill = heap_w8 s0 (patch +\<^sub>p int (unat data_cursor))"
+      and out_prefix_preserved: "\<forall>i < unat tgt_pos. heap_w8 t' (out +\<^sub>p int i) = heap_w8 t (out +\<^sub>p int i)"
+      and typing_preserved: "heap_typing t' = heap_typing t"
+      and cache_preserved: "near_arr_'' t' = near_arr_'' t"
+                           "same_arr_'' t' = same_arr_'' t"
+  shows "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+           data_end inst_end addr_end src_seg
+           (data_cursor + 1) inst_cursor addr_cursor (tgt_pos + sz) np t'"
+  sorry
+
+(*
+  COPY half-instruction: invariant preservation.
+  After decode_address' gives us (addr, new_np, new_addr_cursor) and
+  copy_loop_correct copies sz bytes.
+*)
+lemma decode_loop_inv_after_copy:
+  fixes sz :: "32 word" and addr :: "32 word" and new_np :: "32 word"
+  assumes inv: "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg
+                  data_cursor inst_cursor addr_cursor tgt_pos np t"
+      and sz_pos: "0 < unat sz"
+      and sz_fits_tgt: "unat tgt_pos + unat sz \<le> tgt_len"
+      and no_overflow_tgt: "unat tgt_pos + unat sz < 2 ^ 32"
+      and addr_ok: "unat addr < unat src_seg_len + unat tgt_pos"
+      and new_addr_cursor_ok: "new_addr_cursor \<le> addr_end"
+      \<comment> \<open>After decode_address' + copy loop\<close>
+      and patch_preserved: "\<forall>j < patch_n. heap_w8 t' (patch +\<^sub>p int j) = heap_w8 s0 (patch +\<^sub>p int j)"
+      and src_preserved: "\<forall>j < src_n. heap_w8 t' (src +\<^sub>p int j) = heap_w8 s0 (src +\<^sub>p int j)"
+      and copy_result: "\<forall>k < unat sz.
+             heap_w8 t' (out +\<^sub>p uint (tgt_pos + of_nat k)) =
+             copy_loop src_seg (heap_bytes t out (unat tgt_pos)) (unat addr) (unat sz)
+               ! (unat tgt_pos + k)"
+      and out_prefix_preserved: "\<forall>i < unat tgt_pos. heap_w8 t' (out +\<^sub>p int i) = heap_w8 t (out +\<^sub>p int i)"
+      and typing_preserved: "heap_typing t' = heap_typing t"
+      and cache_updated: "cache_abs t' c' new_np"
+      and cache_wf': "cache_wf c'"
+      and np_bound: "unat new_np < s_near"
+  shows "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+           data_end inst_end addr_end src_seg
+           data_cursor inst_cursor new_addr_cursor (tgt_pos + sz) new_np t'"
+  sorry
 
 (*
   Full C-side prefix refinement: the C decoder reaches the main while-loop
