@@ -5170,10 +5170,244 @@ lemma decode_loop_inv_after_add:
       and typing_preserved: "heap_typing t' = heap_typing t"
       and cache_preserved: "near_arr_'' t' = near_arr_'' t"
                            "same_arr_'' t' = same_arr_'' t"
+      and code_tbl_preserved: "code_tbl_'' t' = code_tbl_'' t"
   shows "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
            data_end inst_end addr_end src_seg
            (data_cursor + sz) inst_cursor addr_cursor (tgt_pos + sz) np t'"
-  sorry
+proof -
+  note invD = decode_loop_invD[OF inv]
+  \<comment> \<open>Extract the abstract state from the invariant\<close>
+  obtain dst :: dec_state and c :: cache where
+    dst_inst: "ds_inst_rem dst =
+      drop (unat inst_cursor) (take (unat inst_end) (heap_bytes s0 patch patch_n))" and
+    dst_data: "ds_data_rem dst =
+      drop (unat data_cursor) (take (unat data_end) (heap_bytes s0 patch patch_n))" and
+    dst_addr: "ds_addr_rem dst =
+      drop (unat addr_cursor) (take (unat addr_end) (heap_bytes s0 patch patch_n))" and
+    dst_tgt: "ds_tgt dst = heap_bytes t out (unat tgt_pos)" and
+    dst_cache: "ds_cache dst = c" and
+    cache_ok: "cache_abs t c np" and
+    cwf: "cache_wf c"
+    using inv unfolding decode_loop_inv_def by blast
+  \<comment> \<open>Cursor arithmetic\<close>
+  have unat_dc_sz: "unat (data_cursor + sz) = unat data_cursor + unat sz"
+    using no_overflow_data by (simp add: unat_word_ariths(1))
+  have unat_tp_sz: "unat (tgt_pos + sz) = unat tgt_pos + unat sz"
+    using no_overflow_tgt by (simp add: unat_word_ariths(1))
+  \<comment> \<open>New data_rem: dropping further into the same take\<close>
+  have new_data_rem: "drop (unat (data_cursor + sz))
+      (take (unat data_end) (heap_bytes s0 patch patch_n))
+    = drop (unat sz) (ds_data_rem dst)"
+  proof -
+    let ?xs = "take (unat data_end) (heap_bytes s0 patch patch_n)"
+    have "drop (unat sz) (drop (unat data_cursor) ?xs) = drop (unat sz + unat data_cursor) ?xs"
+      by (rule drop_drop)
+    hence eq: "drop (unat data_cursor + unat sz) ?xs = drop (unat sz) (drop (unat data_cursor) ?xs)"
+      by (simp add: add.commute)
+    show ?thesis using eq unat_dc_sz dst_data by simp
+  qed
+  \<comment> \<open>New output: heap_bytes t' out (unat tgt_pos + unat sz)\<close>
+  have new_tgt: "heap_bytes t' out (unat tgt_pos + unat sz)
+    = ds_tgt dst @ take (unat sz) (ds_data_rem dst)"
+  proof (rule nth_equalityI)
+    show "length (heap_bytes t' out (unat tgt_pos + unat sz))
+        = length (ds_tgt dst @ take (unat sz) (ds_data_rem dst))"
+    proof -
+      have "length (ds_tgt dst) = unat tgt_pos" using dst_tgt by simp
+      moreover have "length (take (unat sz) (ds_data_rem dst)) = unat sz"
+      proof -
+        have "length (ds_data_rem dst) = unat data_end - unat data_cursor"
+          using dst_data invD(10) invD(6) by (simp add: word_le_nat_alt)
+        thus ?thesis using sz_fits_data by simp
+      qed
+      ultimately show ?thesis by simp
+    qed
+  next
+    fix i assume i_bound: "i < length (heap_bytes t' out (unat tgt_pos + unat sz))"
+    hence i_lt: "i < unat tgt_pos + unat sz" by simp
+    show "heap_bytes t' out (unat tgt_pos + unat sz) ! i
+        = (ds_tgt dst @ take (unat sz) (ds_data_rem dst)) ! i"
+    proof (cases "i < unat tgt_pos")
+      case True
+      \<comment> \<open>Prefix: bytes already in output, preserved by out_prefix_preserved\<close>
+      have lhs: "heap_bytes t' out (unat tgt_pos + unat sz) ! i
+               = heap_w8 t' (out +\<^sub>p int i)"
+        using i_lt by (simp add: heap_bytes_nth)
+      have "heap_w8 t' (out +\<^sub>p int i) = heap_w8 t (out +\<^sub>p int i)"
+        using out_prefix_preserved True by auto
+      also have "... = heap_bytes t out (unat tgt_pos) ! i"
+        using True by (simp add: heap_bytes_nth)
+      also have "... = ds_tgt dst ! i" using dst_tgt by simp
+      finally have "heap_bytes t' out (unat tgt_pos + unat sz) ! i = ds_tgt dst ! i"
+        using lhs by simp
+      moreover have "(ds_tgt dst @ take (unat sz) (ds_data_rem dst)) ! i = ds_tgt dst ! i"
+        using True dst_tgt by (simp add: nth_append)
+      ultimately show ?thesis by simp
+    next
+      case False
+      hence i_ge: "unat tgt_pos \<le> i" by simp
+      let ?j = "i - unat tgt_pos"
+      have j_lt: "?j < unat sz" using i_lt i_ge by simp
+      \<comment> \<open>New bytes: written by the ADD loop\<close>
+      have lhs: "heap_bytes t' out (unat tgt_pos + unat sz) ! i
+               = heap_w8 t' (out +\<^sub>p int i)"
+        using i_lt by (simp add: heap_bytes_nth)
+      have ptr_eq: "out +\<^sub>p int i = out +\<^sub>p uint (tgt_pos + of_nat ?j)"
+      proof -
+        have unat_eq: "unat (tgt_pos + of_nat ?j :: 32 word) = i"
+        proof -
+          have "unat tgt_pos + ?j = i" using i_ge by simp
+          moreover have "i < 2 ^ 32" using i_lt no_overflow_tgt by simp
+          ultimately show ?thesis
+            by (simp add: unat_word_ariths(1) unat_of_nat)
+        qed
+        show ?thesis by (simp only: ptr_add_def uint_nat unat_eq of_int_of_nat_eq)
+      qed
+      have "heap_w8 t' (out +\<^sub>p uint (tgt_pos + of_nat ?j))
+          = heap_w8 s0 (patch +\<^sub>p uint (data_cursor + of_nat ?j))"
+        using add_result j_lt by auto
+      \<comment> \<open>RHS: (ds_tgt dst @ take sz data_rem) ! i = data_rem ! j\<close>
+      have rhs: "(ds_tgt dst @ take (unat sz) (ds_data_rem dst)) ! i
+               = (take (unat sz) (ds_data_rem dst)) ! ?j"
+        using i_ge dst_tgt by (simp add: nth_append)
+      have data_rem_nth: "(take (unat sz) (ds_data_rem dst)) ! ?j
+               = ds_data_rem dst ! ?j"
+        using j_lt by simp
+      have "ds_data_rem dst ! ?j =
+            (drop (unat data_cursor) (take (unat data_end) (heap_bytes s0 patch patch_n))) ! ?j"
+        using dst_data by simp
+      also have "... = (take (unat data_end) (heap_bytes s0 patch patch_n)) ! (unat data_cursor + ?j)"
+      proof -
+        have "unat data_cursor + ?j < unat data_end"
+          using sz_fits_data j_lt invD(6) by (simp add: word_le_nat_alt)
+        moreover have "length (take (unat data_end) (heap_bytes s0 patch patch_n)) = unat data_end"
+          using invD(10) by simp
+        ultimately show ?thesis by (simp add: nth_drop)
+      qed
+      also have "... = (heap_bytes s0 patch patch_n) ! (unat data_cursor + ?j)"
+      proof -
+        have idx_lt: "unat data_cursor + ?j < unat data_end"
+          using sz_fits_data j_lt invD(6) by (simp add: word_le_nat_alt)
+        thus ?thesis by (simp add: nth_take)
+      qed
+      also have "... = heap_w8 s0 (patch +\<^sub>p int (unat data_cursor + ?j))"
+      proof -
+        have "unat data_cursor + ?j < patch_n"
+          using sz_fits_data j_lt invD(6) invD(10) by (simp add: word_le_nat_alt)
+        thus ?thesis by (simp add: heap_bytes_nth)
+      qed
+      finally have data_byte: "ds_data_rem dst ! ?j
+        = heap_w8 s0 (patch +\<^sub>p int (unat data_cursor + ?j))" .
+      \<comment> \<open>Connect the patch pointer forms\<close>
+      have patch_ptr_eq: "patch +\<^sub>p int (unat data_cursor + ?j)
+                        = patch +\<^sub>p uint (data_cursor + of_nat ?j)"
+      proof -
+        have unat_eq: "unat (data_cursor + of_nat ?j :: 32 word) = unat data_cursor + ?j"
+        proof -
+          have "unat data_cursor + ?j < 2 ^ 32"
+            using j_lt no_overflow_data by simp
+          thus ?thesis by (simp add: unat_word_ariths(1) unat_of_nat)
+        qed
+        have "uint (data_cursor + of_nat ?j :: 32 word) = int (unat data_cursor + ?j)"
+          by (simp only: uint_nat unat_eq)
+        thus ?thesis by simp
+      qed
+      show ?thesis using lhs ptr_eq add_result[rule_format, OF j_lt]
+        rhs data_rem_nth data_byte patch_ptr_eq by simp
+    qed
+  qed
+  \<comment> \<open>cache_abs t' c np — arrays unchanged, so same as cache_abs t c np\<close>
+  have cache_abs': "cache_abs t' c np"
+    using cache_ok cache_preserved
+    by (simp add: cache_abs_def)
+  \<comment> \<open>code_tbl_matches t'\<close>
+  have code_tbl': "code_tbl_matches t'"
+    using invD(13) code_tbl_preserved by (simp add: code_tbl_matches_def)
+  \<comment> \<open>buf_valid — depends only on heap_typing\<close>
+  have bv_patch: "buf_valid t' patch patch_n"
+    using invD(3) typing_preserved by (simp add: buf_valid_def)
+  have bv_src: "buf_valid t' src src_n"
+    using invD(4) typing_preserved by (simp add: buf_valid_def)
+  have bv_out: "buf_valid t' out tgt_len"
+    using invD(5) typing_preserved by (simp add: buf_valid_def)
+  \<comment> \<open>heap_typing t' = heap_typing s0\<close>
+  have typing_s0: "heap_typing t' = heap_typing s0"
+    using typing_preserved invD(14) by simp
+  \<comment> \<open>Cursor bound: data_cursor + sz \<le> data_end\<close>
+  have dc_bound: "data_cursor + sz \<le> data_end"
+  proof -
+    have "unat data_cursor + unat sz \<le> unat data_end"
+      using sz_fits_data invD(6) by (simp add: word_le_nat_alt)
+    thus ?thesis using unat_dc_sz by (simp add: word_le_nat_alt)
+  qed
+  \<comment> \<open>tgt_pos bound\<close>
+  have tp_bound: "unat (tgt_pos + sz) \<le> tgt_len"
+    using sz_fits_tgt unat_tp_sz by simp
+  \<comment> \<open>Now construct the new existential witness\<close>
+  let ?new_dst = "dst \<lparr> ds_data_rem := drop (unat sz) (ds_data_rem dst),
+                        ds_tgt := ds_tgt dst @ take (unat sz) (ds_data_rem dst) \<rparr>"
+  show ?thesis
+    unfolding decode_loop_inv_def
+    apply (rule exI[where x = "?new_dst"])
+    apply (rule exI[where x = c])
+    apply (intro conjI)
+    \<comment> \<open>ds_inst_rem: unchanged\<close>
+    using dst_inst apply simp
+    \<comment> \<open>ds_data_rem: advanced by sz\<close>
+    using new_data_rem unat_dc_sz apply simp
+    \<comment> \<open>ds_addr_rem: unchanged\<close>
+    using dst_addr apply simp
+    \<comment> \<open>ds_tgt: extended\<close>
+    using new_tgt unat_tp_sz apply simp
+    \<comment> \<open>ds_cache\<close>
+    using dst_cache apply simp
+    \<comment> \<open>cache_abs\<close>
+    using cache_abs' apply simp
+    \<comment> \<open>cache_wf\<close>
+    using cwf apply simp
+    \<comment> \<open>patch heap preserved\<close>
+    using patch_preserved apply simp
+    \<comment> \<open>src heap preserved\<close>
+    using src_preserved apply simp
+    \<comment> \<open>buf_valid patch\<close>
+    using bv_patch apply simp
+    \<comment> \<open>buf_valid src\<close>
+    using bv_src apply simp
+    \<comment> \<open>buf_valid out\<close>
+    using bv_out apply simp
+    \<comment> \<open>data_cursor + sz \<le> data_end\<close>
+    using dc_bound apply simp
+    \<comment> \<open>inst_cursor \<le> inst_end\<close>
+    using invD(7) apply simp
+    \<comment> \<open>addr_cursor \<le> addr_end\<close>
+    using invD(8) apply simp
+    \<comment> \<open>unat (tgt_pos + sz) \<le> tgt_len\<close>
+    using tp_bound apply simp
+    \<comment> \<open>unat data_end \<le> patch_n\<close>
+    using invD(10) apply simp
+    \<comment> \<open>unat inst_end \<le> patch_n\<close>
+    using invD(11) apply simp
+    \<comment> \<open>unat addr_end \<le> patch_n\<close>
+    using invD(12) apply simp
+    \<comment> \<open>code_tbl_matches\<close>
+    using code_tbl' apply simp
+    \<comment> \<open>heap_typing\<close>
+    using typing_s0 apply simp
+    \<comment> \<open>out/patch disjoint\<close>
+    using invD(15) apply simp
+    \<comment> \<open>out/src disjoint\<close>
+    using invD(16) apply simp
+    \<comment> \<open>out injectivity\<close>
+    using invD(17) apply simp
+    \<comment> \<open>tgt_len < 2^32\<close>
+    using invD(18) apply simp
+    \<comment> \<open>src_seg_off + src_seg_len \<le> src_n\<close>
+    using invD(19) apply simp
+    \<comment> \<open>src_seg_off + src_seg_len < 2^32\<close>
+    using invD(20) apply simp
+    \<comment> \<open>src_seg definition\<close>
+    using invD(21) by simp
+qed
 
 (*
   RUN half-instruction: invariant preservation.
