@@ -6108,7 +6108,16 @@ proof -
           apply (all \<open>runs_to_vcg?\<close>)
           apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
                        fail)?\<close>)
-          \<comment> \<open>After prefix varints: remaining goal should be about the whileLoop.\<close>
+          \<comment> \<open>Remaining: runs_to (do-block with whileLoop + post-checks) ta True.
+              The do-block's post-loop tail (unlesses + modify + throw) always succeeds.
+              The only non-trivial obligation is that the whileLoop succeeds.
+              Convert to succeeds form and decompose.\<close>
+          \<comment> \<open>Phase 3b sorry: the remaining goal is
+                runs_to (whileLoop-block; post-checks) ta (λr t. True)
+              where the whileLoop is the outer decode loop. The post-checks
+              (unlesses + modify + throw) always succeed. The whileLoop
+              termination and safety requires decode_loop_inv + the three
+              instruction loop lemmas (add/run/copy_loop_correct).\<close>
           sorry
         done
       done
