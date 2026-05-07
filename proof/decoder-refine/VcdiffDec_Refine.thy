@@ -6160,6 +6160,74 @@ proof -
   thus ?thesis by simp
 qed
 
+(*
+  Under code_tbl_matches, the first half-instruction from code_tbl[op] has:
+  - typ (slot 0): corresponds to ity of fst (default_entry op)
+  - sz  (slot 1): corresponds to isz of fst (default_entry op)
+  - md  (slot 2): mode (only used for COPY)
+  And byte_to_hi of these three gives fst (default_entry op).
+*)
+lemma code_tbl_matches_first_half:
+  assumes "code_tbl_matches t"
+      and "unat (op :: 8 word) < 256"
+  shows "byte_to_hi (code_tbl_'' t .[unat op] .[0])
+                    (code_tbl_'' t .[unat op] .[1])
+                    (code_tbl_'' t .[unat op] .[2])
+       = fst (default_entry (unat op))"
+proof -
+  let ?row = "code_tbl_'' t .[unat op]"
+  have eq: "(byte_to_hi (?row.[0]) (?row.[1]) (?row.[2]),
+             byte_to_hi (?row.[3]) (?row.[4]) (?row.[5]))
+          = default_entry (unat op)"
+    using code_tbl_matches_lookup[OF assms] by (simp add: entry_of_row_def)
+  have "fst (byte_to_hi (?row.[0]) (?row.[1]) (?row.[2]),
+             byte_to_hi (?row.[3]) (?row.[4]) (?row.[5]))
+      = fst (default_entry (unat op))"
+    using eq by simp
+  thus ?thesis by simp
+qed
+
+lemma code_tbl_matches_second_half:
+  assumes "code_tbl_matches t"
+      and "unat (op :: 8 word) < 256"
+  shows "byte_to_hi (code_tbl_'' t .[unat op] .[3])
+                    (code_tbl_'' t .[unat op] .[4])
+                    (code_tbl_'' t .[unat op] .[5])
+       = snd (default_entry (unat op))"
+proof -
+  let ?row = "code_tbl_'' t .[unat op]"
+  have eq: "(byte_to_hi (?row.[0]) (?row.[1]) (?row.[2]),
+             byte_to_hi (?row.[3]) (?row.[4]) (?row.[5]))
+          = default_entry (unat op)"
+    using code_tbl_matches_lookup[OF assms] by (simp add: entry_of_row_def)
+  have "snd (byte_to_hi (?row.[0]) (?row.[1]) (?row.[2]),
+             byte_to_hi (?row.[3]) (?row.[4]) (?row.[5]))
+      = snd (default_entry (unat op))"
+    using eq by simp
+  thus ?thesis by simp
+qed
+
+(*
+  Key bridge lemma: the C's check "typ == 0" corresponds to ity h = NOOP,
+  "typ == 1" to IADD, "typ == 2" to IRUN, "typ >= 3" to ICOPY.
+  This follows from byte_to_hi's definition.
+*)
+lemma byte_to_hi_tag_ity:
+  "ity (byte_to_hi tag sz mode) =
+     (if tag = 0 then NOOP
+      else if tag = 1 then IADD
+      else if tag = 2 then IRUN
+      else if tag = 3 then ICOPY (unat mode)
+      else NOOP)"
+  by (simp add: byte_to_hi_def noop_hi_def add_hi_def run_hi_def copy_hi_def)
+
+lemma byte_to_hi_tag_isz:
+  "isz (byte_to_hi tag sz mode) =
+     (if tag = 0 then 0
+      else if tag = 1 \<or> tag = 2 \<or> tag = 3 then unat sz
+      else 0)"
+  by (simp add: byte_to_hi_def noop_hi_def add_hi_def run_hi_def copy_hi_def)
+
 end
 
 end
