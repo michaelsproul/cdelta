@@ -5077,6 +5077,50 @@ lemma remaining_bytes_length:
   using assms by simp
 
 (*
+  Lemma connecting code_tbl_matches to default_entry lookup.
+  Under code_tbl_matches, reading code_tbl[op] gives entry_of_row matching
+  default_entry (unat op).
+*)
+lemma code_tbl_matches_lookup:
+  assumes "code_tbl_matches s"
+      and "unat (op :: 8 word) < 256"
+  shows "entry_of_row (code_tbl_'' s .[unat op]) = default_entry (unat op)"
+  using assms by (simp add: code_tbl_matches_def)
+
+(*
+  Connecting pop_byte on the spec side to the invariant's cursor read.
+  When inst_cursor < inst_end, the byte at inst_cursor is the head of
+  ds_inst_rem, and advancing the cursor by 1 drops it.
+*)
+lemma inv_inst_pop_byte:
+  fixes inst_cursor :: "32 word" and inst_end :: "32 word"
+  assumes ic_lt: "unat inst_cursor < unat inst_end"
+      and end_bd: "unat inst_end \<le> patch_n"
+  shows "pop_byte (drop (unat inst_cursor) (take (unat inst_end) (heap_bytes s0 patch patch_n)))
+         = Some (heap_w8 s0 (patch +\<^sub>p int (unat inst_cursor)),
+                 drop (Suc (unat inst_cursor)) (take (unat inst_end) (heap_bytes s0 patch patch_n)))"
+proof -
+  have pop: "drop (unat inst_cursor) (take (unat inst_end) (heap_bytes s0 patch patch_n))
+             = heap_w8 s0 (patch +\<^sub>p int (unat inst_cursor))
+               # drop (Suc (unat inst_cursor)) (take (unat inst_end) (heap_bytes s0 patch patch_n))"
+    using inv_pop_byte_cursor[OF ic_lt end_bd] by simp
+  thus ?thesis by (simp add: pop_byte_def)
+qed
+
+(*
+  ADD half-instruction correspondence: when exec_half succeeds for IADD,
+  the spec advances ds_data_rem by sz and appends those bytes to ds_tgt.
+  The C implementation uses the add_loop inner loop which does the same
+  (proved in add_loop_correct).
+*)
+
+(*
+  COPY half-instruction correspondence: exec_half for ICOPY calls
+  decode_address then copy_loop. The C does decode_address' then the
+  copy inner loop. combine decode_address'_spec + copy_loop_correct.
+*)
+
+(*
   Full C-side prefix refinement: the C decoder reaches the main while-loop
   with cursors matching parse_window, for the no-source, no-app, built case.
 
