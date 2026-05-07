@@ -745,6 +745,44 @@ lemma read_varint'_spec:
     done
   done
 
+lemma read_varint'_succeeds:
+  assumes "buf_valid s buf (unat len)" "pos \<le> len"
+  shows "succeeds (read_varint' buf len pos) s"
+  using read_varint'_spec[OF assms]
+  by (simp add: succeeds_runs_to_iff runs_to_weaken)
+
+lemma read_varint'_reaches_state:
+  assumes "buf_valid s buf (unat len)" "pos \<le> len"
+      and "reaches (read_varint' buf len pos) s r t"
+  shows "t = s"
+proof -
+  from assms(3) have succ: "succeeds (read_varint' buf len pos) s"
+    by (rule reaches_succeeds)
+  from read_varint'_spec[OF assms(1,2)]
+  have rt: "read_varint' buf len pos \<bullet> s \<lbrace> \<lambda>r t. t = s \<and>
+    (\<exists>v. r = Result v \<and> pos \<le> pr_t_C.pos_C v \<and> pr_t_C.pos_C v \<le> len \<and>
+         (case varint_decode (drop (unat pos) (heap_bytes s buf (unat len))) of
+            Some (nv, rest) \<Rightarrow> pr_t_C.err_C v = VCD_OK \<and>
+              unat (pr_t_C.pos_C v) = unat len - length rest \<and> nv = unat (pr_t_C.val_C v)
+          | None \<Rightarrow> pr_t_C.err_C v \<noteq> VCD_OK)) \<rbrace>" .
+  from runs_toD2[OF rt assms(3)] show "t = s" by auto
+qed
+
+lemma read_varint'_reaches_pos:
+  assumes "buf_valid s buf (unat len)" "pos \<le> len"
+      and "reaches (read_varint' buf len pos) s (Result v) t"
+  shows "pr_t_C.pos_C v \<le> len"
+proof -
+  from read_varint'_spec[OF assms(1,2)]
+  have rt: "read_varint' buf len pos \<bullet> s \<lbrace> \<lambda>r t. t = s \<and>
+    (\<exists>v. r = Result v \<and> pos \<le> pr_t_C.pos_C v \<and> pr_t_C.pos_C v \<le> len \<and>
+         (case varint_decode (drop (unat pos) (heap_bytes s buf (unat len))) of
+            Some (nv, rest) \<Rightarrow> pr_t_C.err_C v = VCD_OK \<and>
+              unat (pr_t_C.pos_C v) = unat len - length rest \<and> nv = unat (pr_t_C.val_C v)
+          | None \<Rightarrow> pr_t_C.err_C v \<noteq> VCD_OK)) \<rbrace>" .
+  from runs_toD2[OF rt assms(3)] show ?thesis by auto
+qed
+
 (* ---------- build_code_table refinement ---------- *)
 
 (*
@@ -5940,6 +5978,7 @@ proof -
               Apply VCG which decomposes bind_handle goals.
               The 2 remaining goals are do-blocks; try applying the VCG rules
               with explicit split_tuple annotation.\<close>
+          \<comment> \<open>Further VCG decomposition + close trivial goals\<close>
           apply (all \<open>clarsimp?\<close>)
           apply (all \<open>runs_to_vcg\<close>)
           apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
@@ -5947,93 +5986,129 @@ proof -
           apply runs_to_vcg
           apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
                        fail)?\<close>)
-          \<comment> \<open>2 remaining goals: do-blocks (whileLoop + post-checks).
-              Decompose with runs_to_bind_handle_iff, weaken to True,
-              then prove the outer whileLoop terminates.\<close>
-          \<comment> \<open>2 remaining goals: do-blocks (whileLoop + post-checks).
-              Decompose with runs_to_bind_handle_iff, weaken to True.
-              The sorry covers the outer decode whileLoop termination.
-              To close it, apply runs_to_whileLoop_exn with decode_loop_inv
-              as invariant and measure (inst_end - inst_cursor). The body proof
-              requires connecting decode_loop_inv_after_add/run/copy with the
-              AutoCorres-lifted loop body, plus inner loop termination (for which<2,
-              for j<sz). This is Phase 3b of the refinement plan.\<close>
-          \<comment> \<open>After VCG+auto: goals remain. Close read_varint' goals with
-              read_varint'_spec + word_le_nat_alt. One goal remains (Phase 3b).\<close>
+          \<comment> \<open>Close read_varint' runs_to goals\<close>
           apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
                        simp add: word_le_nat_alt; fail)?\<close>)
-          \<comment> \<open>One goal: runs_to (big do-block) t Q.  Weaken to True.\<close>
-          apply (rule runs_to_weaken[where Q = "\<lambda>_ _. True"])
-           prefer 2 apply simp
-          \<comment> \<open>Goal: runs_to (whileLoop-block ; post-checks) t Q.
-              Weaken Q to True (post-checks always succeed: just unlesses + throw).
-              The remaining obligation: the main decode loop doesn't guard-fail.
-              Phase 3b of the plan.\<close>
-          apply (rule runs_to_weaken[where Q = "\<lambda>_ _. True"])
-           prefer 2 apply simp
-          \<comment> \<open>Goal: runs_to (bind_handle (whileLoop C B init) cont handler) t True.
-              Convert to succeeds form. The continuation and handler always succeed
-              (they are just unlesses + modify + throw_exception_or_result).
-              Use succeeds_bind_handle to reduce to succeeds(whileLoop).\<close>
-          apply (subst succeeds_runs_to_iff[symmetric])
-          apply (unfold bind_def)
-          apply (subst succeeds_bind_handle)
-          \<comment> \<open>Goal: succeeds (bind_handle (whileLoop ...) cont handler) t.
-              simp with succeeds_bind_handle decomposes into:
-                succeeds(f) ∧ ∀results. succeeds(continuation)
-              The continuation always succeeds (just throws). Focus on the whileLoop.\<close>
-          apply (simp add: succeeds_bind_handle
-                      split: exception_or_result_splits)
-          apply (intro conjI allI impI)
-          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when
-                            split: exception_or_result_splits; fail)?\<close>)
-          apply (all \<open>(subst succeeds_runs_to_iff;
-                       rule runs_to_weaken[OF read_varint'_spec];
-                       simp add: word_le_nat_alt; fail)?\<close>)
-          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when
-                            split: exception_or_result_splits; fail)?\<close>)
-          \<comment> \<open>Remaining goals: iterate one more round of simp/read_varint' handling\<close>
-          apply (all \<open>(subst succeeds_runs_to_iff;
-                       rule runs_to_weaken[OF read_varint'_spec];
-                       simp add: word_le_nat_alt; fail)?\<close>)
+          \<comment> \<open>Weaken remaining do-block goals to True postcondition\<close>
+          apply (all \<open>(rule runs_to_weaken[where Q = "\<lambda>_ _. True"],
+                       simp; fail)?\<close>)
+          \<comment> \<open>Convert to succeeds form and decompose bind_handle layers\<close>
+          apply (all \<open>(subst succeeds_runs_to_iff[symmetric]; fail)?\<close>)
+          apply (all \<open>(simp only: bind_def; fail)?\<close>)
           apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
                             split: exception_or_result_splits; fail)?\<close>)
-          apply (all \<open>(subst succeeds_runs_to_iff;
-                       rule runs_to_weaken[OF read_varint'_spec];
-                       simp add: word_le_nat_alt; fail)?\<close>)
+          apply (all \<open>(intro conjI allI impI; fail)?\<close>)
           apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
                             split: exception_or_result_splits; fail)?\<close>)
-          apply (all \<open>(subst succeeds_runs_to_iff;
-                       rule runs_to_weaken[OF read_varint'_spec];
+          \<comment> \<open>Close succeeds(read_varint') goals using state propagation\<close>
+          apply (all \<open>(rule read_varint'_succeeds; assumption;
                        simp add: word_le_nat_alt; fail)?\<close>)
-          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
-                            split: exception_or_result_splits; fail)?\<close>)
-          \<comment> \<open>Handle any remaining runs_to (read_varint') goals and succeeds(whileLoop)\<close>
+          apply (all \<open>(rule read_varint'_succeeds,
+                       (simp add: read_varint'_reaches_state word_le_nat_alt
+                              reaches_liftE; assumption),
+                       (simp add: read_varint'_reaches_pos word_le_nat_alt
+                              reaches_liftE; assumption)
+                      ; fail)?\<close>)
+          \<comment> \<open>Single remaining goal: runs_to (read_varint' ...) ta (λr t. CONTINUATION • t ⦃ True ⦄).
+              The entire remaining computation (varints + whileLoop + post-checks)
+              must succeed from state ta. Iteratively peel each prefix operation:
+              read_varint'_spec handles varints (state unchanged: t = s),
+              runs_to_vcg handles binds and unless/when guards,
+              auto closes arithmetic side conditions.\<close>
+          apply (rule runs_to_weaken[OF read_varint'_spec])
+            apply assumption
+           apply (simp add: word_le_nat_alt)
+          apply (clarsimp split: option.splits)
+          apply runs_to_vcg
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          \<comment> \<open>Iterative peeling pattern for remaining varints and read_byte'\<close>
           apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
-                       simp add: word_le_nat_alt; fail)?\<close>)
-          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
-                            split: exception_or_result_splits; fail)?\<close>)
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          \<comment> \<open>Repeat for data_len varint\<close>
           apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
-                       simp add: word_le_nat_alt; fail)?\<close>)
-          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
-                            split: exception_or_result_splits; fail)?\<close>)
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          \<comment> \<open>Repeat for inst_len varint\<close>
           apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
-                       simp add: word_le_nat_alt; fail)?\<close>)
-          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
-                            split: exception_or_result_splits; fail)?\<close>)
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          \<comment> \<open>Repeat for addr_len varint\<close>
           apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
-                       simp add: word_le_nat_alt; fail)?\<close>)
-          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
-                            split: exception_or_result_splits; fail)?\<close>)
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          \<comment> \<open>The remaining goal has a bind_handle wrapper; apply runs_to_vcg
+              to decompose, then continue peeling varints.\<close>
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
           apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
-                       simp add: word_le_nat_alt; fail)?\<close>)
-          apply (all \<open>(simp add: succeeds_bind_handle succeeds_when succeeds_bind
-                            split: exception_or_result_splits; fail)?\<close>)
-          \<comment> \<open>Remaining: succeeds(outer-whileLoop-computation) s'n.
-              The whileLoop is the instruction decode loop + for-which + inner loops.
-              To prove it doesn't fail, use whileLoop_ne_Failure coinductively with
-              decode_loop_inv ensuring all IS_VALID guards hold at each iteration.
-              This is Phase 3b — the full loop body correctness proof.\<close>
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          \<comment> \<open>Remaining: runs_to (read_varint' ...) ta (λRes r t. CONT • t ⦃ True ⦄).
+              Apply runs_to_vcg which should decompose this as a res_monad bind.\<close>
+          apply runs_to_vcg
+          apply (rule runs_to_weaken[OF read_varint'_spec])
+            apply assumption
+           apply (simp add: word_le_nat_alt)
+          apply (clarsimp split: option.splits)
+          apply runs_to_vcg
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          \<comment> \<open>Continue: peel remaining varints and read_byte\<close>
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          \<comment> \<open>After prefix varints: remaining goal should be about the whileLoop.\<close>
           sorry
         done
       done
