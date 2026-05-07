@@ -5007,18 +5007,23 @@ proof -
             subgoal by simp
            subgoal using len_ge6 by (simp add: word_less_nat_alt)
           apply (intro allI impI)
-          subgoal for va
-            apply simp
-            apply runs_to_vcg
-            using win_no_target win_mask_ok win_no_source
-            apply (auto simp: word_less_nat_alt word_le_nat_alt)[]
-            \<comment> \<open>After win_ind checks pass (no source branch), we have the full
-                continuation of vcdiff_decode' as a runs_to goal. We need to step
-                through the remaining reads + main loop + post-checks.
-                This constitutes the bulk of the prefix + main loop proof.
-                We split it as: runs_to_vcg decomposes the monadic term step by step.\<close>
-            sorry
-          done
+          apply simp
+          apply runs_to_vcg
+          using win_no_target win_mask_ok win_no_source
+          apply (auto simp: word_less_nat_alt word_le_nat_alt)[]
+          \<comment> \<open>After win_ind checks pass (no-source path), the continuation includes:
+              read_varint' for dlen/tgt_len/data_len/inst_len/addr_len, read_byte'
+              for delta_indicator, bounds checks, cursor arithmetic, the main
+              instruction decode while loop, post-loop checks, final write.
+              runs_to_vcg + auto closes the prefix reads and checks; the remaining
+              sorry covers the main while loop (Phase 3) and post-checks (Phase 4).\<close>
+          apply runs_to_vcg
+          using patch_ok dlen_ok tgt_ok rest_tgt_nonempty di_zero data_ok inst_ok addr_ok
+                sizes_ok tgt_fits dlen_consistent dlen_fits len_ge6 bs_def
+                varint_decode_value_bound
+          apply (auto simp: word_less_nat_alt word_le_nat_alt Exn_def
+                      intro: read_varint'_spec buf_validD runs_to_weaken)
+          sorry
         done
       done
     done
