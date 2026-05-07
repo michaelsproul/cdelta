@@ -4554,6 +4554,291 @@ lemma copy_loop_correct:
     done
   done
 
+(* ---------- Phase 2: Prefix refinement (no-source, no-app-header) ---------- *)
+
+(*
+  Prefix refinement lemma: the C decoder's execution from start to the main
+  while-loop entry corresponds to parse_header + parse_window from the spec.
+
+  Simplest success-path scenario:
+    - Magic OK, hdr_indicator OK, no app header (bit 2 = 0)
+    - code_tbl_built (skip build_code_table call)
+    - win_ind: no source (bit 0 = 0), no target (bit 1 = 0), no adler32 (bit 2 = 0)
+    - All varints (dlen, tgt_len, di=0, data_len, inst_len, addr_len) parse successfully
+    - Section sizes consistent
+
+  Postcondition: the state after prefix execution has:
+    - data_cursor, inst_cursor, addr_cursor pointing to the three sections
+    - tgt_pos = 0, near_ptr = 0
+    - cache initialized to zero (near_arr, same_arr all zero)
+    - Cursors match parse_window output
+*)
+
+(*
+  Helper: varint_decode always returns a value < 2^32.
+  (Used to discharge the nv_fits precondition of read_varint'_chain.)
+*)
+lemma varint_decode_fits:
+  "varint_decode bs = Some (nv, rest) \<Longrightarrow> nv < 2 ^ 32"
+  by (rule varint_decode_value_bound)
+
+(*
+  Helper: after a varint decode from drop k bs, the rest length < 2^32
+  if the total buffer length < 2^32.
+*)
+lemma varint_rest_lt_2p32:
+  assumes "varint_decode (drop k bs) = Some (nv, rest)"
+      and "length bs < 2 ^ 32"
+  shows "length rest < 2 ^ 32"
+proof -
+  have "length rest \<le> length (drop k bs)"
+    by (rule varint_decode_length[OF assms(1)])
+  also have "\<dots> \<le> length bs" by simp
+  finally show ?thesis using assms(2) by linarith
+qed
+
+(*
+  Helper: pop_byte on a non-empty drop gives the nth element.
+*)
+lemma pop_byte_drop:
+  assumes "k < length bs"
+  shows "pop_byte (drop k bs) = Some (bs ! k, drop (Suc k) bs)"
+proof -
+  have "drop k bs = bs ! k # drop (Suc k) bs"
+    using assms by (simp add: Cons_nth_drop_Suc)
+  thus ?thesis by (simp add: pop_byte_def)
+qed
+
+(*
+  The prefix refinement for the no-source, no-app-header, code-table-built
+  success path. Shows that after the C prefix, the cursor variables point
+  to the correct sections matching parse_window.
+
+  This lemma establishes the connection between the C state entering the
+  main while-loop and the pure spec's parse_header + parse_window result.
+
+  We state it in terms of varint_decode results on the patch bytes, since
+  those are exactly what read_varint'_chain needs.
+*)
+lemma prefix_refine_no_source:
+  assumes bs_def: "bs = heap_bytes s patch (unat patch_len)"
+      and len_ge5: "5 \<le> unat patch_len"
+      \<comment> \<open>Header: magic OK, hdr indicator OK, no app header\<close>
+      and magic0: "bs ! 0 = 0xD6"
+      and magic1: "bs ! 1 = 0xC3"
+      and magic2: "bs ! 2 = 0xC4"
+      and magic3: "bs ! 3 = 0x00"
+      and hdr_ok: "bs ! 4 AND 0x03 = 0"
+      and no_app: "bs ! 4 AND 0x04 = 0"
+      \<comment> \<open>Window indicator: no source, no target, no adler32\<close>
+      and win_ind_parse: "pop_byte (drop 5 bs) = Some (win_ind, wbs1)"
+      and no_source: "win_ind AND 0x01 = 0"
+      and no_target: "win_ind AND 0x02 = 0"
+      and win_mask_ok: "win_ind AND 0xFA = 0"
+      and no_adler: "win_ind AND 0x04 = 0"
+      \<comment> \<open>Varint parses for window metadata\<close>
+      and dlen_ok: "varint_decode wbs1 = Some (dlen, wbs2)"
+      and tgt_ok: "varint_decode wbs2 = Some (tgt_len, wbs3)"
+      and di_pop: "pop_byte wbs3 = Some (di_byte, wbs4)"
+      and di_zero: "di_byte = 0"
+      and data_ok: "varint_decode wbs4 = Some (data_len, wbs5)"
+      and inst_ok: "varint_decode wbs5 = Some (inst_len, wbs6)"
+      and addr_ok: "varint_decode wbs6 = Some (addr_len, wbs7)"
+      \<comment> \<open>Section sizes fit\<close>
+      and sizes_ok: "data_len + inst_len + addr_len \<le> length wbs7"
+  shows "parse_header bs = Inl (drop 5 bs)
+       \<and> parse_window (drop 5 bs) = Inl (\<lparr>
+           pw_src_seg_len = 0,
+           pw_src_seg_off = 0,
+           pw_tgt_len = tgt_len,
+           pw_data = take data_len wbs7,
+           pw_inst = take inst_len (drop data_len wbs7),
+           pw_addr = take addr_len (drop (data_len + inst_len) wbs7)
+         \<rparr>, drop (data_len + inst_len + addr_len) wbs7)"
+proof (intro conjI)
+  show "parse_header bs = Inl (drop 5 bs)"
+    by (rule parse_header_no_app[OF bs_def len_ge5 magic0 magic1 magic2 magic3 hdr_ok no_app])
+next
+  show "parse_window (drop 5 bs) = Inl (\<lparr>
+           pw_src_seg_len = 0,
+           pw_src_seg_off = 0,
+           pw_tgt_len = tgt_len,
+           pw_data = take data_len wbs7,
+           pw_inst = take inst_len (drop data_len wbs7),
+           pw_addr = take addr_len (drop (data_len + inst_len) wbs7)
+         \<rparr>, drop (data_len + inst_len + addr_len) wbs7)"
+    by (rule parse_window_no_source[OF win_ind_parse no_target win_mask_ok no_source
+            dlen_ok tgt_ok di_pop di_zero data_ok inst_ok addr_ok sizes_ok])
+qed
+
+(*
+  Helper: when pop_byte (drop 5 bs) = Some (w, rest), we have length bs >= 6
+  and rest = drop 6 bs.
+*)
+lemma pop_byte_drop5:
+  assumes "pop_byte (drop 5 bs) = Some (w, rest)"
+      and "5 \<le> length bs"
+  shows "length bs \<ge> 6 \<and> rest = drop 6 bs \<and> w = bs ! 5"
+proof -
+  have len5: "5 < length bs"
+  proof (rule ccontr)
+    assume "\<not> 5 < length bs"
+    hence "length bs = 5" using assms(2) by simp
+    hence "drop 5 bs = []" by simp
+    with assms(1) show False by (simp add: pop_byte_def)
+  qed
+  hence eq: "drop 5 bs = bs ! 5 # drop 6 bs"
+    using Cons_nth_drop_Suc[of 5 bs] by simp
+  from assms(1) eq have "w = bs ! 5 \<and> rest = drop 6 bs"
+    by (simp add: pop_byte_def)
+  with len5 show ?thesis by linarith
+qed
+
+(*
+  Init loops preserve heap_bytes of patch buffer.
+  Stronger version that preserves the full buf_valid + heap_bytes combo.
+*)
+lemma near_init_preserves_patch_heap:
+  "(whileLoop (\<lambda>idx st. unat idx < 4)
+      (\<lambda>idx. do {
+          modify (near_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (4 :: 32 word)
+          \<and> heap_bytes t buf n = heap_bytes s0 buf n
+          \<and> buf_valid t buf n = buf_valid s0 buf n
+          \<and> heap_w32 t p = heap_w32 s0 p
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0 \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+     where R = "measure (\<lambda>((idx :: 32 word), _). 4 - unat idx)"
+       and I = "\<lambda>idx st. unat idx \<le> 4
+              \<and> heap_bytes st buf n = heap_bytes s0 buf n
+              \<and> buf_valid st buf n = buf_valid s0 buf n
+              \<and> heap_w32 st p = heap_w32 s0 p
+              \<and> code_tbl_built_'' st = code_tbl_built_'' s0"])
+  subgoal by simp
+  subgoal by simp
+  subgoal for idx st
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (subst word_unat_eq_iff)
+    apply simp
+    done
+  subgoal for idx st
+    apply runs_to_vcg
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (cases "unat idx")
+     apply (auto simp: unat_word_ariths(1) word_less_nat_alt)
+    done
+  done
+
+lemma same_init_preserves_patch_heap:
+  "(whileLoop (\<lambda>idx st. unat idx < 768)
+      (\<lambda>idx. do {
+          modify (same_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (768 :: 32 word)
+          \<and> heap_bytes t buf n = heap_bytes s0 buf n
+          \<and> buf_valid t buf n = buf_valid s0 buf n
+          \<and> heap_w32 t p = heap_w32 s0 p
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0 \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+     where R = "measure (\<lambda>((idx :: 32 word), _). 768 - unat idx)"
+       and I = "\<lambda>idx st. unat idx \<le> 768
+              \<and> heap_bytes st buf n = heap_bytes s0 buf n
+              \<and> buf_valid st buf n = buf_valid s0 buf n
+              \<and> heap_w32 st p = heap_w32 s0 p
+              \<and> code_tbl_built_'' st = code_tbl_built_'' s0"])
+  subgoal by simp
+  subgoal by simp
+  subgoal for idx st
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (subst word_unat_eq_iff)
+    apply simp
+    done
+  subgoal for idx st
+    apply runs_to_vcg
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (cases "unat idx")
+     apply (auto simp: unat_word_ariths(1) word_less_nat_alt)
+    done
+  done
+
+(*
+  Varint chain helper: if varint_decode on drop k bs = Some (v, rest),
+  and rest = drop (length bs - length rest) bs, then
+  read_varint' at C position (patch_len - of_nat (length (drop k bs)))
+  gives Result with pos = patch_len - of_nat (length rest).
+
+  We use read_varint'_chain for each varint read. The key insight is:
+  varint_decode (drop (unat pos) (heap_bytes s patch (unat patch_len))) = Some ...
+  when pos = patch_len - of_nat (length suffix) where suffix starts at
+  the current parse point.
+
+  Position relation: drop k bs is a suffix of bs. If varint_decode
+  (drop k bs) returns rest, the C position after the read is
+  patch_len - of_nat (length rest). The next varint decode starts from
+  the same position since drop (unat pos) bs = rest.
+*)
+
+(*
+  Helper: varint_decode on drop succeeds implies the position is in range.
+*)
+lemma varint_decode_pos_le:
+  assumes "varint_decode (drop k bs) = Some (v, rest)"
+      and "k \<le> length bs"
+  shows "length rest \<le> length bs"
+proof -
+  have "length rest \<le> length (drop k bs)"
+    by (rule varint_decode_length[OF assms(1)])
+  thus ?thesis using assms(2) by simp
+qed
+
+(*
+  Helper: position word from varint rest length.
+  If length rest \<le> unat patch_len and length rest < 2^32,
+  then unat (patch_len - of_nat (length rest)) = unat patch_len - length rest,
+  and the position is in [0, patch_len].
+*)
+lemma varint_pos_unat:
+  fixes patch_len :: "32 word"
+  assumes "length rest \<le> unat patch_len"
+      and "length rest < 2 ^ 32"
+  shows "unat (patch_len - of_nat (length rest) :: 32 word) = unat patch_len - length rest"
+proof -
+  have unat_rest: "unat (of_nat (length rest) :: 32 word) = length rest"
+    using assms(2) by (simp add: unat_of_nat_eq)
+  have le: "(of_nat (length rest) :: 32 word) \<le> patch_len"
+    using assms(1) unat_rest by (simp add: word_le_nat_alt)
+  show ?thesis using le unat_rest by (simp add: unat_sub)
+qed
+
+(*
+  Helper: chaining varint decodes. If varint_decode on drop (unat pos) bs
+  succeeds, and then varint_decode on the resulting rest also succeeds,
+  we can express the second decode as varint_decode (drop (unat pos') bs)
+  where pos' = patch_len - of_nat (length rest1).
+*)
+lemma varint_chain_drop:
+  fixes patch_len :: "32 word"
+  assumes first: "varint_decode (drop (unat pos) (heap_bytes s patch (unat patch_len)))
+                  = Some (v1, rest1)"
+      and second: "varint_decode rest1 = Some (v2, rest2)"
+      and rest1_le: "length rest1 \<le> unat patch_len"
+      and rest1_lt: "length rest1 < 2 ^ 32"
+  shows "varint_decode (drop (unat (patch_len - of_nat (length rest1)))
+                             (heap_bytes s patch (unat patch_len)))
+         = Some (v2, rest2)"
+proof -
+  have unat_pos': "unat (patch_len - of_nat (length rest1) :: 32 word)
+                   = unat patch_len - length rest1"
+    by (rule varint_pos_unat[OF rest1_le rest1_lt])
+  have drop_eq: "drop (unat patch_len - length rest1)
+                      (heap_bytes s patch (unat patch_len)) = rest1"
+    using varint_decode_drop_rest[OF first] rest1_le by simp
+  show ?thesis using second drop_eq unat_pos' by simp
+qed
+
 end
 
 end

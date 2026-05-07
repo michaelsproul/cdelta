@@ -198,6 +198,22 @@ lemma varint_decode_length:
   "varint_decode bs = Some (v, rest) \<Longrightarrow> length rest \<le> length bs"
   unfolding varint_decode_def by (rule varint_decode_loop_length)
 
+lemma varint_decode_loop_value_bound:
+  "varint_decode_loop fuel acc bs = Some (v, rest) \<Longrightarrow> v < 2 ^ 32"
+proof (induction fuel acc bs rule: varint_decode_loop.induct)
+  case (1 acc bs) then show ?case by simp
+next
+  case (2 fuel acc) then show ?case by simp
+next
+  case (3 fuel acc b rest')
+  from 3 show ?case
+    by (auto simp: Let_def split: if_splits)
+qed
+
+lemma varint_decode_value_bound:
+  "varint_decode bs = Some (v, rest) \<Longrightarrow> v < 2 ^ 32"
+  unfolding varint_decode_def by (rule varint_decode_loop_value_bound)
+
 (* ---------- Base-128 digit arithmetic ---------- *)
 
 (* Interpret a big-endian digit list as a natural number. *)
