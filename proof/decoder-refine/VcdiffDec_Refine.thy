@@ -6286,11 +6286,58 @@ proof -
                                  split: option.splits; fail)?\<close>)
           apply (all \<open>runs_to_vcg?\<close>)
           apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def; fail)?\<close>)
-          \<comment> \<open>The remaining goal is the main decode whileLoop + post-checks, runs_to True.
-              All paths either throw (satisfies True) or return (satisfies True).
-              The only obligation is that no guard fails (IS_VALID assertions hold).
-              This requires showing that cursor bounds are maintained throughout the loop.\<close>
-          sorry
+          \<comment> \<open>The remaining goal: read_varint' ... • ta ⟨ λRes r t. CONTINUATION • t ⟨True⟩ ⟩.
+              Peel the last read_varint', then VCG through unless/when checks.
+              The whileLoop is handled by runs_to_whileLoop_exn with an invariant
+              ensuring cursor bounds and buffer validity (sufficient for IS_VALID).\<close>
+          apply (rule runs_to_weaken[OF read_varint'_spec])
+            apply assumption
+           apply (simp add: word_le_nat_alt)
+          \<comment> \<open>Postcondition split: Some case (success) and None case (err≠0, throw).\<close>
+          apply (clarsimp simp: Exn_def default_option_def split: option.splits)
+          \<comment> \<open>None case and Some-with-err≠0 both trigger 'unless' throw: VCG + auto close them.\<close>
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def; fail)?\<close>)
+          \<comment> \<open>Remaining: whileLoop(...) • ta ⟨ λr t. (Result → POST • t ⟨True⟩) ∧ (Exn → True) ⟩.
+              Apply runs_to_whileLoop_exn. Invariant ensures cursors stay in bounds
+              (so guards hold) and code_tbl/buf_valid are preserved.
+              Post-loop continuation (unless × 3 + modify + throw 0) always succeeds.\<close>
+          apply (rule runs_to_whileLoop_exn[where
+            I = "\<lambda>r t. case r of
+                   Exn _ \<Rightarrow> True
+                 | Result (addr_cursor, data_cursor, inst_cursor, np, tgt_pos) \<Rightarrow>
+                     buf_valid t patch (unat patch_len) \<and>
+                     buf_valid t out (unat out_cap) \<and>
+                     heap_typing t = heap_typing s \<and>
+                     code_tbl_built_'' t \<noteq> 0 \<and>
+                     unat data_cursor \<le> unat (pr_t_C.pos_C vd + val_C vb) \<and>
+                     unat inst_cursor \<le> unat (pr_t_C.pos_C vd + val_C vb + val_C vc) \<and>
+                     unat addr_cursor \<le> unat (pr_t_C.pos_C vd + val_C vb + val_C vc + val_C vd) \<and>
+                     unat tgt_pos \<le> unat (val_C va) \<and>
+                     unat (val_C va) \<le> unat out_cap \<and>
+                     unat (pr_t_C.pos_C vd + val_C vb + val_C vc + val_C vd) \<le> unat patch_len \<and>
+                     unat (pr_t_C.pos_C vd + val_C vb) \<le> unat patch_len \<and>
+                     (\<forall>i<unat out_cap. \<forall>j<unat patch_len. out +\<^sub>p int i \<noteq> patch +\<^sub>p int j) \<and>
+                     (\<forall>i<unat out_cap. \<forall>j<unat out_cap. i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j) \<and>
+                     heap_bytes t patch (unat patch_len) = heap_bytes s patch (unat patch_len)"
+            and R = "measure (\<lambda>((addr_cursor, data_cursor, inst_cursor, np, tgt_pos), _).
+                     unat (pr_t_C.pos_C vd + val_C vb + val_C vc) - unat inst_cursor)"])
+          \<comment> \<open>Subgoal 1: wf R (trivial for measure)\<close>
+          subgoal by simp
+          \<comment> \<open>Subgoal 2: I holds initially.
+              Requires: pos_C vd + vb + vc + vd ≤ patch_len (section ends within buffer).
+              Proof sketch: pos_C vd + vb + vc + vd = pos_C v + val_C v ≤ patch_len.\<close>
+          subgoal sorry
+          \<comment> \<open>Subgoal 3: ¬C ∧ I(Result v) ⟹ Q(Result v) (post-loop succeeds)\<close>
+          subgoal
+            apply (clarsimp split: prod.splits)
+            by runs_to_vcg
+          \<comment> \<open>Subgoal 4: I(Exn e) ⟹ Q(Exn e) (exceptions satisfy True)\<close>
+          subgoal by simp
+          \<comment> \<open>Subgoal 5: Body preserves I with measure decrease\<close>
+          subgoal
+            sorry
+          done
         done
       done
     done
