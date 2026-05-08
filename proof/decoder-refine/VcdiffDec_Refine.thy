@@ -4746,14 +4746,16 @@ lemma near_init_preserves_patch_heap:
           \<and> heap_bytes t buf n = heap_bytes s0 buf n
           \<and> buf_valid t buf n = buf_valid s0 buf n
           \<and> heap_w32 t p = heap_w32 s0 p
-          \<and> code_tbl_built_'' t = code_tbl_built_'' s0 \<rbrace>"
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+          \<and> heap_typing t = heap_typing s0 \<rbrace>"
   apply (rule runs_to_whileLoop_res'[
      where R = "measure (\<lambda>((idx :: 32 word), _). 4 - unat idx)"
        and I = "\<lambda>idx st. unat idx \<le> 4
               \<and> heap_bytes st buf n = heap_bytes s0 buf n
               \<and> buf_valid st buf n = buf_valid s0 buf n
               \<and> heap_w32 st p = heap_w32 s0 p
-              \<and> code_tbl_built_'' st = code_tbl_built_'' s0"])
+              \<and> code_tbl_built_'' st = code_tbl_built_'' s0
+              \<and> heap_typing st = heap_typing s0"])
   subgoal by simp
   subgoal by simp
   subgoal for idx st
@@ -4779,14 +4781,16 @@ lemma same_init_preserves_patch_heap:
           \<and> heap_bytes t buf n = heap_bytes s0 buf n
           \<and> buf_valid t buf n = buf_valid s0 buf n
           \<and> heap_w32 t p = heap_w32 s0 p
-          \<and> code_tbl_built_'' t = code_tbl_built_'' s0 \<rbrace>"
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+          \<and> heap_typing t = heap_typing s0 \<rbrace>"
   apply (rule runs_to_whileLoop_res'[
      where R = "measure (\<lambda>((idx :: 32 word), _). 768 - unat idx)"
        and I = "\<lambda>idx st. unat idx \<le> 768
               \<and> heap_bytes st buf n = heap_bytes s0 buf n
               \<and> buf_valid st buf n = buf_valid s0 buf n
               \<and> heap_w32 st p = heap_w32 s0 p
-              \<and> code_tbl_built_'' st = code_tbl_built_'' s0"])
+              \<and> code_tbl_built_'' st = code_tbl_built_'' s0
+              \<and> heap_typing st = heap_typing s0"])
   subgoal by simp
   subgoal by simp
   subgoal for idx st
@@ -5862,6 +5866,13 @@ lemma vcdiff_decode'_prefix_correct:
       and tgt_fits: "of_nat tgt_n \<le> out_cap"
       \<comment> \<open>dlen consistency check (the C checks remaining = data+inst+addr+adler)\<close>
       and dlen_consistent: "dlen_n = (length (drop 6 bs) - length rest_addr)"
+      \<comment> \<open>Output buffer validity and disjointness (needed for inner loop guards)\<close>
+      and out_ok: "buf_valid s out (unat out_cap)"
+      and out_patch_disj: "\<forall>i < unat out_cap. \<forall>j < unat patch_len.
+           out +\<^sub>p int i \<noteq> patch +\<^sub>p int j"
+      and out_inj: "\<forall>i < unat out_cap. \<forall>j < unat out_cap.
+           i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j"
+      and out_cap_bound: "unat out_cap < 2 ^ 32"
   shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
            \<lbrace> \<lambda>r t. \<exists>ret. r = Result ret \<rbrace>"
 proof -
@@ -5966,6 +5977,7 @@ proof -
           using patch_ok dlen_ok tgt_ok rest_tgt_nonempty di_zero data_ok inst_ok addr_ok
                 sizes_ok tgt_fits dlen_consistent dlen_fits len_ge6 bs_def
                 varint_decode_value_bound out_len_ok win_no_adler
+                out_ok out_patch_disj out_inj out_cap_bound
           apply (auto simp: word_less_nat_alt word_le_nat_alt Exn_def
                       intro: read_varint'_spec buf_validD runs_to_weaken)
           \<comment> \<open>Remaining: the main while loop + post-checks (Phase 3/4).
@@ -6112,12 +6124,75 @@ proof -
               The do-block's post-loop tail (unlesses + modify + throw) always succeeds.
               The only non-trivial obligation is that the whileLoop succeeds.
               Convert to succeeds form and decompose.\<close>
-          \<comment> \<open>Phase 3b sorry: the remaining goal is
-                runs_to (whileLoop-block; post-checks) ta (λr t. True)
-              where the whileLoop is the outer decode loop. The post-checks
-              (unlesses + modify + throw) always succeed. The whileLoop
-              termination and safety requires decode_loop_inv + the three
-              instruction loop lemmas (add/run/copy_loop_correct).\<close>
+          \<comment> \<open>Phase 3b: Goal is ∃vb. read_byte' ... = Some vb ∧ (do-block(vb) • ta ⦃ True ⦄).
+              The do-block with True postcondition always succeeds regardless of
+              the read_byte' result: if truncation, the first unless throws
+              immediately (succeeds); if OK, the continuation eventually reaches
+              the whileLoop (proved via decode_loop_inv).\<close>
+          apply (simp add: read_byte'_def ocondition_def oreturn_def
+                     oguard_def ogets_def obind_def K_def)
+          \<comment> \<open>After unfolding read_byte': both cases are resolved.
+              Remaining goals are runs_to (do-block) ta True under each case.
+              For True postcondition, use succeeds approach.\<close>
+          apply (intro conjI impI)
+          \<comment> \<open>Close trivial IS_VALID / patch_len goals from the read_byte' unfolding.\<close>
+           apply (all \<open>(erule buf_valid_uintD; simp add: word_less_nat_alt; fail)?\<close>)
+           apply (all \<open>(simp add: word_le_nat_alt; fail)?\<close>)
+          \<comment> \<open>Two goals remain:
+              1. runs_to (big do-block with whileLoop) ta (λr t. True)
+              2. ¬IS_VALID ⟹ patch_len = pos (contradiction with buf_valid)
+              Close goal 2 first, then tackle goal 1.\<close>
+          defer
+          apply (metis buf_valid_uintD word_le_nat_alt word_less_nat_alt linorder_not_less
+                       order_antisym)
+          \<comment> \<open>Remaining goal: runs_to (decode-window do-block) ta (λ_ _. True).
+              This requires showing the entire decode window body doesn't produce Failure.
+              The prefix (unless/when + 3 read_varint') trivially succeeds. The outer
+              whileLoop requires whileLoop_ne_Failure with decode_loop_inv as invariant
+              to show:
+              - gets_the(read_byte') always returns Some (read_byte'_spec)
+              - inner whileLoop guards pass: unat(which*3) < 6 for which ∈ {0,1}
+              - ADD/RUN/COPY sub-loop guards: IS_VALID for out/patch pointers, from
+                buf_valid + cursor bounds maintained by decode_loop_inv
+              Required facts: out_ok, out_patch_disj, out_inj + buf_valid ta patch.
+              Proof strategy: whileLoop_ne_Failure at outer level, fixed-count unrolling
+              for inner (which < 2) loop, runs_to_weaken on add/run/copy_loop_correct
+              for sub-loops.
+              Missing piece: buf_valid ta out (unat out_cap). This follows from
+              buf_valid s out (unat out_cap) (in scope) + heap_typing ta = heap_typing s
+              (true because near/same init + heap_w32_update preserve heap_typing).
+              TODO: either propagate from upstream via near/same_init postconditions,
+              or derive inline from ptr_valid preservation simp rules.\<close>
+          \<comment> \<open>Key derived fact: buf_valid ta out from heap_typing preservation\<close>
+          apply (subgoal_tac "buf_valid ta out (unat out_cap)")
+           prefer 2
+           apply (simp add: buf_valid_def)
+          \<comment> \<open>Resolve existential from read_byte'\<close>
+          apply (simp (no_asm_simp) add: read_byte'_spec buf_valid_def
+                     word_less_nat_alt word_le_nat_alt)
+          \<comment> \<open>VCG + auto to decompose the do-block\<close>
+          apply runs_to_vcg
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt buf_valid_def); fail)?\<close>)
+          apply (all \<open>(clarsimp split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def;
+                       fail)?\<close>)
+          \<comment> \<open>Goal: runs_to (read_varint' ... (pos_C va + 1)) ta
+                     (λRes r t. succeeds(CONTINUATION(r)) t).
+              The entire decode window body (prefix reads + whileLoop + postfix)
+              never produces Failure. Proof: use runs_to_vcg to decompose all bind
+              layers; for each layer, unless/when/throw/modify/return always succeed;
+              read_varint' succeeds under buf_valid + bounds (unchanged since pure);
+              the only remaining obligation is the outer whileLoop.\<close>
+          \<comment> \<open>The remaining goal: runs_to (read_varint' ...) ta (λRes r t. CONTINUATION • t ⟨ True ⟩).
+              This requires proving the entire decode window doesn't fail:
+              - All read_varint' calls succeed (buf_valid ta patch + bounds)
+              - The outer whileLoop doesn't fail (requires decode_loop_inv safety invariant)
+              - All inner guard/gets_the calls succeed under decode_loop_inv
+              This is the decode_window_body_succeeds obligation. See the helper lemma below.\<close>
           sorry
         done
       done
