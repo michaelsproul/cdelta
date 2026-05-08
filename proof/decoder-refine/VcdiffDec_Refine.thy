@@ -6355,6 +6355,12 @@ proof -
                               oguard_def ogets_def obind_def K_def; fail)?\<close>)
             apply (all \<open>(erule buf_valid_uintD, simp add: word_less_nat_alt; fail)?\<close>)
             apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt; fail)?\<close>)
+            \<comment> \<open>VCG decomposes the full do-block, auto closes arithmetic.\<close>
+            apply runs_to_vcg
+            apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt Exn_def
+                              split: prod.splits exception_or_result_splits; fail)?\<close>)
+            apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt
+                              split: prod.splits exception_or_result_splits; fail)?\<close>)
             sorry
           done
         done
