@@ -6187,12 +6187,81 @@ proof -
               layers; for each layer, unless/when/throw/modify/return always succeed;
               read_varint' succeeds under buf_valid + bounds (unchanged since pure);
               the only remaining obligation is the outer whileLoop.\<close>
-          \<comment> \<open>The remaining goal: runs_to (read_varint' ...) ta (λRes r t. CONTINUATION • t ⟨ True ⟩).
-              This requires proving the entire decode window doesn't fail:
-              - All read_varint' calls succeed (buf_valid ta patch + bounds)
-              - The outer whileLoop doesn't fail (requires decode_loop_inv safety invariant)
-              - All inner guard/gets_the calls succeed under decode_loop_inv
-              This is the decode_window_body_succeeds obligation. See the helper lemma below.\<close>
+          \<comment> \<open>Goal: runs_to (read_varint' ...) ta (λRes r t. CONTINUATION • t ⟨ True ⟩).
+              Weaken postcondition to True (equivalent to succeeds), since the original
+              postcondition for any result r is just (CONT r • t ⟨ True ⟩) which is
+              implied if the whole sequential block succeeds. But the weakening direction
+              is wrong (True doesn't imply CONT succeeds). Instead, we must prove the
+              full obligation.\<close>
+          \<comment> \<open>Strategy: convert to succeeds form and decompose the bind chain.
+              For the exception monad, succeeds(f >>= g) requires:
+              1. succeeds f s
+              2. For all results r, states t with reaches f s r t:
+                 if r = Result v: succeeds (g v) t
+                 if r = Exn e: succeeds (handler e) t (but bind_handle is not present here)\<close>
+          \<comment> \<open>Convert to succeeds form and close via succeeds_bind decomposition.
+              The block is: read_varint' >>= (λr. unless ... >> rest_of_decode_window).
+              If read_varint' succeeds (it does: buf_valid + bounds) AND for any result
+              the continuation succeeds, then the whole bind succeeds.
+              Continuation: either throws (err≠0) or continues (err=0) with more varints
+              + the whileLoop. Both paths eventually succeed because throw always succeeds
+              and the whileLoop terminates with non-failing body (decode_loop_inv).\<close>
+          apply (rule runs_to_weaken[OF read_varint'_spec[where s=ta]])
+            apply assumption
+           apply (rule word_Suc_le[THEN iffD2])
+           apply (simp add: word_less_nat_alt word_le_nat_alt)
+          \<comment> \<open>Now we must show: for any result of read_varint'_spec, the continuation from ta succeeds.
+              The spec says: t = ta, Result v with pos/err/val properties.
+              Simplify the quantifiers and case-split on varint success vs truncation.\<close>
+          apply (clarsimp simp: Exn_def default_option_def split: option.splits)
+          \<comment> \<open>Two cases: varint decode succeeds (Some) or fails (None).
+              In both cases the continuation succeeds (error path throws, success path continues).\<close>
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def; fail)?\<close>)
+          \<comment> \<open>Remaining goals need further varint peeling or the whileLoop proof.\<close>
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp simp: Exn_def default_option_def
+                                 split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def; fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp simp: Exn_def default_option_def
+                                 split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def; fail)?\<close>)
+          \<comment> \<open>3 goals remain:
+              1. False from contradictory pos_C va = -1 (impossible from varint bounds)
+              2. pos_C va < patch_len (from pos_C va ≤ patch_len ∧ patch_len ≠ pos_C va)
+              3. The main decode-window body runs_to True (whileLoop + post-checks)\<close>
+          \<comment> \<open>Goals 1+2: False from pos_C va = -1; and pos_C va < patch_len from ≤ + ≠\<close>
+          subgoal
+            apply (subgoal_tac "(- 1 :: 32 word) \<le> patch_len")
+             apply (metis word_order.extremum antisym)
+            apply (rule iffD2[OF word_le_nat_alt])
+            apply linarith
+            done
+          subgoal by (metis word_le_less_eq)
+          \<comment> \<open>Goal 3: the main decode-window body runs_to True (whileLoop + post-checks)\<close>
+          apply (tactic \<open>fn st => let
+            val ctxt = @{context}
+            val subgoals = Thm.prems_of st
+            val n = length subgoals
+            fun term_to_str t = XML.content_of (YXML.parse_body (Syntax.string_of_term ctxt t))
+            fun dump_goal i = if i < n then
+              let val s = term_to_str (nth subgoals i)
+                  val path = Path.explode
+                    ("/home/michael/Programming/cdelta/.build-tmp/goal-g" ^ string_of_int (i+1) ^ ".txt")
+                  val _ = File.write path s
+              in () end
+            else ()
+            val _ = dump_goal 0
+            val _ = dump_goal 1
+            val _ = dump_goal 2
+            val path0 = Path.explode "/home/michael/Programming/cdelta/.build-tmp/goal-count2.txt"
+            val _ = File.write path0 (string_of_int n ^ " goals remaining\n")
+            in all_tac st end\<close>)
           sorry
         done
       done
