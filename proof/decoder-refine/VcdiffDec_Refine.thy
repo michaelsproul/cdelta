@@ -3954,7 +3954,8 @@ lemma add_loop_correct:
          \<lbrace> \<lambda>r t. r = Result sz \<and>
             (\<forall>j < patch_n. heap_w8 t (patch +\<^sub>p int j) = heap_w8 s (patch +\<^sub>p int j)) \<and>
             (\<forall>j < unat sz. heap_w8 t (out +\<^sub>p uint (tgt_pos + of_nat j)) =
-               heap_w8 s (patch +\<^sub>p uint (data_cursor + of_nat j))) \<rbrace>"
+               heap_w8 s (patch +\<^sub>p uint (data_cursor + of_nat j))) \<and>
+            heap_typing t = heap_typing s \<rbrace>"
   apply (rule runs_to_whileLoop_res'[
     where R = "measure (\<lambda>((j :: 32 word), _). unat sz - unat j)"
       and I = "\<lambda>j st. unat j \<le> unat sz
@@ -4042,7 +4043,8 @@ lemma run_loop_correct:
            }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
          \<lbrace> \<lambda>r t. r = Result sz \<and>
             (\<forall>j < patch_n. heap_w8 t (patch +\<^sub>p int j) = heap_w8 s (patch +\<^sub>p int j)) \<and>
-            (\<forall>j < unat sz. heap_w8 t (out +\<^sub>p uint (tgt_pos + of_nat j)) = fill) \<rbrace>"
+            (\<forall>j < unat sz. heap_w8 t (out +\<^sub>p uint (tgt_pos + of_nat j)) = fill) \<and>
+            heap_typing t = heap_typing s \<rbrace>"
   apply (rule runs_to_whileLoop_res'[
     where R = "measure (\<lambda>((j :: 32 word), _). unat sz - unat j)"
       and I = "\<lambda>j st. unat j \<le> unat sz
@@ -4305,7 +4307,8 @@ lemma copy_loop_correct:
             (\<forall>k < unat sz.
                heap_w8 t (out +\<^sub>p uint (tgt_pos + of_nat k)) =
                copy_loop src_seg tgt_pre (unat addr) (unat sz)
-                 ! (unat tgt_pos + k)) \<rbrace>"
+                 ! (unat tgt_pos + k)) \<and>
+            heap_typing t = heap_typing s \<rbrace>"
   apply (rule runs_to_whileLoop_res'[
     where R = "measure (\<lambda>((j :: 32 word), _). unat sz - unat j)"
       and I = "\<lambda>j st. unat j \<le> unat sz
@@ -6310,23 +6313,18 @@ proof -
                      buf_valid t out (unat out_cap) \<and>
                      heap_typing t = heap_typing s \<and>
                      code_tbl_built_'' t \<noteq> 0 \<and>
-                     unat data_cursor \<le> unat (pr_t_C.pos_C vd + val_C vb) \<and>
-                     unat inst_cursor \<le> unat (pr_t_C.pos_C vd + val_C vb + val_C vc) \<and>
-                     unat addr_cursor \<le> unat (pr_t_C.pos_C vd + val_C vb + val_C vc + val_C vd) \<and>
-                     unat tgt_pos \<le> unat (val_C va) \<and>
-                     unat (val_C va) \<le> unat out_cap \<and>
-                     unat (pr_t_C.pos_C vd + val_C vb + val_C vc + val_C vd) \<le> unat patch_len \<and>
-                     unat (pr_t_C.pos_C vd + val_C vb) \<le> unat patch_len \<and>
+                     unat tgt_pos \<le> unat out_cap \<and>
+                     unat inst_cursor \<le> unat patch_len \<and>
+                     unat data_cursor \<le> unat patch_len \<and>
+                     unat addr_cursor \<le> unat patch_len \<and>
                      (\<forall>i<unat out_cap. \<forall>j<unat patch_len. out +\<^sub>p int i \<noteq> patch +\<^sub>p int j) \<and>
                      (\<forall>i<unat out_cap. \<forall>j<unat out_cap. i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j) \<and>
                      heap_bytes t patch (unat patch_len) = heap_bytes s patch (unat patch_len)"
             and R = "measure (\<lambda>((addr_cursor, data_cursor, inst_cursor, np, tgt_pos), _).
-                     unat (pr_t_C.pos_C vd + val_C vb + val_C vc) - unat inst_cursor)"])
+                     unat patch_len - unat inst_cursor)"])
           \<comment> \<open>Subgoal 1: wf R (trivial for measure)\<close>
           subgoal by simp
-          \<comment> \<open>Subgoal 2: I holds initially.
-              Requires: pos_C vd + vb + vc + vd ≤ patch_len (section ends within buffer).
-              Proof sketch: pos_C vd + vb + vc + vd = pos_C v + val_C v ≤ patch_len.\<close>
+          \<comment> \<open>Subgoal 2: I holds initially.\<close>
           subgoal sorry
           \<comment> \<open>Subgoal 3: ¬C ∧ I(Result v) ⟹ Q(Result v) (post-loop succeeds)\<close>
           subgoal
@@ -6334,8 +6332,29 @@ proof -
             by runs_to_vcg
           \<comment> \<open>Subgoal 4: I(Exn e) ⟹ Q(Exn e) (exceptions satisfy True)\<close>
           subgoal by simp
-          \<comment> \<open>Subgoal 5: Body preserves I with measure decrease\<close>
+          \<comment> \<open>Subgoal 5: Body preserves I with measure decrease.
+              Strategy: decompose the tuple, preserve the loop guard as a named
+              fact, then VCG through the body. read_byte' always returns Some
+              under buf_valid, and the for-loop body always succeeds because all
+              sub-operations (read_varint', add/run/copy loops) return results
+              under the maintained invariant.\<close>
           subgoal
+            \<comment> \<open>Use simp (no_asm_use) to decompose tuples in the goal without
+                consuming the loop guard from assumptions via transitivity.\<close>
+            apply (simp (no_asm_use) split: prod.splits)
+            apply (intro allI impI)
+            apply (elim conjE)
+            \<comment> \<open>Derive x1b < patch_len from guard + outer scope.\<close>
+            apply (subgoal_tac "x1b < patch_len")
+             prefer 2
+             apply (simp add: word_less_nat_alt word_le_nat_alt)
+            \<comment> \<open>Now VCG through the body. The body starts with gets_the(read_byte')
+                which needs ptr_valid, derivable from buf_valid + x1b < patch_len.\<close>
+            apply runs_to_vcg
+            apply (all \<open>(simp add: read_byte'_def ocondition_def oreturn_def
+                              oguard_def ogets_def obind_def K_def; fail)?\<close>)
+            apply (all \<open>(erule buf_valid_uintD, simp add: word_less_nat_alt; fail)?\<close>)
+            apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt; fail)?\<close>)
             sorry
           done
         done
