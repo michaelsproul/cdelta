@@ -6243,25 +6243,53 @@ proof -
             apply linarith
             done
           subgoal by (metis word_le_less_eq)
-          \<comment> \<open>Goal 3: the main decode-window body runs_to True (whileLoop + post-checks)\<close>
-          apply (tactic \<open>fn st => let
-            val ctxt = @{context}
-            val subgoals = Thm.prems_of st
-            val n = length subgoals
-            fun term_to_str t = XML.content_of (YXML.parse_body (Syntax.string_of_term ctxt t))
-            fun dump_goal i = if i < n then
-              let val s = term_to_str (nth subgoals i)
-                  val path = Path.explode
-                    ("/home/michael/Programming/cdelta/.build-tmp/goal-g" ^ string_of_int (i+1) ^ ".txt")
-                  val _ = File.write path s
-              in () end
-            else ()
-            val _ = dump_goal 0
-            val _ = dump_goal 1
-            val _ = dump_goal 2
-            val path0 = Path.explode "/home/michael/Programming/cdelta/.build-tmp/goal-count2.txt"
-            val _ = File.write path0 (string_of_int n ^ " goals remaining\n")
-            in all_tac st end\<close>)
+          \<comment> \<open>Goal 3: the main decode-window body runs_to True (whileLoop + post-checks)
+              Strategy: simplify case-Result, peel prefix with VCG, then apply
+              runs_to_whileLoop_exn with decode_loop_inv for the outer loop.\<close>
+          apply (clarsimp simp: Exn_def)
+          apply runs_to_vcg
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def; fail)?\<close>)
+          \<comment> \<open>Peel read_varint' obligations\<close>
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp simp: Exn_def default_option_def
+                                 split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def; fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp simp: Exn_def default_option_def
+                                 split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def; fail)?\<close>)
+          \<comment> \<open>Last varint read: apply spec, split on option.splits\<close>
+          apply (rule runs_to_weaken[OF read_varint'_spec])
+            apply assumption
+           apply (simp add: word_le_nat_alt)
+          apply (clarsimp simp: Exn_def default_option_def split: option.splits)
+          \<comment> \<open>Two cases from option.splits:
+              None case: err ≠ 0, continuation throws immediately (trivial runs_to True).
+              Some case: err = 0, continuation proceeds with whileLoop etc.
+              Use VCG + auto to close the None case and peel the Some prefix.\<close>
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def; fail)?\<close>)
+          \<comment> \<open>Remaining: the Some case continuation. Peel more read_varint obligations.\<close>
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp simp: Exn_def default_option_def
+                                 split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def; fail)?\<close>)
+          apply (all \<open>(rule runs_to_weaken[OF read_varint'_spec];
+                       (assumption | simp add: word_le_nat_alt); fail)?\<close>)
+          apply (all \<open>(clarsimp simp: Exn_def default_option_def
+                                 split: option.splits; fail)?\<close>)
+          apply (all \<open>runs_to_vcg?\<close>)
+          apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def; fail)?\<close>)
+          \<comment> \<open>The remaining goal is the main decode whileLoop + post-checks, runs_to True.
+              All paths either throw (satisfies True) or return (satisfies True).
+              The only obligation is that no guard fails (IS_VALID assertions hold).
+              This requires showing that cursor bounds are maintained throughout the loop.\<close>
           sorry
         done
       done
