@@ -5888,6 +5888,15 @@ proof -
   ultimately show ?thesis using nat_bound by simp
 qed
 
+lemma inst_end_le_patch_len3:
+  fixes pos_vd val_vb val_vc val_vd patch_len :: "32 word"
+  assumes "unat pos_vd = unat patch_len - rest_len"
+    and "rest_len \<le> unat patch_len"
+    and "unat val_vb + unat val_vc + unat val_vd \<le> rest_len"
+  shows "unat (pos_vd + val_vb + val_vc) \<le> unat patch_len"
+  using inst_end_le_patch_len2[OF assms] .
+
+
 lemma inst_end_le_word:
   fixes pos_vd val_vb val_vc patch_len :: "32 word"
   assumes pos_vd_le: "pos_vd \<le> patch_len"
@@ -5923,29 +5932,21 @@ lemma inst_end_from_sizes:
   fixes pos_v pos_vd val_v val_vb val_vc val_vd patch_len :: "32 word"
   assumes eq: "val_v - (pos_vd - pos_v) = val_vb + val_vc + val_vd"
     and bound1: "\<not> unat (patch_len - pos_v) < unat val_v"
-    and bound2: "\<not> unat val_v < unat (pos_vd - pos_v)"
     and pv_le: "pos_v \<le> patch_len"
-    and pvd_le: "pos_vd \<le> patch_len"
-    and chain: "pos_v \<le> pos_vd"
+    and vd_le_v: "val_vd \<le> val_v"
   shows "unat (pos_vd + val_vb + val_vc) \<le> unat patch_len"
-  sorry
+  using inst_end_le_patch_len[OF eq bound1 pv_le vd_le_v]
+  by (simp add: word_le_nat_alt)
 
 lemma inst_end_from_sizes':
   fixes pos_v pos_vd val_v val_vb val_vc val_vd patch_len :: "32 word"
   assumes "val_v - (pos_vd - pos_v) = val_vb + val_vc + val_vd"
     and "\<not> unat (patch_len - pos_v) < unat val_v"
-    and "\<not> unat val_v < unat (pos_vd - pos_v)"
-    and "unat pos_v = unat patch_len - lv"
-    and "unat pos_vd = unat patch_len - ld"
-    and "ld \<le> lv"
+    and "pos_v \<le> patch_len"
+    and "val_vd \<le> val_v"
   shows "unat (pos_vd + val_vb + val_vc) \<le> unat patch_len"
-proof -
-  from assms(4-6) have chain: "pos_v \<le> pos_vd" by (simp add: word_le_nat_alt)
-  from assms(4) have pv: "pos_v \<le> patch_len" by (simp add: word_le_nat_alt)
-  from assms(5) have pvd: "pos_vd \<le> patch_len" by (simp add: word_le_nat_alt)
-  show ?thesis
-    by (rule inst_end_from_sizes[OF assms(1) assms(2) assms(3) pv pvd chain])
-qed
+  by (rule inst_end_from_sizes[OF assms])
+
 
 lemma vcdiff_decode'_prefix_correct:
   fixes patch :: "8 word ptr" and patch_len :: "32 word"
@@ -6441,8 +6442,22 @@ proof -
                      unat patch_len - unat inst_cursor)"])
           \<comment> \<open>Subgoal 1: wf R (trivial for measure)\<close>
           subgoal by simp
-          \<comment> \<open>Subgoal 2: I holds initially.\<close>
-          subgoal sorry
+          \<comment> \<open>Subgoal 2: I holds initially.
+              Remaining after auto: unat (pos_vd + val_vb + val_vc) \<le> unat patch_len.
+              Needs val_vd \<le> val_v for inst_end_le_patch_len, which requires connecting
+              spec-level sizes_ok (data_n + inst_n + addr_n \<le> length rest_addr) to C-level
+              variables. Connection: addr_n = unat val_vd, dlen_n = unat val_v, and
+              addr_n \<le> dlen_n follows from sizes_ok + dlen_consistent.\<close>
+          subgoal
+            using sizes_ok
+            apply (auto simp: word_less_nat_alt word_le_nat_alt
+                        intro!: inst_end_from_sizes)
+            \<comment> \<open>Remaining: unat (val_C vd_) \<le> unat (val_C v_).
+                Needs varint decode chain alignment to connect
+                addr_n = unat (val_C vd_), then sizes_ok + dlen_consistent give bound.
+                Alternatively: prove the sum vb+vc+vd doesn't overflow (which follows
+                from the chain alignment + sizes_ok: sum \<le> length rest_addr < 2^32).\<close>
+            sorry
           \<comment> \<open>Subgoal 3: ¬C ∧ I(Result v) ⟹ Q(Result v) (post-loop succeeds)\<close>
           subgoal
             apply (clarsimp split: prod.splits)
@@ -6451,17 +6466,18 @@ proof -
           subgoal by simp
           \<comment> \<open>Subgoal 5: Body preserves I with measure decrease.\<close>
           subgoal
-            apply (clarsimp split: prod.splits exception_or_result_splits)
+            apply (clarsimp split: prod.splits)
+            apply (subgoal_tac "unat x1b < unat patch_len")
+             prefer 2
+             apply (simp add: word_less_nat_alt word_le_nat_alt)
             apply runs_to_vcg
             apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def
-                              split: prod.splits exception_or_result_splits; fail)?\<close>)
-            \<comment> \<open>Two remaining goals:
-                1. whileLoop (which < 2) inner loop body (sorry for now)
-                2. IS VALID 8 word sa (patch ptr+ uint x1b)\<close>
-            subgoal sorry
-            \<comment> \<open>Goal 2: IS_VALID via buf_valid_uintD + inst_end_from_sizes + pos_chain_le.\<close>
-            subgoal sorry
-            done
+                              intro!: buf_valid_uintD; fail)?\<close>)
+            \<comment> \<open>Remaining: inner whileLoop (which < 2) body + return.
+                The inner loop dispatches to ADD/RUN/COPY sub-loops.
+                Each sub-loop preserves buf_valid, heap_typing, patch bytes,
+                and advances cursors within bounds.\<close>
+            sorry
           done
         done
       done
