@@ -5905,6 +5905,48 @@ proof -
   ultimately show ?thesis using nat_bound by (simp add: word_le_nat_alt)
 qed
 
+lemma word_le_of_unat_le:
+  fixes a b :: "'a::len word"
+  assumes "unat a \<le> unat b"
+  shows "a \<le> b"
+  using assms by (simp add: word_le_nat_alt)
+
+lemma pos_chain_le:
+  fixes pos_v pos_vd patch_len :: "32 word"
+  assumes "unat pos_v = unat patch_len - lv"
+    and "unat pos_vd = unat patch_len - ld"
+    and "ld \<le> lv"
+  shows "pos_v \<le> pos_vd"
+  using assms by (simp add: word_le_nat_alt)
+
+lemma inst_end_from_sizes:
+  fixes pos_v pos_vd val_v val_vb val_vc val_vd patch_len :: "32 word"
+  assumes eq: "val_v - (pos_vd - pos_v) = val_vb + val_vc + val_vd"
+    and bound1: "\<not> unat (patch_len - pos_v) < unat val_v"
+    and bound2: "\<not> unat val_v < unat (pos_vd - pos_v)"
+    and pv_le: "pos_v \<le> patch_len"
+    and pvd_le: "pos_vd \<le> patch_len"
+    and chain: "pos_v \<le> pos_vd"
+  shows "unat (pos_vd + val_vb + val_vc) \<le> unat patch_len"
+  sorry
+
+lemma inst_end_from_sizes':
+  fixes pos_v pos_vd val_v val_vb val_vc val_vd patch_len :: "32 word"
+  assumes "val_v - (pos_vd - pos_v) = val_vb + val_vc + val_vd"
+    and "\<not> unat (patch_len - pos_v) < unat val_v"
+    and "\<not> unat val_v < unat (pos_vd - pos_v)"
+    and "unat pos_v = unat patch_len - lv"
+    and "unat pos_vd = unat patch_len - ld"
+    and "ld \<le> lv"
+  shows "unat (pos_vd + val_vb + val_vc) \<le> unat patch_len"
+proof -
+  from assms(4-6) have chain: "pos_v \<le> pos_vd" by (simp add: word_le_nat_alt)
+  from assms(4) have pv: "pos_v \<le> patch_len" by (simp add: word_le_nat_alt)
+  from assms(5) have pvd: "pos_vd \<le> patch_len" by (simp add: word_le_nat_alt)
+  show ?thesis
+    by (rule inst_end_from_sizes[OF assms(1) assms(2) assms(3) pv pvd chain])
+qed
+
 lemma vcdiff_decode'_prefix_correct:
   fixes patch :: "8 word ptr" and patch_len :: "32 word"
     and src :: "8 word ptr" and src_len :: "32 word"
@@ -6399,9 +6441,7 @@ proof -
                      unat patch_len - unat inst_cursor)"])
           \<comment> \<open>Subgoal 1: wf R (trivial for measure)\<close>
           subgoal by simp
-          \<comment> \<open>Subgoal 2: I holds initially.
-              Most conjuncts follow directly from prefix state sa_.
-              The tricky one: inst_end (= pos_vd + val_vb + val_vc) ≤ patch_len.\<close>
+          \<comment> \<open>Subgoal 2: I holds initially.\<close>
           subgoal sorry
           \<comment> \<open>Subgoal 3: ¬C ∧ I(Result v) ⟹ Q(Result v) (post-loop succeeds)\<close>
           subgoal
@@ -6409,21 +6449,19 @@ proof -
             by runs_to_vcg
           \<comment> \<open>Subgoal 4: I(Exn e) ⟹ Q(Exn e) (exceptions satisfy True)\<close>
           subgoal by simp
-          \<comment> \<open>Subgoal 5: Body preserves I with measure decrease.
-              Strategy: decompose the tuple, preserve the loop guard as a named
-              fact, then VCG through the body. read_byte' always returns Some
-              under buf_valid, and the for-loop body always succeeds because all
-              sub-operations (read_varint', add/run/copy loops) return results
-              under the maintained invariant.\<close>
+          \<comment> \<open>Subgoal 5: Body preserves I with measure decrease.\<close>
           subgoal
             apply (clarsimp split: prod.splits exception_or_result_splits)
-            \<comment> \<open>x1b < patch_len follows from guard + sizes.\<close>
-            apply (subgoal_tac "x1b < patch_len")
-             prefer 2
-             apply (simp add: word_less_nat_alt word_le_nat_alt)
-            \<comment> \<open>The monadic body starts with gets_the(inlined read_byte).
-                Prove it returns runs_to True using sorry for now.\<close>
-            sorry
+            apply runs_to_vcg
+            apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def
+                              split: prod.splits exception_or_result_splits; fail)?\<close>)
+            \<comment> \<open>Two remaining goals:
+                1. whileLoop (which < 2) inner loop body (sorry for now)
+                2. IS VALID 8 word sa (patch ptr+ uint x1b)\<close>
+            subgoal sorry
+            \<comment> \<open>Goal 2: IS_VALID via buf_valid_uintD + inst_end_from_sizes + pos_chain_le.\<close>
+            subgoal sorry
+            done
           done
         done
       done
