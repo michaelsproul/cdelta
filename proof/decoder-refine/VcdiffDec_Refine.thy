@@ -5830,6 +5830,44 @@ qed
   A more detailed version establishing cursor positions will come later,
   once the main-loop invariant structure is defined.
 *)
+
+lemma word_less_trans_le:
+  fixes x :: "'a::len word"
+  assumes "x < y" and "y \<le> z"
+  shows "x < z"
+  using assms by (meson order.strict_trans2)
+
+lemma inst_end_le_patch_len:
+  fixes pos_v pos_vd val_v val_vb val_vc val_vd patch_len :: "32 word"
+  assumes sizes: "val_v - (pos_vd - pos_v) = val_vb + val_vc + val_vd"
+    and dlen_fit: "\<not> unat (patch_len - pos_v) < unat val_v"
+    and pos_v_le: "pos_v \<le> patch_len"
+    and vd_le_v: "val_vd \<le> val_v"
+  shows "pos_vd + val_vb + val_vc \<le> patch_len"
+proof -
+  have sum_full: "pos_vd + val_vb + val_vc + val_vd = pos_v + val_v"
+    using sizes by (simp add: algebra_simps)
+  have sub_eq: "pos_vd + val_vb + val_vc = pos_v + val_v - val_vd"
+    by (metis sum_full add_diff_cancel_right')
+  have sum_le: "unat pos_v + unat val_v \<le> unat patch_len"
+  proof -
+    have "unat (patch_len - pos_v) = unat patch_len - unat pos_v"
+      using pos_v_le by (simp add: unat_sub word_le_nat_alt)
+    hence "unat val_v \<le> unat patch_len - unat pos_v"
+      using dlen_fit by simp
+    thus ?thesis using pos_v_le by (simp add: word_le_nat_alt)
+  qed
+  have unat_pv: "unat (pos_v + val_v) = unat pos_v + unat val_v"
+    using sum_le unat_lt2p[of patch_len]
+    by (simp add: unat_add_lem[THEN iffD1])
+  have pv_le: "pos_v + val_v \<le> patch_len"
+    using sum_le unat_pv by (simp add: word_le_nat_alt)
+  have vd_le_pv: "val_vd \<le> pos_v + val_v"
+    using vd_le_v unat_pv by (simp add: word_le_nat_alt)
+  show ?thesis using sub_eq vd_le_pv pv_le
+    by (metis word_sub_le order.trans)
+qed
+
 lemma vcdiff_decode'_prefix_correct:
   fixes patch :: "8 word ptr" and patch_len :: "32 word"
     and src :: "8 word ptr" and src_len :: "32 word"
@@ -6324,7 +6362,8 @@ proof -
                      unat patch_len - unat inst_cursor)"])
           \<comment> \<open>Subgoal 1: wf R (trivial for measure)\<close>
           subgoal by simp
-          \<comment> \<open>Subgoal 2: I holds initially.\<close>
+          \<comment> \<open>Subgoal 2: I holds initially.
+              Remaining subgoal after auto: inst_end ≤ patch_len.\<close>
           subgoal sorry
           \<comment> \<open>Subgoal 3: ¬C ∧ I(Result v) ⟹ Q(Result v) (post-loop succeeds)\<close>
           subgoal
@@ -6344,12 +6383,16 @@ proof -
             apply (simp (no_asm_use) split: prod.splits)
             apply (intro allI impI)
             apply (elim conjE)
-            \<comment> \<open>Derive x1b < patch_len from guard + outer scope.\<close>
-            apply (subgoal_tac "x1b < patch_len")
+            \<comment> \<open>Derive inst_cursor < patch_len from guard + prefix bounds.
+                Proof sketch: x1d < inst_end (guard) and inst_end ≤ patch_len
+                (from inst_end_le_patch_len + val_vd ≤ val_v). The val_vd ≤ val_v
+                fact follows from the sizes equation and no-underflow, but requires
+                connecting the nat-level varint values to the word-level ones.\<close>
+            apply (subgoal_tac "x1d < patch_len")
              prefer 2
              apply (simp add: word_less_nat_alt word_le_nat_alt)
             \<comment> \<open>Now VCG through the body. The body starts with gets_the(read_byte')
-                which needs ptr_valid, derivable from buf_valid + x1b < patch_len.\<close>
+                which needs ptr_valid, derivable from buf_valid + inst_cursor < patch_len.\<close>
             apply runs_to_vcg
             apply (all \<open>(simp add: read_byte'_def ocondition_def oreturn_def
                               oguard_def ogets_def obind_def K_def; fail)?\<close>)
