@@ -6499,6 +6499,48 @@ lemma exec_half_copy_conditions:
   using assms
   by (auto simp: exec_half_def Let_def split: if_splits option.splits prod.splits)
 
+
+(*
+  Target theorem for the rescue plan (planning/refine-progress.md).
+
+  States full functional correctness of the C decoder against the pure
+  decode_spec, over the simplified-VCDIFF input class covered by the
+  spec layer.  Sub-lemmas (header_magic_refine, init_loops_refine,
+  window_meta_refine, section_cursors_refine, decode_window_loop_correct)
+  compose into this via runs_to_bind.
+
+  Currently sorry; this is Step 1 of the rescue plan — the statement
+  anchors the postcondition shape for every intermediate lemma.
+*)
+lemma vcdiff_decode'_spec:
+  fixes patch :: "8 word ptr" and patch_len :: "32 word"
+    and src   :: "8 word ptr" and src_len   :: "32 word"
+    and out   :: "8 word ptr" and out_cap   :: "32 word"
+    and out_len :: "32 word ptr"
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch (unat patch_len)"
+      and src_ok:   "buf_valid s src   (unat src_len)"
+      and out_ok:   "buf_valid s out   (unat out_cap)"
+      and code_tbl_ready: "code_tbl_built_'' s \<noteq> 0"
+      and out_patch_disj:
+        "\<forall>i < unat out_cap. \<forall>j < unat patch_len.
+             out +\<^sub>p int i \<noteq> patch +\<^sub>p int j"
+      and out_src_disj:
+        "\<forall>i < unat out_cap. \<forall>j < unat src_len.
+             out +\<^sub>p int i \<noteq> src +\<^sub>p int j"
+      and out_inj:
+        "\<forall>i < unat out_cap. \<forall>j < unat out_cap.
+             i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t.
+             case decode_spec (heap_bytes s patch (unat patch_len))
+                              (heap_bytes s src   (unat src_len)) of
+               Inl tgt \<Rightarrow> r = Result (0 :: int) \<and>
+                          unat (heap_w32 t out_len) = length tgt \<and>
+                          heap_bytes t out (length tgt) = tgt
+             | Inr _   \<Rightarrow> (\<exists>e. r = Result (e :: int) \<and> e \<noteq> 0) \<rbrace>"
+  sorry
+
 end
 
 end
