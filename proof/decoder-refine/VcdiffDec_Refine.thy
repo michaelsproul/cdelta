@@ -5868,6 +5868,43 @@ proof -
     by (metis word_sub_le order.trans)
 qed
 
+lemma inst_end_le_patch_len2:
+  fixes pos_vd val_vb val_vc patch_len :: "32 word"
+  assumes pos_vd_eq: "unat pos_vd = unat patch_len - rest_len"
+    and rest_bound: "rest_len \<le> unat patch_len"
+    and sizes_fit: "unat val_vb + unat val_vc + addr_n \<le> rest_len"
+  shows "unat (pos_vd + val_vb + val_vc) \<le> unat patch_len"
+proof -
+  have sum_nat: "unat val_vb + unat val_vc \<le> rest_len"
+    using sizes_fit by linarith
+  have nat_bound: "unat pos_vd + unat val_vb + unat val_vc \<le> unat patch_len"
+    using pos_vd_eq rest_bound sum_nat by linarith
+  have no_overflow: "unat pos_vd + unat val_vb + unat val_vc < 4294967296"
+    using nat_bound unat_lt2p[of patch_len] by simp
+  have "unat (pos_vd + val_vb) = unat pos_vd + unat val_vb"
+    using no_overflow by (simp add: unat_add_lem[THEN iffD1])
+  moreover have "unat (pos_vd + val_vb + val_vc) = unat pos_vd + unat val_vb + unat val_vc"
+    using no_overflow calculation by (simp add: unat_add_lem[THEN iffD1])
+  ultimately show ?thesis using nat_bound by simp
+qed
+
+lemma inst_end_le_word:
+  fixes pos_vd val_vb val_vc patch_len :: "32 word"
+  assumes pos_vd_le: "pos_vd \<le> patch_len"
+    and sizes_fit: "unat val_vb + unat val_vc + unat val_vd \<le> unat patch_len - unat pos_vd"
+  shows "pos_vd + val_vb + val_vc \<le> patch_len"
+proof -
+  have nat_bound: "unat pos_vd + unat val_vb + unat val_vc \<le> unat patch_len"
+    using pos_vd_le sizes_fit by (simp add: word_le_nat_alt)
+  have no_overflow: "unat pos_vd + unat val_vb + unat val_vc < 4294967296"
+    using nat_bound unat_lt2p[of patch_len] by simp
+  have "unat (pos_vd + val_vb) = unat pos_vd + unat val_vb"
+    using no_overflow by (simp add: unat_add_lem[THEN iffD1])
+  moreover have "unat (pos_vd + val_vb + val_vc) = unat pos_vd + unat val_vb + unat val_vc"
+    using no_overflow calculation by (simp add: unat_add_lem[THEN iffD1])
+  ultimately show ?thesis using nat_bound by (simp add: word_le_nat_alt)
+qed
+
 lemma vcdiff_decode'_prefix_correct:
   fixes patch :: "8 word ptr" and patch_len :: "32 word"
     and src :: "8 word ptr" and src_len :: "32 word"
@@ -6363,7 +6400,8 @@ proof -
           \<comment> \<open>Subgoal 1: wf R (trivial for measure)\<close>
           subgoal by simp
           \<comment> \<open>Subgoal 2: I holds initially.
-              Remaining subgoal after auto: inst_end ≤ patch_len.\<close>
+              Most conjuncts follow directly from prefix state sa_.
+              The tricky one: inst_end (= pos_vd + val_vb + val_vc) ≤ patch_len.\<close>
           subgoal sorry
           \<comment> \<open>Subgoal 3: ¬C ∧ I(Result v) ⟹ Q(Result v) (post-loop succeeds)\<close>
           subgoal
@@ -6378,32 +6416,13 @@ proof -
               sub-operations (read_varint', add/run/copy loops) return results
               under the maintained invariant.\<close>
           subgoal
-            \<comment> \<open>Use simp (no_asm_use) to decompose tuples in the goal without
-                consuming the loop guard from assumptions via transitivity.\<close>
-            apply (simp (no_asm_use) split: prod.splits)
-            apply (intro allI impI)
-            apply (elim conjE)
-            \<comment> \<open>Derive inst_cursor < patch_len from guard + prefix bounds.
-                Proof sketch: x1d < inst_end (guard) and inst_end ≤ patch_len
-                (from inst_end_le_patch_len + val_vd ≤ val_v). The val_vd ≤ val_v
-                fact follows from the sizes equation and no-underflow, but requires
-                connecting the nat-level varint values to the word-level ones.\<close>
-            apply (subgoal_tac "x1d < patch_len")
+            apply (clarsimp split: prod.splits exception_or_result_splits)
+            \<comment> \<open>x1b < patch_len follows from guard + sizes.\<close>
+            apply (subgoal_tac "x1b < patch_len")
              prefer 2
              apply (simp add: word_less_nat_alt word_le_nat_alt)
-            \<comment> \<open>Now VCG through the body. The body starts with gets_the(read_byte')
-                which needs ptr_valid, derivable from buf_valid + inst_cursor < patch_len.\<close>
-            apply runs_to_vcg
-            apply (all \<open>(simp add: read_byte'_def ocondition_def oreturn_def
-                              oguard_def ogets_def obind_def K_def; fail)?\<close>)
-            apply (all \<open>(erule buf_valid_uintD, simp add: word_less_nat_alt; fail)?\<close>)
-            apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt; fail)?\<close>)
-            \<comment> \<open>VCG decomposes the full do-block, auto closes arithmetic.\<close>
-            apply runs_to_vcg
-            apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt Exn_def
-                              split: prod.splits exception_or_result_splits; fail)?\<close>)
-            apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt
-                              split: prod.splits exception_or_result_splits; fail)?\<close>)
+            \<comment> \<open>The monadic body starts with gets_the(inlined read_byte).
+                Prove it returns runs_to True using sorry for now.\<close>
             sorry
           done
         done
