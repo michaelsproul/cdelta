@@ -5928,6 +5928,48 @@ lemma pos_chain_le:
   shows "pos_v \<le> pos_vd"
   using assms by (simp add: word_le_nat_alt)
 
+lemma runs_to_whileLoop_bind_drop6th:
+  assumes wl: "whileLoop C B a \<bullet> s
+    \<lbrace>\<lambda>r t. case r of
+       Exn e \<Rightarrow> Q (Exn e) t
+     | Result v \<Rightarrow> Q (Result (fst v, fst (snd v), fst (snd (snd v)),
+                              fst (snd (snd (snd v))), fst (snd (snd (snd (snd v)))))) t\<rbrace>"
+  shows "(whileLoop C B a >>= (\<lambda>v. return (fst v, fst (snd v), fst (snd (snd v)),
+                                            fst (snd (snd (snd v))), fst (snd (snd (snd (snd v)))))))
+         \<bullet> s \<lbrace>Q\<rbrace>"
+  apply (rule runs_to_bind_exception[where f = "whileLoop C B a"])
+  apply (rule runs_to_weaken[OF wl])
+  apply (auto simp: Exn_def default_option_def split: exception_or_result_splits)
+  done
+
+lemma runs_to_whileLoop_bind_drop6th':
+  assumes wl: "whileLoop C B a \<bullet> s
+    \<lbrace>\<lambda>r t. case r of
+       Exn e \<Rightarrow> Q (Exn e) t
+     | Result v \<Rightarrow> Q (Result (fst v, fst (snd v), fst (snd (snd v)),
+                              fst (snd (snd (snd v))), fst (snd (snd (snd (snd v)))))) t\<rbrace>"
+  shows "(whileLoop C B a >>= (\<lambda>(a, b, c, d, e, f). return (a, b, c, d, e)))
+         \<bullet> s \<lbrace>Q\<rbrace>"
+proof -
+  have eq: "(\<lambda>(a, b, c, d, e, f). return (a, b, c, d, e))
+          = (\<lambda>v. return (fst v, fst (snd v), fst (snd (snd v)),
+                         fst (snd (snd (snd v))), fst (snd (snd (snd (snd v))))))"
+    by (auto simp: case_prod_beta)
+  show ?thesis unfolding eq by (rule runs_to_whileLoop_bind_drop6th[OF wl])
+qed
+
+lemma summand_le_from_sub_eq:
+  fixes v gap a b c :: "32 word"
+  assumes eq: "v - gap = a + b + c"
+    and no_under: "\<not> unat v < unat gap"
+    and no_over: "unat a + unat b + unat c \<le> unat v"
+  shows "c \<le> v"
+proof -
+  have "unat c \<le> unat a + unat b + unat c" by simp
+  also have "\<dots> \<le> unat v" by (rule no_over)
+  finally show ?thesis by (simp add: word_le_nat_alt)
+qed
+
 lemma inst_end_from_sizes:
   fixes pos_v pos_vd val_v val_vb val_vc val_vd patch_len :: "32 word"
   assumes eq: "val_v - (pos_vd - pos_v) = val_vb + val_vc + val_vd"
@@ -6443,45 +6485,58 @@ proof -
           \<comment> \<open>Subgoal 1: wf R (trivial for measure)\<close>
           subgoal by simp
           \<comment> \<open>Subgoal 2: I holds initially.
-              Remaining after auto: unat (pos_vd + val_vb + val_vc) \<le> unat patch_len.
-              Needs val_vd \<le> val_v for inst_end_le_patch_len, which requires connecting
-              spec-level sizes_ok (data_n + inst_n + addr_n \<le> length rest_addr) to C-level
-              variables. Connection: addr_n = unat val_vd, dlen_n = unat val_v, and
-              addr_n \<le> dlen_n follows from sizes_ok + dlen_consistent.\<close>
-          subgoal
-            using sizes_ok
-            apply (auto simp: word_less_nat_alt word_le_nat_alt
-                        intro!: inst_end_from_sizes)
-            \<comment> \<open>Remaining: unat (val_C vd_) \<le> unat (val_C v_).
-                Needs varint decode chain alignment to connect
-                addr_n = unat (val_C vd_), then sizes_ok + dlen_consistent give bound.
-                Alternatively: prove the sum vb+vc+vd doesn't overflow (which follows
-                from the chain alignment + sizes_ok: sum \<le> length rest_addr < 2^32).\<close>
-            sorry
+              Remaining after auto: unat (val_C vd_) \<le> unat (val_C v_).
+              Proof requires varint chain alignment to show the sum vb_+vc_+vd_
+              doesn't overflow, which lets us derive vd_ \<le> v_ from the sizes equation.\<close>
+          subgoal sorry
           \<comment> \<open>Subgoal 3: ¬C ∧ I(Result v) ⟹ Q(Result v) (post-loop succeeds)\<close>
           subgoal
             apply (clarsimp split: prod.splits)
             by runs_to_vcg
           \<comment> \<open>Subgoal 4: I(Exn e) ⟹ Q(Exn e) (exceptions satisfy True)\<close>
           subgoal by simp
-          \<comment> \<open>Subgoal 5: Body preserves I with measure decrease.\<close>
+          \<comment> \<open>Subgoal 5: Body preserves I with measure decrease.
+              The body: read opcode, decode, inner loop (which < 2) for ADD/RUN/COPY.
+              Strategy: VCG decomposes the prefix (opcode read + decode), leaving
+              the inner whileLoop obligation. Then case_prod_beta normalizes the bind
+              continuation before applying runs_to_whileLoop_exn on the inner loop.\<close>
           subgoal
             apply (clarsimp split: prod.splits)
             apply (subgoal_tac "unat x1b < unat patch_len")
              prefer 2
              apply (simp add: word_less_nat_alt word_le_nat_alt)
+            \<comment> \<open>VCG pass 1: decompose outer body prefix.\<close>
             apply runs_to_vcg
             apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def
                               intro!: buf_valid_uintD; fail)?\<close>)
-            \<comment> \<open>Remaining: inner whileLoop (which < 2) body + return.
-                The inner loop dispatches to ADD/RUN/COPY sub-loops.
-                Each sub-loop preserves buf_valid, heap_typing, patch bytes,
-                and advances cursors within bounds.\<close>
+            \<comment> \<open>VCG pass 2: try to decompose inner bind chain.\<close>
+            apply (all \<open>runs_to_vcg?\<close>)
+            apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def
+                              intro!: buf_valid_uintD; fail)?\<close>)
+            \<comment> \<open>Remaining goals: some trivial (Exn branches) + the inner whileLoop.
+                Close trivial goals first.\<close>
+            apply (all \<open>(simp add: Exn_def; fail)?\<close>)
+            apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt; fail)?\<close>)
+            \<comment> \<open>Close Exn branches (Exn e = Result x is False).\<close>
+            apply (all \<open>(auto split: exception_or_result_splits
+                              simp: Exn_def default_option_def; fail)?\<close>)
+            \<comment> \<open>Decompose the bind: VCG splits into whileLoop + continuation goals.\<close>
+            apply runs_to_vcg
+            \<comment> \<open>Close trivial goals from the bind split (return of tuple projections).\<close>
+            apply (all \<open>(auto simp: word_less_nat_alt word_le_nat_alt Exn_def
+                              split: prod.splits; fail)?\<close>)
+            \<comment> \<open>Normalize any remaining case_prod for whileLoop matching.\<close>
+            apply (all \<open>(simp only: case_prod_beta fst_conv snd_conv; fail)?\<close>)
+            \<comment> \<open>Close further trivial goals.\<close>
+            apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt; fail)?\<close>)
+            \<comment> \<open>Inner whileLoop body proof deferred. The remaining goal is
+                whileLoop C B init • sa_ ⦃ Q ⦄ with a composite postcondition
+                from the bind decomposition.\<close>
             sorry
-          done
         done
       done
     done
+  done
 qed
 
 (*
