@@ -1,289 +1,183 @@
 # Refinement Layer Progress
 
-## Status (2026-05-07)
+## Status (2026-05-10) — rescue branch
 
-Phase B Step 2 (decoder refinement). All three instruction loop lemmas
-(ADD, RUN, COPY) are proved sorry-free. All three invariant preservation
-lemmas (decode_loop_inv_after_add/run/copy) are proved sorry-free.
-Prefix refinement through to the main while-loop entry is proved (sorry
-at loop body). Main loop invariant defined (Phase 3a complete); Phase 3c
-(invariant preservation) is complete. Phase 3b (loop body proof) is next.
+The previous approach on `refine/close-loop-sorry` has been abandoned.
+Audit found three problems with it that made further investment unsafe:
 
-## Completed (current theory state)
+1. **Build is broken.** Last CdeltaRefine build
+   (`cdelta-refine-build.log`, 2026-05-09) hung for ~5 minutes on
+   `runs_to_vcg` around line 6453 of `VcdiffDec_Refine.thy` and was
+   terminated. No incremental elaboration is possible on the current
+   top-level proof.
+2. **Postcondition is too weak to reuse.** `vcdiff_decode'_prefix_correct`
+   proves only `∃ret. r = Result ret` (no Failure). The target theorem
+   needs `heap_bytes t out (length tgt) = tgt ∧ heap_w32 t out_len = …`.
+   The current proof cannot be composed into `vcdiff_decode'_spec` —
+   it is a parallel track, not a stepping stone.
+3. **Main loop invariant is disconnected.** The outer
+   `runs_to_whileLoop_exn` invariant (line 6468) tracks only
+   `buf_valid` + cursor bounds + `heap_typing`. It has no connection
+   to `dec_state`, `ds_tgt`, or `decode_spec`, so the sorry-free
+   `decode_loop_inv_after_add/run/copy` lemmas cannot be applied inside
+   the loop body. ~2000 lines of infrastructure is currently unreachable
+   from the top-level goal.
 
-In [proof/decoder-refine/VcdiffDec_Refine.thy](../proof/decoder-refine/VcdiffDec_Refine.thy):
+Additionally, the top-level proof is a ~500-line apply-script chain of
+copy-pasted `apply (all \<open>… read_varint'_spec … ; fail)?\<close>`
+peel steps. Each peel inflates terms the higher-order unifier must
+traverse; this is the direct cause of the VCG hang.
 
-* `read_byte'_spec` and `read_byte'_list_spec` — proved.
-* `read_varint'_spec` — proved (line 337, full functional correctness).
-* `decode_address'_spec` — proved (line 975, all four address modes, sorry-free).
-* `build_code_table'_spec` — proved (line 1789, 6 nested loops, table-match
-  invariant, postcondition `code_tbl_built_'' s' = 1`).
-* ~30 error-case lemmas for `vcdiff_decode'` (short patch, magic bytes, hdr
-  indicator, window indicator, app-header skip, cache-init paths).
-* Cache-init loop preservation lemmas (`near_init_loop_res_w32_ptr`,
-  `same_init_loop_res_w32_ptr`).
-* Phase 1 infrastructure: `bufs_disjoint`, `heap_bytes_update_disjoint`,
-  `heap_bytes_update_outside`, `buf_valid_heap_w8_update_any`,
-  `heap_w32_heap_w8_update`, `ptr_valid_heap_w8_update`, `heap_bytes_extend`.
-* Varint chaining: `varint_decode_loop_suffix`, `varint_decode_suffix`,
-  `varint_decode_drop_rest`, `varint_next_position`, `init_loops_preserve_patch`.
-* Pointer injectivity: `ptr_add_inject`, `ptr_add_inject_nat`.
-* `parse_header_no_app` — proved (header parse correspondence).
-* `parse_window_no_source` — proved (window parse correspondence).
-* **`add_loop_correct`** — proved (ADD instruction inner loop, sorry-free).
-* **`run_loop_correct`** — proved (RUN instruction inner loop, sorry-free).
-* `copy_loop_prefix`, `copy_loop_nth`, `copy_loop_nth_stable`, `copy_loop_nth_src`,
-  `copy_loop_nth_tgt` — proved (helper lemmas for COPY).
-* `copy_loop_overlap_ptr_eq` — proved (word-arithmetic ptr equality for overlapping copy).
-* **`copy_loop_correct`** — proved (COPY instruction inner loop, sorry-free).
-* `near_init_preserves_patch_heap`, `same_init_preserves_patch_heap` — proved
-  (init loops preserve heap_bytes, buf_valid, heap_w32, code_tbl_built).
-* `read_varint'_chain_transfer` — proved (state-transfer variant of varint chain).
-* `varint_decode_value_bound` — proved (varint results < 2^32).
-* **`vcdiff_decode'_prefix_correct`** — partial proof (sorry at while-loop body).
-  Handles: magic checks, init loops, win_ind read + checks (no-source path),
-  full varint read chain (dlen, tgt_len, di, data_len, inst_len, addr_len),
-  bounds checks, cursor arithmetic. Uses `runs_to_vcg` + `auto` with
-  `read_varint'_spec`/`buf_validD`/`runs_to_weaken` as intro rules.
-* **`decode_loop_inv`** — defined (Phase 3a). Loop invariant connecting C
-  cursors to spec's `dec_state` via drop/take on heap_bytes.
-* `decode_loop_invD` — destructor extracting all 21 fields from the invariant.
-* `decode_loop_inv_init` — proved (invariant holds at loop entry with
-  tgt_pos=0, np=0, cache=cache_init).
-* `inv_pop_byte_cursor` — proved (drop/take list = hd # tl when cursor < end).
-* `inv_inst_pop_byte` — proved (connects pop_byte on spec list to C heap read).
-* `code_tbl_matches_lookup` — proved (entry_of_row = default_entry under code_tbl_matches).
-* `cursor_advance_drop` — proved (cursor+1 drop = Suc cursor drop).
-* **`decode_loop_inv_after_add`** — proved (sorry-free, invariant preserved after ADD).
-* **`decode_loop_inv_after_run`** — proved (sorry-free, invariant preserved after RUN).
-* **`decode_loop_inv_after_copy`** — proved (sorry-free, invariant preserved after COPY).
-* `decode_loop_inv_advance_inst` — proved (invariant after reading one opcode byte).
-* `decode_loop_inv_advance_inst_n` — proved (invariant after varint read in inst section).
-* `buf_valid_mono` — proved (buf_valid with smaller length).
-* `inv_inst_varint_bridge` — proved (connects heap_bytes t patch to abstract inst_rem).
-* `code_tbl_matches_first_half`, `code_tbl_matches_second_half` — proved
-  (extract half_inst from code table array under code_tbl_matches).
-* `byte_to_hi_tag_ity`, `byte_to_hi_tag_isz` — proved (map raw bytes to inst_type/size).
-* `inv_no_overflow_data`, `inv_no_overflow_tgt` — proved (overflow safety under invariant).
-* `resolve_size_length`, `resolve_size_nonzero`, `resolve_size_varint` — proved
-  (properties of resolve_size connecting to C's conditional varint read).
-* `inv_data_rem_length`, `inv_tgt_length` — proved (numeric length correspondences).
+## What to keep from the old branch
 
-Build status: **clean** (`isabelle build -d . -v -o system_log=true CdeltaRefine`).
-Only 1 sorry remains (in `vcdiff_decode'_prefix_correct`, covering the main while loop).
+All of these are sorry-free, heavily reused, and unrelated to the
+broken glue code:
 
-## Goal
+* `read_byte'_spec`, `read_byte'_list_spec`
+* `read_varint'_spec`, `read_varint'_chain`, `read_varint'_chain_transfer`,
+  `varint_decode_value_bound`
+* `decode_address'_spec` (all four address modes)
+* `build_code_table'_spec` (3 sorrys, but contained and independent)
+* `add_loop_correct`, `run_loop_correct`, `copy_loop_correct` (inner
+  instruction loops)
+* `decode_loop_inv`, `decode_loop_invD`, `decode_loop_inv_init`
+* `decode_loop_inv_after_add/run/copy` (invariant preservation for each
+  instruction type)
+* `decode_loop_inv_advance_inst`, `decode_loop_inv_advance_inst_n`
+* `near_init_preserves_patch_heap`, `same_init_preserves_patch_heap`
+* Heap/buffer infra (`bufs_disjoint`, `heap_bytes_*`, `buf_valid_*`,
+  `ptr_add_inject`, `heap_w32_heap_w8_update`, …)
+* Bridge/support lemmas (`code_tbl_matches_{first,second}_half`,
+  `byte_to_hi_tag_{ity,isz}`, `exec_half_*_conditions`, `inv_*`,
+  `resolve_size_*`)
 
-```
-theorem vcdiff_decode'_spec:
-  assumes [full preconditions]
-  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len . s
-    { \<lambda>r t. case decode_spec (heap_bytes s patch (unat patch_len))
-                             (heap_bytes s src (unat src_len)) of
-        Inl tgt => r = Result VCD_OK \<and>
-                   heap_bytes t out (length tgt) = tgt \<and>
-                   heap_w32 t out_len = of_nat (length tgt)
-      | Inr _ => r \<noteq> Result VCD_OK }"
-```
+## What to discard
 
-## Plan
+* `vcdiff_decode'_prefix_correct` (the 1000-line apply-script glue)
+* `inst_end_le_patch_len`, `inst_end_le_patch_len2/3`, `inst_end_le_word`,
+  `word_le_of_unat_le`, `pos_chain_le`, `runs_to_whileLoop_bind_drop6th`,
+  `runs_to_whileLoop_bind_drop6th'`, `summand_le_from_sub_eq`,
+  `inst_end_from_sizes`, `inst_end_from_sizes'` — all propped up the
+  broken proof, likely not needed by the new decomposition.
+  **Decision rule:** leave them in place for now; delete only when a
+  replacement lemma is proved and they are confirmed unused.
 
-### Phase 1 — Output-write infrastructure (1-2 days)
+## New plan: structured decomposition
 
-The C decoder reads from `patch`/`src` and writes to `out`. Every byte write to
-`out` must not invalidate what we know about `patch`/`src`.
+The previous plan in `proof-strategy.md` and in the old version of this
+file is still essentially right; the failure was tactical, not strategic.
+The key change is **disciplined modular composition via `runs_to_bind`
+and structured Isar**, never `runs_to_vcg` across the whole body.
 
-**1a. Disjointness predicate:**
+### Step 0 — unblock the build
 
-```
-definition bufs_disjoint :: "8 word ptr => nat => 8 word ptr => nat => bool" where
-  "bufs_disjoint p pn q qn =
-     (\<forall>i < pn. \<forall>j < qn. p +p int i \<noteq> q +p int j)"
-```
+1. Replace the broken `vcdiff_decode'_prefix_correct` proof body with
+   `sorry` (accepting `quick_and_dirty = true` as we already have it)
+   so the session elaborates. Keep the statement; we'll probably
+   discard it later but for now we want the file to load so the
+   supporting lemmas remain checkable.
+2. Confirm `isabelle build -d . -o system_log=true -v CdeltaRefine`
+   finishes. Baseline for further work.
 
-**1b. Preservation lemmas for `heap_w8_update`:**
+### Step 1 — state the target theorem
 
-- `heap_bytes_heap_w8_update_disjoint`: reading `heap_bytes s patch n` is
-  unchanged after writing to a pointer in the `out` region (given disjointness).
-- `buf_valid_heap_w8_update`: writing to `out` preserves `buf_valid` for
-  `patch`/`src`.
-- `heap_w32_heap_w8_update`: writing a byte doesn't affect `heap_w32` of
-  `out_len` (type separation).
+Write `vcdiff_decode'_spec` with the *real* postcondition (roughly the
+one in `refine-progress.md` Goal section) as a `lemma … sorry`.
+This anchors what all sub-lemmas need to compose to, and stops us
+from drifting into weaker intermediate statements that can't be
+glued together.
 
-**1c. Output-region lemmas:**
+### Step 2 — Phase 2: four small prefix lemmas
 
-- Writing `out[tgt_pos + j] = v` extends `heap_bytes t out (tgt_pos + j + 1)`
-  by one byte.
-- Inductive output-write invariant for the ADD/RUN/COPY inner `for` loops.
+Each is a standalone lemma with an explicit postcondition that names
+the parse result and the C state. Each is ~30-80 lines of structured
+Isar (`obtain`/`note`/`have`/`show`), not apply-scripts.
 
-### Phase 2 — Header + window parse refinement (3-5 days)
+| Lemma | C code section | Postcondition |
+|-------|---------------|---------------|
+| `header_magic_refine` | bytes 0..4 | `parse_header bs = Inl (hdr, rest)` ∧ `hdr` has no app data |
+| `init_loops_refine` | near/same init | cache = cache_init, `heap_bytes` of patch/src unchanged, `buf_valid` preserved |
+| `window_meta_refine` | byte 5 + 5 varints + di byte | `parse_window rest = Inl (win, tail)`, cursors positioned at `data_pos`/`inst_pos`/`addr_pos`, arithmetic bounds established |
+| `section_cursors_refine` | arithmetic + sanity checks | `data_end`, `inst_end`, `addr_end` in `32 word`, all ≤ `patch_len`, `decode_loop_inv` holds at loop entry |
 
-Factor the linear prefix of `vcdiff_decode'` (everything before
-`while (inst_cursor < inst_end)`) into a standalone lemma:
+Compose with `runs_to_bind` / `runs_to_weaken`. Don't unfold
+`vcdiff_decode'_def` inside these; work against already-lifted
+sub-operations (`read_byte'`, `read_varint'`, init loops).
+
+If any of these lemmas resist structured proof, **stop and revisit the
+statement** rather than fall back to apply-script peeling. The peel
+style is what killed the old approach.
+
+### Step 3 — Phase 3: the main loop as a standalone lemma
 
 ```
-lemma vcdiff_decode'_prefix_refine:
-  assumes [buf_valid, ptr_valid, disjoint, well-formed patch]
-  shows "\<exists>t' data_cursor inst_cursor addr_cursor ...
-    [C execution reaches the main loop in state t'] \<and>
-    parse_header (heap_bytes s patch (unat patch_len)) = Inl rest \<and>
-    parse_window rest = Inl (win, tail) \<and>
-    data_cursor = ... \<and> inst_cursor = ... \<and> addr_cursor = ... \<and>
-    [cache zero-initialized] \<and> [code_tbl_built = 1]"
+lemma decode_window_loop_correct:
+  assumes decode_loop_inv s0 … data_cursor inst_cursor addr_cursor 0 0 t
+      and [code_tbl_matches, buf_valid, disjoint, bounds]
+  shows "whileLoop C B (addr_cursor, data_cursor, inst_cursor, 0, 0) ∙ t
+           ⦃ λr t'. case r of
+               Result (…) ⇒ ∃st'.
+                 decode_window (ds_state_from_inv …) = Inl st' ∧
+                 decode_loop_inv … t' ∧
+                 [final cursors = ends]
+             | Exn _ ⇒ False ⦄"
 ```
 
-**Sub-lemmas (each ~30-50 lines, mechanical VCG):**
+Prove with `runs_to_whileLoop_exn` using **`decode_loop_inv`** (not a
+bespoke subset of it) as the invariant. The body obligation decomposes
+via `runs_to_bind` into:
+* opcode read → `decode_loop_inv_advance_inst`
+* first half dispatch → `decode_loop_inv_after_{add,run,copy}` or NOOP
+* second half dispatch → ditto
+* which < 2 inner loop: unroll to 2 sequential dispatches
 
-| Lemma | C code section | Spec counterpart |
-|-------|---------------|-----------------|
-| `header_magic_refine` | `patch[0..3]` checks + `hi` byte | `parse_header` magic + hdr_indicator |
-| `app_header_skip_refine` | Optional varint + skip | `parse_header` app-data branch |
-| `window_meta_refine` | `win_ind`, src_seg varints, `dlen`, `tgt_len`, `di`, section lengths | `parse_window` |
-| `section_cursors_refine` | Arithmetic: `data_pos`, `inst_pos`, `addr_pos` | Take/drop offsets into `pw_data`/`pw_inst`/`pw_addr` |
+Termination: measure `unat inst_end - unat inst_cursor`, decreases by
+≥ 1 per iteration via the opcode read.
 
-Each is a sequential chain of `read_varint'_spec` / `read_byte'_spec`
-applications. Use `obtain`/`note` Isar style to name intermediate states.
+### Step 4 — Phase 4: composition
 
-### Phase 3 — Main decode loop invariant (7-10 days, critical path)
+`vcdiff_decode'_spec` = chain of:
 
-**3a. Define the loop invariant:**
+* `header_magic_refine` + `runs_to_bind`
+* `init_loops_refine` + `runs_to_bind`
+* `window_meta_refine` + `runs_to_bind`
+* `section_cursors_refine` — establishes `decode_loop_inv`
+* `decode_window_loop_correct` — invariant maintained, `ds_tgt` correct
+* post-loop `unless` checks follow from final-state cursor bounds
+* final `*out_len = tgt_pos` write + return
 
-```
-definition decode_loop_inv where
-  "decode_loop_inv s0 t patch src out
-     data_end_n inst_end_n addr_end_n src_seg_len_n tgt_len_n
-     data_cursor inst_cursor addr_cursor tgt_pos near_ptr
-     dst \<equiv>
-       ds_inst_rem dst = heap_bytes t patch [inst_cursor..inst_end] \<and>
-       ds_data_rem dst = heap_bytes t patch [data_cursor..data_end] \<and>
-       ds_addr_rem dst = heap_bytes t patch [addr_cursor..addr_end] \<and>
-       ds_tgt dst = heap_bytes t out [0..tgt_pos] \<and>
-       ds_cache dst = cache_from_arrays t near_ptr \<and>
-       [buf_valid / ptr_valid preserved] \<and>
-       [patch/src heap unchanged from s0] \<and>
-       [cursor bounds: data_cursor \<le> data_end, etc.]"
-```
+Unfold `decode_spec` once at the top level to show the post-condition
+matches. Never unfold `vcdiff_decode'_def` except inside the four
+prefix lemmas (each unfolds only the prefix it covers).
 
-**3b. Loop body — outer while:**
+### Step 5 — cleanup
 
-The C has `while (inst_cursor < inst_end)` wrapping `for (which=0; which<2)`.
-Since the inner for-loop always executes exactly 2 iterations, **unroll it** to
-two sequential half-instruction dispatches.
+* Delete discarded helper lemmas once shown unused.
+* Turn off `quick_and_dirty` in ROOT for `CdeltaRefine`.
+* Full clean build, no sorry / no oops.
 
-Each iteration:
-1. `read_byte` to get opcode -> look up `code_tbl[op]`
-2. First half-instruction dispatch (typ1/sz1/md1)
-3. Second half-instruction dispatch (typ2/sz2/md2)
+## Anti-patterns (do not repeat)
 
-**3c. Three instruction branches (per half):**
+These are the things that caused the previous blowup. Stop and ask
+if any of them start to appear again:
 
-| Branch | Key reasoning | Effort |
-|--------|--------------|--------|
-| **ADD** | `for j` byte-copy from data section to output. `heap_bytes` extension + disjointness. | 2-3 days |
-| **RUN** | `for j` fill output with single byte. Simpler than ADD. | 1-2 days |
-| **COPY** | Calls `decode_address'`, then `for j` with src-vs-output dispatch. Overlapping copy via `copy_loop`. **Hardest sub-lemma.** | 3-4 days |
-
-**3d. COPY overlap invariant (hardest piece):**
-
-The C does:
-```c
-for (j = 0; j < sz; j++) {
-    a = addr + j;
-    if (a < src_seg_len) byte = src[src_seg_off + a];
-    else byte = out[a - src_seg_len];  // may read earlier output
-    out[tgt_pos + j] = byte;
-}
-```
-
-The spec: `copy_loop src_seg (ds_tgt st) addr sz`. Refinement needs induction:
-```
-\<forall>k < j.
-  heap_w8 t (out +p (tgt_pos + k)) =
-  copy_loop src_seg (ds_tgt st) addr sz ! k
-```
-
-Case split on `addr + k < src_seg_len` vs reading from output-so-far. Likely
-~100 lines of Isar. May need an auxiliary `copy_loop_nth` lemma in the pure
-spec layer.
-
-**3e. Termination:**
-
-Measure: `inst_end - inst_cursor` (strictly decreasing, each iteration advances
-`inst_cursor` by at least 1 via `read_byte`).
-
-### Phase 4 — Post-checks + composition (2-3 days)
-
-**4a. Final consistency checks after loop exit:**
-
-- `tgt_pos = tgt_len` <-> `length (ds_tgt final_st) = pw_tgt_len win`
-- `data_cursor = data_end` <-> `ds_data_rem final_st = []`
-- `addr_cursor = addr_end` <-> `ds_addr_rem final_st = []`
-
-Follow directly from loop invariant cursor-bounds clauses.
-
-**4b. Final write:** `*out_len = tgt_pos` (one `heap_w32_update`).
-
-**4c. Composition:**
-
-Combine Phase 2 (prefix reaches loop entry) + Phase 3 (loop maintains invariant
-and terminates) + Phase 4a/4b (post-loop checks + final write) into
-`vcdiff_decode'_spec`. Never unfold the full `vcdiff_decode'_def` in the final
-theorem; compose modular sub-lemmas via `runs_to_weaken` and `runs_to_bind`.
-
-Error path: when `decode_spec` returns `Inr _`, show C returns non-zero. Mostly
-follows from existing error-case lemmas.
-
-### Phase 5 — Cleanup + final build (1 day)
-
-- Remove `quick_and_dirty = true` from ROOT session options.
-- Full clean build: `isabelle build -d . -o system_log=true -v CdeltaRefine`
-- Verify no sorry/oops in output.
-
-## Dependency Graph
-
-```
-Phase 1 (disjointness infra)
-    |
-    |---> Phase 3 (loop invariant + branches)
-    |         |
-    |         \---> Phase 4 (post-checks + composition)
-    |                   |
-Phase 2 (header parse) -/
-    |
-    \---> Phase 4 ---> Phase 5 (cleanup)
-```
-
-Phases 1 and 2 are independent and can proceed in parallel.
-
-## Effort Estimate
-
-| Phase | Days | Notes |
-|-------|------|-------|
-| 1. Output-write infra | 1-2 | Mostly mechanical lemmas |
-| 2. Header/window parse | 3-5 | Sequential VCG, tedious but predictable |
-| 3. Main loop + branches | 7-10 | COPY overlap is the hard part |
-| 4. Post-checks + compose | 2-3 | Straightforward given 2+3 |
-| 5. Cleanup | 1 | Build verification |
-| **Total** | **~3 weeks** | |
-
-## Key Risks
-
-1. **COPY overlap semantics** — if `copy_loop`'s recursive definition doesn't
-   unfold cleanly against the C's imperative loop, may need an auxiliary
-   `copy_loop_nth` characterization lemma in the pure spec layer.
-
-2. **`runs_to_vcg` blowup** — the full `vcdiff_decode'_def` unfolding is
-   enormous. Mitigation: never unfold the full definition in the final theorem;
-   compose modular sub-lemmas using `runs_to_weaken` and `runs_to_bind`.
-
-3. **Word-arithmetic congestion** — the window-parse section has ~15 variables
-   in scope, all `32 word`. Explicit `unat`/`uint` reasoning will dominate.
-   Mitigation: establish nat-level facts early with `have` blocks, then cast.
+1. **`runs_to_vcg` on the full decoder body.** Always bind-decompose
+   first, then VCG on bite-sized pieces.
+2. **`apply (all \<open>… ; fail)?\<close>` chains longer than ~3 in a row.**
+   If you need more, the goal has too much structure; extract a lemma.
+3. **Intermediate postconditions of the form `∃ret. r = Result ret`.**
+   Any reusable lemma needs a postcondition that names the semantic
+   effect on the state.
+4. **Bespoke loop invariants that duplicate a subset of `decode_loop_inv`.**
+   Use `decode_loop_inv` directly; it's why we defined it.
+5. **`unfolding vcdiff_decode'_def` at the top-level theorem.** Only
+   unfold inside the smallest lemma that mentions that prefix.
 
 ## Build workflow
 
-Keep builds serialized and logged:
-
-```bash
-isabelle build -d . -o system_log=true -v CdeltaRefine > cdelta-refine-build.log 2>&1
 ```
+isabelle build -d . -o system_log=true -v CdeltaRefine > .build-tmp/build.log 2>&1
+```
+
+Keep foreground. `system_log=true -v` is how we detect stuckness
+(timing lines indicate a stuck command).
