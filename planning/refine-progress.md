@@ -108,16 +108,44 @@ the win_ind `read_byte'` (= `gets_the (…)` existential).
 
 ### Current blocker: gets_the-existential for win_ind
 
-Residual goal shape:
-  `∃v. read_byte' patch patch_len (pos + val) taa_ = Some v ∧
-       REST_OF_DECODER • taa_ ⦃ POST ⦄`
+**Partially solved.**  Made substantial progress:
 
-`read_byte'` is total (returns `Some` in both `pos < len` and
-`pos ≥ len` branches — the latter gives an error value).  Simp
-with `read_byte'_spec` doesn't fire because it requires a
-`ptr_valid` precondition under the `pos < len` case.  Best attack:
-a case-split on `pr_t_C.pos_C va + val_C va < patch_len` with
-explicit witnesses per branch.
+* Added `build_code_table'_preserves_typing` (sorry) as a stronger
+  supply rule so that downstream buf_valid facts are derivable.
+* Added `out_cap_enough` assumption to the theorem statement
+  (necessary — without it the Inl branch is false when the spec
+  produces a tgt larger than out_cap).
+* Closed word-bound arithmetic: `pos_C va + val_C va ≤ patch_len`
+  (no overflow).
+* Closed `buf_valid td patch` via the heap_typing-preservation chain.
+* Invoked `read_byte'_spec` by subst, then `split if_splits;
+  intro conjI impI` to produce two branches.
+
+**Remaining**:
+
+* Truncation branch (`pos_C va + val_C va = patch_len`): single
+  subgoal `⟹ False`, needs a contradiction from Inl + parse_header_app
+  (rest_h = [] ⟹ parse_window rest_h = Inr E_TRUNC ⟹ decode_spec =
+  Inr, contradicting Inl).  Deferred.
+* Success branch: after `apply runs_to_vcg`, produces 31 residual
+  subgoals breaking down as:
+  - 9 × `⟹ False` (contradictions from Inl — various win_ind bits,
+    varint failures)
+  - 6 × `unat (heap_w32 td out_len) = length tgt` (output length
+    postcondition, multiple paths)
+  - 6 × `heap_bytes td out (length tgt) = tgt` (output bytes
+    postcondition, multiple paths)
+  - 4 × `pr_t_C.err_C ... = 0` (varint read error checks)
+  - 2 × `pos + val + 1 ≤ patch_len` (bound after advancing position)
+  - 2 × `∃v. read_byte' ... = Some v ∧ ...` (di-byte, dlen-byte
+    `gets_the`s — same pattern as win_ind)
+  
+  The `heap_bytes td out = tgt` is particularly troubling — `td` is
+  the state *before* the outer whileLoop, but the postcondition claims
+  the output is already correct.  This suggests either (a) `runs_to_vcg`
+  applied the postcondition template to the pre-loop state, which means
+  the loop obligation is somewhere else, or (b) there's a broken
+  threading we haven't understood.  Investigate.
 
 ### Reality check on the outer whileLoop
 
