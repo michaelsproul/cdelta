@@ -6545,23 +6545,48 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
                      heap_bytes t out (length tgt) = tgt"
   have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
   proof -
-    \<comment> \<open>Extract ptr_valid for the header bytes from patch_ok.
-        These are needed for the magic/hdr guards.\<close>
-    have len_ge_parse: "unat patch_len \<ge> 5"
+    \<comment> \<open>Extract facts from the Inl hypothesis via parse_header.\<close>
+    obtain rest where ph: "parse_header (heap_bytes s patch (unat patch_len)) = Inl rest"
+      using Inl unfolding decode_spec_def by (auto split: sum.splits)
+    from ph obtain b0 b1 b2 b3 hi body where
+      bs_form: "heap_bytes s patch (unat patch_len) = b0 # b1 # b2 # b3 # hi # body" and
+      magic: "[b0, b1, b2, b3] = [0xD6, 0xC3, 0xC4, 0x00]" and
+      hdr3: "hi AND 0x03 = 0"
+      unfolding parse_header_def
+      by (auto split: list.splits if_splits)
+    from magic have b0_eq: "b0 = 0xD6" and b1_eq: "b1 = 0xC3"
+      and b2_eq: "b2 = 0xC4" and b3_eq: "b3 = 0x00" by auto
+    \<comment> \<open>Length bound\<close>
+    have len_ge5: "unat patch_len \<ge> 5"
     proof -
-      have "parse_header (heap_bytes s patch (unat patch_len)) \<noteq> Inr E_TRUNC"
-        using Inl unfolding decode_spec_def
-        by (auto split: sum.splits)
-      then have "\<exists>b0 b1 b2 b3 hi rest.
-                   heap_bytes s patch (unat patch_len) = b0 # b1 # b2 # b3 # hi # rest"
-        unfolding parse_header_def by (auto split: list.splits if_splits)
-      then obtain b0 b1 b2 b3 hi rest where
-        "heap_bytes s patch (unat patch_len) = b0 # b1 # b2 # b3 # hi # rest"
-        by blast
-      then have "length (heap_bytes s patch (unat patch_len)) \<ge> 5"
-        by simp
+      have "length (heap_bytes s patch (unat patch_len)) \<ge> 5"
+        using bs_form by simp
       thus ?thesis by simp
     qed
+    have len_ge5_word: "(5 :: 32 word) \<le> patch_len"
+      using len_ge5 by (simp add: word_le_nat_alt)
+    \<comment> \<open>Pointer validity for patch[0..4]\<close>
+    have patch_n_ok: "buf_valid s patch (unat patch_len)" using patch_ok .
+    have patchi_ok:
+      "\<And>i. i < 5 \<Longrightarrow> ptr_valid (heap_typing s) (patch +\<^sub>p int i)"
+      using buf_validD[OF patch_ok] len_ge5 by simp
+    \<comment> \<open>Header bytes match magic via heap_bytes_nth\<close>
+    have nth_eq: "\<And>i. i < 5 \<Longrightarrow>
+        heap_w8 s (patch +\<^sub>p int i) = heap_bytes s patch (unat patch_len) ! i"
+      using len_ge5 by (simp add: heap_bytes_nth)
+    have magic0_v: "heap_w8 s patch = 0xD6"
+      using nth_eq[of 0] bs_form b0_eq by simp
+    have magic1_v: "heap_w8 s (patch +\<^sub>p 1) = 0xC3"
+      using nth_eq[of 1] bs_form b1_eq by simp
+    have magic2_v: "heap_w8 s (patch +\<^sub>p 2) = 0xC4"
+      using nth_eq[of 2] bs_form b2_eq by simp
+    have magic3_v: "heap_w8 s (patch +\<^sub>p 3) = 0"
+      using nth_eq[of 3] bs_form b3_eq by simp
+    have hi_v: "heap_w8 s (patch +\<^sub>p 4) = hi"
+      using nth_eq[of 4] bs_form by simp
+    \<comment> \<open>hdr_ok deferred: the C expresses it as UCAST(hi) AND 3 = 0; we have
+        hi AND 0x03 = 0 at the byte level from parse_header.  Bridge below
+        when closing the relevant subgoal.\<close>
     show ?thesis
       unfolding vcdiff_decode'_def
       supply read_byte'_spec [runs_to_vcg]
@@ -6570,6 +6595,31 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       supply same_init_preserves_patch_heap [runs_to_vcg]
       supply if_split [split del]
       apply runs_to_vcg
+      \<comment> \<open>Close subgoals 1-14: ptr_valid, magic-byte mismatches, hdr bit,
+          length bounds.  For IS_VALID we invoke patchi_ok; for magic
+          mismatches we use the magicK_v facts extracted from Inl.\<close>
+      subgoal using out_len_ok by simp
+      subgoal using len_ge5 by (simp add: word_less_nat_alt)
+      subgoal using patchi_ok[of 0] by simp
+      subgoal using magic0_v by simp
+      subgoal using patchi_ok[of 1] by simp
+      subgoal using magic1_v by simp
+      subgoal using patchi_ok[of 2] by simp
+      subgoal using magic2_v by simp
+      subgoal using patchi_ok[of 3] by simp
+      subgoal using magic3_v by simp
+      subgoal using patchi_ok[of 4] by simp
+      subgoal premises prems
+        \<comment> \<open>Goal: UCAST(hi) AND 3 ≠ 0 ⟹ False.\<close>
+      proof -
+        have eq: "UCAST(8 \<rightarrow> 32) hi AND 3 = UCAST(8 \<rightarrow> 32) (hi AND 3)"
+          by word_bitwise
+        from prems eq hi_v hdr3 show ?thesis by auto
+      qed
+      subgoal using patch_ok by simp
+      subgoal using len_ge5_word by simp
+      \<comment> \<open>Remaining: 8 subgoals covering the app-header varint case (contradiction
+          from Inl), the build_code_table branch, and the main body.\<close>
       sorry
   qed
   thus ?thesis by (simp add: Inl)
