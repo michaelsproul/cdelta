@@ -6842,6 +6842,31 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       subgoal
         apply runs_to_vcg
         apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        \<comment> \<open>2 × pos+val+1 ≤ patch_len from pos+val < patch_len.\<close>
+        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
+                                unat_word_ariths(1); fail)?\<close>)
+        \<comment> \<open>2 × inner gets_the.  Rule application produces 8 subgoals:
+            2 × {buf_valid, pos_ok, live-branch continuation, trunc-branch}.
+            The buf_valid and pos_ok close trivially; the trunc branches
+            close via runs_to_vcg (err ≠ 0 ⇒ Exn).  Live branches
+            contain more continuation.\<close>
+        apply (all \<open>(rule read_byte'_gets_the_discharge)?\<close>)
+        \<comment> \<open>buf_valid obligations (goals 1 and 5 typically).\<close>
+        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        \<comment> \<open>pos_ok obligations — needs read_varint' spec telling us pos_C ≤ len.\<close>
+        apply (all \<open>(assumption | simp)?\<close>)
+        \<comment> \<open>Trunc-branch obligations (err ≠ 0 makes unless throw, r = Exn).\<close>
+        apply (all \<open>(simp add: ; runs_to_vcg; fail)?\<close>)
+        \<comment> \<open>2 live-branch continuations remain — apply runs_to_vcg to each.\<close>
+        apply (all \<open>runs_to_vcg?\<close>)
+        \<comment> \<open>Close more buf_valid and pos-bound obligations from these VCGs.\<close>
+        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
+                                unat_word_ariths(1); fail)?\<close>)
+        \<comment> \<open>2 subgoals remain: both are the outer instruction-dispatch
+            whileLoop (from the two paths through the win_ind branches).
+            STOPPING HERE per plan — the next step is the outer loop
+            invariant.\<close>
         sorry
       \<comment> \<open>Trunc branch: pos+val = patch_len, err = -1.  unless throws,
           making r = Exn _, so ?WeakPost's antecedent r = Result 0 fails.\<close>
