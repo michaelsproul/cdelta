@@ -6540,7 +6540,39 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
   case (Inl tgt)
   \<comment> \<open>Soundness: if the spec accepts the input, the C decoder produces
       the same target bytes and returns VCD_OK.\<close>
-  show ?thesis sorry
+  let ?Post = "\<lambda>r t. r = Result (0 :: int) \<and>
+                     unat (heap_w32 t out_len) = length tgt \<and>
+                     heap_bytes t out (length tgt) = tgt"
+  have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
+  proof -
+    \<comment> \<open>Extract ptr_valid for the header bytes from patch_ok.
+        These are needed for the magic/hdr guards.\<close>
+    have len_ge_parse: "unat patch_len \<ge> 5"
+    proof -
+      have "parse_header (heap_bytes s patch (unat patch_len)) \<noteq> Inr E_TRUNC"
+        using Inl unfolding decode_spec_def
+        by (auto split: sum.splits)
+      then have "\<exists>b0 b1 b2 b3 hi rest.
+                   heap_bytes s patch (unat patch_len) = b0 # b1 # b2 # b3 # hi # rest"
+        unfolding parse_header_def by (auto split: list.splits if_splits)
+      then obtain b0 b1 b2 b3 hi rest where
+        "heap_bytes s patch (unat patch_len) = b0 # b1 # b2 # b3 # hi # rest"
+        by blast
+      then have "length (heap_bytes s patch (unat patch_len)) \<ge> 5"
+        by simp
+      thus ?thesis by simp
+    qed
+    show ?thesis
+      unfolding vcdiff_decode'_def
+      supply read_byte'_spec [runs_to_vcg]
+      supply read_varint'_spec [runs_to_vcg]
+      supply near_init_preserves_patch_heap [runs_to_vcg]
+      supply same_init_preserves_patch_heap [runs_to_vcg]
+      supply if_split [split del]
+      apply runs_to_vcg
+      sorry
+  qed
+  thus ?thesis by (simp add: Inl)
 next
   case (Inr e)
   \<comment> \<open>Completeness on rejection: if the spec rejects the input, the C
