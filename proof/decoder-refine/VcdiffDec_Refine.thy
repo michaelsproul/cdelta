@@ -6616,75 +6616,104 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
                            (heap_bytes s src   (unat src_len))")
   case (Inl tgt)
   \<comment> \<open>Soundness: if the spec accepts the input, the C decoder produces
-      the same target bytes and returns VCD_OK.\<close>
+      the same target bytes and returns VCD_OK.
+
+      Two-step strategy: prove (weak) output matches whenever r = Result 0,
+      and (strong) r = Result 0 holds.  The weak form's throw-branches
+      are vacuous, which avoids the 31-subgoal explosion from the
+      conjunctive postcondition.\<close>
+  \<comment> \<open>Extract facts from the Inl hypothesis via parse_header.\<close>
+  obtain rest where ph: "parse_header (heap_bytes s patch (unat patch_len)) = Inl rest"
+    using Inl unfolding decode_spec_def by (auto split: sum.splits)
+  from ph obtain b0 b1 b2 b3 hi body where
+    bs_form: "heap_bytes s patch (unat patch_len) = b0 # b1 # b2 # b3 # hi # body" and
+    magic: "[b0, b1, b2, b3] = [0xD6, 0xC3, 0xC4, 0x00]" and
+    hdr3: "hi AND 0x03 = 0"
+    unfolding parse_header_def
+    by (auto split: list.splits if_splits)
+  from magic have b0_eq: "b0 = 0xD6" and b1_eq: "b1 = 0xC3"
+    and b2_eq: "b2 = 0xC4" and b3_eq: "b3 = 0x00" by auto
+  have len_ge5: "unat patch_len \<ge> 5"
+  proof -
+    have "length (heap_bytes s patch (unat patch_len)) \<ge> 5"
+      using bs_form by simp
+    thus ?thesis by simp
+  qed
+  have len_ge5_word: "(5 :: 32 word) \<le> patch_len"
+    using len_ge5 by (simp add: word_le_nat_alt)
+  have patch_n_ok: "buf_valid s patch (unat patch_len)" using patch_ok .
+  have patchi_ok:
+    "\<And>i. i < 5 \<Longrightarrow> ptr_valid (heap_typing s) (patch +\<^sub>p int i)"
+    using buf_validD[OF patch_ok] len_ge5 by simp
+  have nth_eq: "\<And>i. i < 5 \<Longrightarrow>
+      heap_w8 s (patch +\<^sub>p int i) = heap_bytes s patch (unat patch_len) ! i"
+    using len_ge5 by (simp add: heap_bytes_nth)
+  have magic0_v: "heap_w8 s patch = 0xD6"
+    using nth_eq[of 0] bs_form b0_eq by simp
+  have magic1_v: "heap_w8 s (patch +\<^sub>p 1) = 0xC3"
+    using nth_eq[of 1] bs_form b1_eq by simp
+  have magic2_v: "heap_w8 s (patch +\<^sub>p 2) = 0xC4"
+    using nth_eq[of 2] bs_form b2_eq by simp
+  have magic3_v: "heap_w8 s (patch +\<^sub>p 3) = 0"
+    using nth_eq[of 3] bs_form b3_eq by simp
+  have hi_v: "heap_w8 s (patch +\<^sub>p 4) = hi"
+    using nth_eq[of 4] bs_form by simp
+  have body_from_drop5:
+    "body = drop 5 (heap_bytes s patch (unat patch_len))"
+    using bs_form by simp
+  define app_bit where "app_bit = (hi AND 0x04 \<noteq> 0)"
+  have parse_header_app:
+    "app_bit \<Longrightarrow> \<exists>app_len rest'.
+        varint_decode body = Some (app_len, rest') \<and>
+        app_len \<le> length rest' \<and>
+        rest = drop app_len rest'"
+    using ph bs_form hdr3 unfolding parse_header_def app_bit_def
+    by (auto split: list.splits if_splits option.splits)
+  have parse_header_noapp:
+    "\<not> app_bit \<Longrightarrow> rest = body"
+    using ph bs_form hdr3 unfolding parse_header_def app_bit_def
+    by (auto split: list.splits if_splits option.splits)
+  have ucast_and_4_equiv:
+    "(UCAST(8 \<rightarrow> 32) hi AND 4 \<noteq> 0) = (hi AND 4 \<noteq> 0)"
+    by word_bitwise
+  let ?WeakPost = "\<lambda>r t. r = Result (0 :: int) \<longrightarrow>
+                         unat (heap_w32 t out_len) = length tgt \<and>
+                         heap_bytes t out (length tgt) = tgt"
   let ?Post = "\<lambda>r t. r = Result (0 :: int) \<and>
                      unat (heap_w32 t out_len) = length tgt \<and>
                      heap_bytes t out (length tgt) = tgt"
+  have weak: "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+                \<lbrace> ?WeakPost \<rbrace>"
+    unfolding vcdiff_decode'_def
+    supply read_byte'_spec [runs_to_vcg]
+    supply read_varint'_spec [runs_to_vcg]
+    supply near_init_preserves_patch_heap_word
+        [where buf = patch and n = "unat patch_len" and p = out_len,
+         runs_to_vcg]
+    supply same_init_preserves_patch_heap_word
+        [where buf = patch and n = "unat patch_len" and p = out_len,
+         runs_to_vcg]
+    supply build_code_table'_preserves_typing [runs_to_vcg]
+    supply decode_address'_spec [runs_to_vcg]
+    supply add_loop_correct [runs_to_vcg]
+    supply run_loop_correct [runs_to_vcg]
+    supply copy_loop_correct [runs_to_vcg]
+    supply if_split [split del]
+    apply runs_to_vcg
+    \<comment> \<open>The weak postcondition `r = Result 0 ⟶ ...` makes every throw
+        branch vacuous (antecedent becomes `Exn e = Result 0` which is
+        false).  Only 12 subgoals remain, all simple.\<close>
+    subgoal using out_len_ok by simp
+    subgoal using patchi_ok[of 0] by simp
+    subgoal using patchi_ok[of 1] by simp
+    subgoal using patchi_ok[of 2] by simp
+    subgoal using patchi_ok[of 3] by simp
+    subgoal using patchi_ok[of 4] by simp
+    subgoal using patch_ok by simp
+    subgoal using len_ge5_word by simp
+    sorry
   have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
   proof -
-    \<comment> \<open>Extract facts from the Inl hypothesis via parse_header.\<close>
-    obtain rest where ph: "parse_header (heap_bytes s patch (unat patch_len)) = Inl rest"
-      using Inl unfolding decode_spec_def by (auto split: sum.splits)
-    from ph obtain b0 b1 b2 b3 hi body where
-      bs_form: "heap_bytes s patch (unat patch_len) = b0 # b1 # b2 # b3 # hi # body" and
-      magic: "[b0, b1, b2, b3] = [0xD6, 0xC3, 0xC4, 0x00]" and
-      hdr3: "hi AND 0x03 = 0"
-      unfolding parse_header_def
-      by (auto split: list.splits if_splits)
-    from magic have b0_eq: "b0 = 0xD6" and b1_eq: "b1 = 0xC3"
-      and b2_eq: "b2 = 0xC4" and b3_eq: "b3 = 0x00" by auto
-    \<comment> \<open>Length bound\<close>
-    have len_ge5: "unat patch_len \<ge> 5"
-    proof -
-      have "length (heap_bytes s patch (unat patch_len)) \<ge> 5"
-        using bs_form by simp
-      thus ?thesis by simp
-    qed
-    have len_ge5_word: "(5 :: 32 word) \<le> patch_len"
-      using len_ge5 by (simp add: word_le_nat_alt)
-    \<comment> \<open>Pointer validity for patch[0..4]\<close>
-    have patch_n_ok: "buf_valid s patch (unat patch_len)" using patch_ok .
-    have patchi_ok:
-      "\<And>i. i < 5 \<Longrightarrow> ptr_valid (heap_typing s) (patch +\<^sub>p int i)"
-      using buf_validD[OF patch_ok] len_ge5 by simp
-    \<comment> \<open>Header bytes match magic via heap_bytes_nth\<close>
-    have nth_eq: "\<And>i. i < 5 \<Longrightarrow>
-        heap_w8 s (patch +\<^sub>p int i) = heap_bytes s patch (unat patch_len) ! i"
-      using len_ge5 by (simp add: heap_bytes_nth)
-    have magic0_v: "heap_w8 s patch = 0xD6"
-      using nth_eq[of 0] bs_form b0_eq by simp
-    have magic1_v: "heap_w8 s (patch +\<^sub>p 1) = 0xC3"
-      using nth_eq[of 1] bs_form b1_eq by simp
-    have magic2_v: "heap_w8 s (patch +\<^sub>p 2) = 0xC4"
-      using nth_eq[of 2] bs_form b2_eq by simp
-    have magic3_v: "heap_w8 s (patch +\<^sub>p 3) = 0"
-      using nth_eq[of 3] bs_form b3_eq by simp
-    have hi_v: "heap_w8 s (patch +\<^sub>p 4) = hi"
-      using nth_eq[of 4] bs_form by simp
-    \<comment> \<open>hdr_ok deferred: the C expresses it as UCAST(hi) AND 3 = 0; we have
-        hi AND 0x03 = 0 at the byte level from parse_header.  Bridge below
-        when closing the relevant subgoal.\<close>
-    \<comment> \<open>Further case analysis on the app-header bit.  If set, we get
-        the varint-decode fact needed to rule out the err≠0 branch.\<close>
-    have body_from_drop5:
-      "body = drop 5 (heap_bytes s patch (unat patch_len))"
-      using bs_form by simp
-    define app_bit where "app_bit = (hi AND 0x04 \<noteq> 0)"
-    have parse_header_app:
-      "app_bit \<Longrightarrow> \<exists>app_len rest'.
-          varint_decode body = Some (app_len, rest') \<and>
-          app_len \<le> length rest' \<and>
-          rest = drop app_len rest'"
-      using ph bs_form hdr3 unfolding parse_header_def app_bit_def
-      by (auto split: list.splits if_splits option.splits)
-    have parse_header_noapp:
-      "\<not> app_bit \<Longrightarrow> rest = body"
-      using ph bs_form hdr3 unfolding parse_header_def app_bit_def
-      by (auto split: list.splits if_splits option.splits)
-    \<comment> \<open>Bridge byte-level `hi AND 4 ≠ 0` to C-level UCAST AND 4 ≠ 0.\<close>
-    have ucast_and_4_equiv:
-      "(UCAST(8 \<rightarrow> 32) hi AND 4 \<noteq> 0) = (hi AND 4 \<noteq> 0)"
-      by word_bitwise
     show ?thesis
       unfolding vcdiff_decode'_def
       supply read_byte'_spec [runs_to_vcg]
