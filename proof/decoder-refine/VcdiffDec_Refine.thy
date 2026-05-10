@@ -6769,22 +6769,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       \<comment> \<open>Subgoals 5-8: main body.  Apply build_code_table'_spec on
           subgoals 1-2 (code_tbl_built = 0).  The remaining 2 are for
           the code_tbl_built ≠ 0 branch and handle the main body.\<close>
-      \<comment> \<open>Subgoals 5-8: main body.  With the instantiated preservation
-          supplies, runs_to_vcg advances through:
-            build_code_table' (code_tbl=0 branch)
-            near_init whileLoop (preservation: heap_bytes, buf_valid, …)
-            same_init whileLoop (same)
-          landing at the win_ind read_byte' step with clean hypotheses:
-            heap_bytes ta_ patch (unat patch_len) = heap_bytes t_ patch (unat patch_len)
-            buf_valid ta_ patch (unat patch_len) = buf_valid t_ patch (unat patch_len)
-            …and similarly for taa_ vs ta_.
-          Single residual goal:
-            ∃v. read_byte' patch patch_len (pos + val) taa_ = Some v ∧
-                do { rest of decoder body } ∙ taa_ ⦃ ?Post ⦄
-          This is the gets_the-existential for win_ind.  The rest of
-          the proof chains read_byte'_spec + read_varint'_spec via VCG
-          through the varint prefix, then hits the outer whileLoop
-          which needs the strengthened decode_loop_inv.\<close>
+      \<comment> \<open>Subgoals 5-8: main body.  Partial progress — further work needed.\<close>
       sorry
   qed
   thus ?thesis by (simp add: Inl)
