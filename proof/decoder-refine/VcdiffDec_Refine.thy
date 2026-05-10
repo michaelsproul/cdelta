@@ -6535,7 +6535,18 @@ lemma vcdiff_decode'_spec:
                           unat (heap_w32 t out_len) = length tgt \<and>
                           heap_bytes t out (length tgt) = tgt
              | Inr _   \<Rightarrow> (\<exists>e. r = Result (e :: int) \<and> e \<noteq> 0) \<rbrace>"
-  sorry
+proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
+                           (heap_bytes s src   (unat src_len))")
+  case (Inl tgt)
+  \<comment> \<open>Soundness: if the spec accepts the input, the C decoder produces
+      the same target bytes and returns VCD_OK.\<close>
+  show ?thesis sorry
+next
+  case (Inr e)
+  \<comment> \<open>Completeness on rejection: if the spec rejects the input, the C
+      decoder returns a nonzero error code.\<close>
+  show ?thesis sorry
+qed
 
 end
 
