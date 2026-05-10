@@ -6830,10 +6830,19 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
              (= patch_len).  Both deferred until the outer whileLoop is
              reachable.\<close>
          apply (all \<open>clarsimp?\<close>)
-         subgoal \<comment> \<open>success branch\<close>
+         subgoal \<comment> \<open>success branch: runs_to_vcg advances through the
+             win_ind checks + varint chain + inner whileLoops, leaving
+             31 subgoals covering:
+             * win_ind bit checks (contradictions from parse_window)
+             * varint chain side conditions (ptr_valid, bounds)
+             * the outer instruction-dispatch whileLoop (the main work)
+             * post-loop cursor consistency checks
+             * final out_len write.
+             Deferred — see planning/refine-progress.md for the strengthened
+             decode_loop_inv approach.\<close>
+           apply runs_to_vcg
            sorry
-         subgoal \<comment> \<open>truncation branch\<close>
-           sorry
+         subgoal sorry \<comment> \<open>truncation branch — contradiction from Inl, deferred\<close>
          done
       \<comment> \<open>Remaining 3 main-body subgoals (code_tbl=0 × has-src,
           code_tbl≠0 × has-src ∈ {0,1}).\<close>
