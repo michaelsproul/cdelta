@@ -6614,6 +6614,11 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       supply read_varint'_spec [runs_to_vcg]
       supply near_init_preserves_patch_heap [runs_to_vcg]
       supply same_init_preserves_patch_heap [runs_to_vcg]
+      supply build_code_table'_spec [runs_to_vcg]
+      supply decode_address'_spec [runs_to_vcg]
+      supply add_loop_correct [runs_to_vcg]
+      supply run_loop_correct [runs_to_vcg]
+      supply copy_loop_correct [runs_to_vcg]
       supply if_split [split del]
       apply runs_to_vcg
       \<comment> \<open>Close subgoals 1-14: ptr_valid, magic-byte mismatches, hdr bit,
@@ -6639,6 +6644,12 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       qed
       subgoal using patch_ok by simp
       subgoal using len_ge5_word by simp
+      apply (tactic \<open>fn st =>
+        let
+          val n = Thm.nprems_of st;
+          val _ = File.write (Path.explode "/tmp/nprems.txt")
+                    ("after 14 closures: " ^ string_of_int n);
+        in all_tac st end\<close>)
       \<comment> \<open>Remaining: 8 subgoals.  Subgoals 1-4 are the app-header branch with
           varint-error path — contradiction from Inl (spec requires varint success).
           Subgoals 5-8 are the main body with build_code_table'.\<close>
@@ -6701,7 +6712,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         finally have "unat (val_C va) \<le> unat (patch_len - pr_t_C.pos_C va)" .
         with lt show False by (simp add: word_less_nat_alt)
       qed
-      \<comment> \<open>Subgoals 5-8: main body with build_code_table'.\<close>
+      \<comment> \<open>Subgoals 5-8: main body.  Remaining work.\<close>
       sorry
   qed
   thus ?thesis by (simp add: Inl)
