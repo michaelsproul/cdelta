@@ -1,5 +1,41 @@
 # Refinement Layer Progress
 
+## Session 2026-05-10 evening 2 — continuation method confirmed
+
+After the survey of l4v/AutoCorres2 patterns, applied the
+`vcdiff_decode'_win_target_bit_nonok_built` template to discharge the
+first of 4 top-level gets_the continuations:
+
+```isabelle
+apply (cases "pos + val < patch_len")
+  \<comment> \<open>live case\<close>
+  apply (rule exI[where x = "pr_t_C (pos + val + 1) (UCAST ...) VCD_OK"])
+  apply (rule conjI)
+   apply (subst read_byte'_spec[of "pos + val" patch_len state patch])
+    subgoal  \<comment> \<open>ptr_valid via heap_typing chain + patch_ok\<close>
+     apply (rule impI, subgoal_tac "heap_typing state = heap_typing s",
+            simp, rule buf_valid_uintD[OF patch_ok], simp add: …)
+    done
+   subgoal by simp  \<comment> \<open>if-simplification to the live branch\<close>
+  apply runs_to_vcg
+  \<comment> \<open>Closes 6 buf_valid via simp add: buf_valid_def patch_ok\<close>
+  apply (all \<open>(simp add: buf_valid_def patch_ok[simplified ...]; fail)?\<close>)
+  \<comment> \<open>5 residuals: 2 pos-bounds + 3 more gets_the's.  Recursive pattern.\<close>
+```
+
+**Pattern verified**: after each `gets_the` discharge + inner
+`runs_to_vcg`, the body advances substantially (6 buf_valid goals
+closed trivially, exposing 3 more inner gets_the's for the di-byte /
+dlen-byte / addr_len-byte reads, plus 2 word-arithmetic bounds).
+
+**Expected scaling**: 4 top-level gets_the × 3 inner gets_the per
+path = 12 witness discharges at 10-15 lines each.  Then the outer
+whileLoop (once reached) handled via `supply runs_to_whileLoop_exn5
+[where I=…, runs_to_vcg]`.  Total: ~200-300 lines of Isar for the
+weak-form proof.
+
+---
+
 ## Session 2026-05-10 summary (rescue branch, 28 commits)
 
 **Major breakthroughs:**
