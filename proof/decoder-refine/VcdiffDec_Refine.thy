@@ -6770,8 +6770,45 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
     subgoal using patch_ok by simp
     subgoal using len_ge5_word by simp
     \<comment> \<open>Remaining 4 subgoals: ∃v. read_byte' ... = Some v ∧ (continuation).
-        Pattern from vcdiff_decode'_win_target_bit_nonok_built: give
-        explicit witness via rule exI, then subst read_byte'_spec.\<close>
+        Pattern from vcdiff_decode'_win_target_bit_nonok_built:
+        give explicit witness via `rule exI[where x = explicit]`,
+        then subst read_byte'_spec to unfold.  Each gets_the is the
+        win_ind read at a different position and state.\<close>
+    \<comment> \<open>1st residual: position pos_C va + val_C va, state taa.
+        This is the app-header case with code_tbl_built = 0.\<close>
+    subgoal for va t ta taa
+      \<comment> \<open>Word bound pos + val ≤ patch_len from the C's truncation check.\<close>
+      apply (subgoal_tac "pr_t_C.pos_C va + val_C va \<le> patch_len")
+       prefer 2
+       subgoal
+         apply (subgoal_tac "val_C va \<le> patch_len - pr_t_C.pos_C va")
+          prefer 2 apply (simp add: word_le_not_less)
+         apply (simp add: word_le_nat_alt unat_sub)
+         apply (subst unat_word_ariths(1))
+         using unat_lt2p[of patch_len] by auto
+      \<comment> \<open>Case split on pos + val vs patch_len: in the live case the
+          read succeeds, in the trunc case it returns err=-1 and the
+          continuation throws.\<close>
+      apply (cases "pr_t_C.pos_C va + val_C va < patch_len")
+       \<comment> \<open>Live case: pos + val < patch_len\<close>
+       apply (rule exI[where x =
+         "pr_t_C (pr_t_C.pos_C va + val_C va + 1)
+                 (UCAST(8 \<rightarrow> 32) (heap_w8 taa (patch +\<^sub>p uint (pr_t_C.pos_C va + val_C va))))
+                 VCD_OK"])
+       apply (rule conjI)
+        apply (subst read_byte'_spec[of "pr_t_C.pos_C va + val_C va" patch_len taa patch])
+         subgoal
+           apply (rule impI)
+           apply (subgoal_tac "heap_typing taa = heap_typing s")
+            prefer 2 apply simp
+           apply simp
+           apply (rule buf_valid_uintD[OF patch_ok])
+           apply (simp add: word_less_nat_alt word_le_nat_alt)
+           done
+        subgoal by simp
+      \<comment> \<open>Continuation of the decoder body.  Deferred.\<close>
+      sorry
+    \<comment> \<open>Remaining 3 gets_the subgoals.\<close>
     sorry
   have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
   proof -
