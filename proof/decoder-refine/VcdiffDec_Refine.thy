@@ -131,6 +131,30 @@ lemma read_byte'_spec:
   Relating the C's byte read to the pure spec. The C indexes by word pos;
   spec uses nat-valued drop/take. Bridge via heap_bytes_nth.
 *)
+(*
+  read_byte' is a total function (returns Some in both the live and
+  trunc cases).  When buf_valid holds for the relevant prefix and
+  pos ≤ len, the live case (pos < len) has ptr_valid satisfied, so
+  we always have a concrete Some witness.
+*)
+lemma read_byte'_total:
+  assumes "buf_valid s buf (unat len)"
+      and "pos \<le> len"
+  shows "\<exists>v. read_byte' buf len pos s = Some v"
+proof (cases "pos < len")
+  case True
+  have ptr_ok: "pos < len \<longrightarrow> ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+    using assms(1) True by (auto intro: buf_valid_uintD simp: word_less_nat_alt)
+  show ?thesis using read_byte'_spec[OF ptr_ok] by simp
+next
+  case False
+  hence eq: "pos = len" using assms(2) by simp
+  \<comment> \<open>trunc branch: pos = len, no ptr_valid needed.\<close>
+  have ptr_ok: "pos < len \<longrightarrow> ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+    using False by simp
+  show ?thesis using read_byte'_spec[OF ptr_ok] by simp
+qed
+
 lemma read_byte'_list_spec:
   assumes "unat pos < unat len"
       and "unat len \<le> length (heap_bytes s buf (unat len))"
@@ -6711,6 +6735,9 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
     subgoal using patchi_ok[of 4] by simp
     subgoal using patch_ok by simp
     subgoal using len_ge5_word by simp
+    \<comment> \<open>Remaining 4 subgoals: gets_the continuations.  Deferred —
+        these contain the outer whileLoop and require the strengthened
+        decode_loop_inv with progress conjunct.\<close>
     sorry
   have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
   proof -

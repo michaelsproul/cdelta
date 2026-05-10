@@ -106,7 +106,38 @@ After this, `runs_to_vcg` inside the main-body subgoal advances
 through `build_code_table'` and both init loops, landing at
 the win_ind `read_byte'` (= `gets_the (…)` existential).
 
-### Current blocker: gets_the-existential for win_ind
+### Two-step strategy (KEY BREAKTHROUGH)
+
+Rather than prove the conjunctive `?Post = (r = Result 0 ∧ output
+matches)`, prove an intermediate `?WeakPost = (r = Result 0 ⟶
+output matches)`.  The weak form makes all throw branches vacuous
+(the antecedent `Exn e = Result 0` is false), so `runs_to_vcg` with
+all supplies produces **only 12 subgoals instead of 22+31**:
+
+  * 5 × `IS_VALID(8 word) s (patch +ₚ K)` for K = 0..4 — one-liner
+    closures via `patchi_ok`
+  * 1 × `IS_VALID(32 word) s out_len` — `out_len_ok`
+  * 1 × `buf_valid s patch (unat patch_len)` — `patch_ok`
+  * 1 × `5 ≤ patch_len` — `len_ge5_word`
+  * 4 × `∃v. read_byte' … = Some v ∧ (rest of body runs correctly)`
+    — these are the meaningful residuals
+
+8 of the 12 close as one-liners.  The 4 remaining gets_the
+continuations each contain the outer whileLoop + post-checks; they
+are structurally identical (differ only in entry state), so one
+proof + three mechanical copies.
+
+Strong form `?Post` derived from `?WeakPost` + a separate
+`r = Result 0` lemma (proving the decoder doesn't fail given Inl),
+combined via `runs_to_weaken`.
+
+Added helpers:
+  * `read_byte'_total`: `read_byte' buf len pos s = Some v` for some
+    v, given `buf_valid s buf (unat len)` and `pos ≤ len`.
+  * Extended `?Post` with `out_cap_enough: length tgt ≤ unat out_cap`
+    precondition (without this the theorem's Inl branch is false).
+
+### Previous attempt: gets_the-existential for win_ind
 
 **Partially solved.**  Made substantial progress:
 
