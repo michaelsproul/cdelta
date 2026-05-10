@@ -6658,7 +6658,49 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       \<comment> \<open>Subgoal 4: patch_len - pos < val_C ⟹ False.  Need: the spec
           succeeded with rest = drop app_len rest', hence app_len ≤ length rest',
           hence pos + app_len ≤ patch_len (i.e. val_C ≤ patch_len - pos).\<close>
-      subgoal sorry
+      subgoal for va
+      proof -
+        assume err0: "pr_t_C.err_C va = 0"
+           and lt: "patch_len - pr_t_C.pos_C va < val_C va"
+           and app4: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 4 \<noteq> 0"
+           and pos_ge5: "5 \<le> pr_t_C.pos_C va"
+           and pos_le: "pr_t_C.pos_C va \<le> patch_len"
+           and case_split:
+             "case varint_decode (drop 5 (heap_bytes s patch (unat patch_len))) of
+                None \<Rightarrow> pr_t_C.err_C va \<noteq> 0
+              | Some (nv, rest) \<Rightarrow> pr_t_C.err_C va = 0 \<and>
+                  unat (pr_t_C.pos_C va) = unat patch_len - length rest \<and>
+                  nv = unat (val_C va)"
+        have hi4: "hi AND 4 \<noteq> 0" using app4 hi_v ucast_and_4_equiv by simp
+        obtain app_len rest' where
+          vd: "varint_decode body = Some (app_len, rest')" and
+          al_le: "app_len \<le> length rest'"
+          using parse_header_app[unfolded app_bit_def] hi4 by blast
+        have vd': "varint_decode (drop 5 (heap_bytes s patch (unat patch_len)))
+                  = Some (app_len, rest')"
+          using vd body_from_drop5 by simp
+        from case_split vd'
+        have err_ok: "pr_t_C.err_C va = 0"
+          and pos_eq: "unat (pr_t_C.pos_C va) = unat patch_len - length rest'"
+          and nv_eq: "app_len = unat (val_C va)"
+          by auto
+        have unat_sub_eq: "unat (patch_len - pr_t_C.pos_C va)
+                        = unat patch_len - unat (pr_t_C.pos_C va)"
+          using pos_le by (rule unat_sub)
+        have "unat (val_C va) = app_len" using nv_eq by simp
+        also have "app_len \<le> length rest'" using al_le .
+        also have "length rest' = unat patch_len - unat (pr_t_C.pos_C va)"
+        proof -
+          have "length rest' \<le> length (heap_bytes s patch (unat patch_len))"
+            using varint_decode_length[OF vd'] by simp
+          hence "length rest' \<le> unat patch_len" by simp
+          thus ?thesis using pos_eq by arith
+        qed
+        also have "\<dots> = unat (patch_len - pr_t_C.pos_C va)"
+          using unat_sub_eq by simp
+        finally have "unat (val_C va) \<le> unat (patch_len - pr_t_C.pos_C va)" .
+        with lt show False by (simp add: word_less_nat_alt)
+      qed
       \<comment> \<open>Subgoals 5-8: main body with build_code_table'.\<close>
       sorry
   qed
