@@ -2617,7 +2617,26 @@ lemma build_code_table'_spec:
     subgoal by (simp add: word_less_nat_alt unat_word_ariths(1))
     done
   done
-(* ---------- vcdiff_decode main refinement (TODO) ---------- *)
+
+
+(*
+  Stronger variant of build_code_table'_spec used downstream: also
+  states that heap_typing is preserved.  (build_code_table' only
+  modifies code_tbl_'' and code_tbl_built_'', neither of which
+  affects heap_typing.)  Sorried for now — run by re-stating with
+  heap_typing carried in the invariant, or via AutoCorres's
+  runs_to_partial_weaken.
+*)
+lemma build_code_table'_preserves_typing:
+  "build_code_table' \<bullet> s
+     \<lbrace> \<lambda>r s'. r = Result () \<and>
+             code_tbl_built_'' s' = 1 \<and>
+             code_tbl_matches s' \<and>
+             near_arr_'' s' = near_arr_'' s \<and>
+             same_arr_'' s' = same_arr_'' s \<and>
+             heap_typing s' = heap_typing s \<rbrace>"
+  sorry
+
 
 lemma vcdiff_decode'_short_patch:
   assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
@@ -6668,7 +6687,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       supply same_init_preserves_patch_heap_word
           [where buf = patch and n = "unat patch_len" and p = out_len,
            runs_to_vcg]
-      supply build_code_table'_spec [runs_to_vcg]
+      supply build_code_table'_preserves_typing [runs_to_vcg]
       supply decode_address'_spec [runs_to_vcg]
       supply add_loop_correct [runs_to_vcg]
       supply run_loop_correct [runs_to_vcg]
@@ -6766,10 +6785,50 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         finally have "unat (val_C va) \<le> unat (patch_len - pr_t_C.pos_C va)" .
         with lt show False by (simp add: word_less_nat_alt)
       qed
-      \<comment> \<open>Subgoals 5-8: main body.  Apply build_code_table'_spec on
-          subgoals 1-2 (code_tbl_built = 0).  The remaining 2 are for
-          the code_tbl_built ≠ 0 branch and handle the main body.\<close>
-      \<comment> \<open>Subgoals 5-8: main body.  Partial progress — further work needed.\<close>
+      \<comment> \<open>Subgoals 5-8: main body.  First subgoal:
+            code_tbl_built = 0, app-header present, no-source path.
+          After runs_to_vcg fires build_code_table'_spec + init-loop
+          preservations, we're at the win_ind read_byte' with clean
+          hypotheses (taa_, ta_, t_ form a chain with heap_bytes and
+          buf_valid preserved).  Close via read_byte'_spec unfold.\<close>
+      subgoal for va tb tc td
+        apply runs_to_vcg
+        \<comment> \<open>Establish word-level bound: pos_C va + val_C va ≤ patch_len.\<close>
+        apply (subgoal_tac "pr_t_C.pos_C va + val_C va \<le> patch_len")
+         prefer 2
+         subgoal
+           \<comment> \<open>From the C's check: val_C va ≤ patch_len - pos_C va.  Thus
+               pos_C va + val_C va ≤ patch_len (word-level, no overflow
+               since pos_C va ≤ patch_len).\<close>
+           apply (subgoal_tac "val_C va \<le> patch_len - pr_t_C.pos_C va")
+            prefer 2
+            apply (simp add: word_le_not_less)
+           apply (simp add: word_le_nat_alt unat_sub)
+           apply (subst unat_word_ariths(1))
+           using unat_lt2p[of patch_len]
+           apply auto
+           done
+        \<comment> \<open>Derive buf_valid td patch (unat patch_len) from chain:
+            heap_typing td = heap_typing s (via build_code_table'_preserves_typing
+            + init-loop preservations) ⟹ buf_valid td = buf_valid s.\<close>
+        apply (subgoal_tac "buf_valid td patch (unat patch_len)")
+         prefer 2
+         using patch_ok apply (simp add: buf_valid_def)
+        \<comment> \<open>Provide witness via read_byte'_spec.\<close>
+        apply (subst read_byte'_spec)
+         subgoal
+           apply (rule impI)
+           apply (erule buf_valid_uintD)
+           apply (simp add: word_less_nat_alt word_le_nat_alt)
+           done
+        \<comment> \<open>Provide witness: the if-expression itself.  Then split on
+            the condition and handle each case.\<close>
+        apply clarsimp
+        apply (split if_splits)
+        apply (intro conjI impI)
+         \<comment> \<open>Two subgoals: success (pos+val < patch_len) and truncation (=).\<close>
+         apply (all \<open>clarsimp?\<close>)
+        sorry
       sorry
   qed
   thus ?thesis by (simp add: Inl)
