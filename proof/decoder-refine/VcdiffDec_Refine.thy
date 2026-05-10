@@ -6826,9 +6826,17 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         apply clarsimp
         apply (split if_splits)
         apply (intro conjI impI)
-         \<comment> \<open>Two subgoals: success (pos+val < patch_len) and truncation (=).\<close>
+         \<comment> \<open>Two subgoals: success (pos+val < patch_len) and truncation
+             (= patch_len).  Both deferred until the outer whileLoop is
+             reachable.\<close>
          apply (all \<open>clarsimp?\<close>)
-        sorry
+         subgoal \<comment> \<open>success branch\<close>
+           sorry
+         subgoal \<comment> \<open>truncation branch\<close>
+           sorry
+         done
+      \<comment> \<open>Remaining 3 main-body subgoals (code_tbl=0 × has-src,
+          code_tbl≠0 × has-src ∈ {0,1}).\<close>
       sorry
   qed
   thus ?thesis by (simp add: Inl)
