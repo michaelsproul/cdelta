@@ -6501,6 +6501,56 @@ lemma exec_half_copy_conditions:
 
 
 (*
+  Word-level-guard variants of near_init_preserves_patch_heap /
+  same_init_preserves_patch_heap.  The original lemmas use `unat idx < N`
+  in the loop guard, but the lifted vcdiff_decode' emits `i < N` at word
+  level.  These variants restate the same fact with the word guard so
+  that [runs_to_vcg] unification succeeds.
+*)
+lemma near_init_preserves_patch_heap_word:
+  "(whileLoop (\<lambda>idx st. idx < (4 :: 32 word))
+      (\<lambda>idx. do {
+          modify (near_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (4 :: 32 word)
+          \<and> heap_bytes t buf n = heap_bytes s0 buf n
+          \<and> buf_valid t buf n = buf_valid s0 buf n
+          \<and> heap_w32 t p = heap_w32 s0 p
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+proof -
+  \<comment> \<open>The word guard `idx < 4` is equivalent to `unat idx < 4` on 32 words
+      (since 4 < 2^32), and our existing lemma proves the nat-guard form.\<close>
+  have guard_eq: "(\<lambda>idx (st :: lifted_globals). idx < (4 :: 32 word))
+                = (\<lambda>idx st. unat idx < 4)"
+    by (auto simp: fun_eq_iff word_less_nat_alt unat_numeral)
+  show ?thesis
+    by (subst guard_eq) (rule near_init_preserves_patch_heap)
+qed
+
+lemma same_init_preserves_patch_heap_word:
+  "(whileLoop (\<lambda>idx st. idx < (0x300 :: 32 word))
+      (\<lambda>idx. do {
+          modify (same_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (0x300 :: 32 word)
+          \<and> heap_bytes t buf n = heap_bytes s0 buf n
+          \<and> buf_valid t buf n = buf_valid s0 buf n
+          \<and> heap_w32 t p = heap_w32 s0 p
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+proof -
+  have guard_eq: "(\<lambda>idx (st :: lifted_globals). idx < (0x300 :: 32 word))
+                = (\<lambda>idx st. unat idx < 0x300)"
+    by (auto simp: fun_eq_iff word_less_nat_alt unat_numeral)
+  show ?thesis
+    by (subst guard_eq) (rule same_init_preserves_patch_heap)
+qed
+
+
+(*
   Target theorem for the rescue plan (planning/refine-progress.md).
 
   States full functional correctness of the C decoder against the pure
@@ -6612,8 +6662,8 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       unfolding vcdiff_decode'_def
       supply read_byte'_spec [runs_to_vcg]
       supply read_varint'_spec [runs_to_vcg]
-      supply near_init_preserves_patch_heap [runs_to_vcg]
-      supply same_init_preserves_patch_heap [runs_to_vcg]
+      supply near_init_preserves_patch_heap_word [runs_to_vcg]
+      supply same_init_preserves_patch_heap_word [runs_to_vcg]
       supply build_code_table'_spec [runs_to_vcg]
       supply decode_address'_spec [runs_to_vcg]
       supply add_loop_correct [runs_to_vcg]
@@ -6715,26 +6765,33 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       \<comment> \<open>Subgoals 5-8: main body.  Apply build_code_table'_spec on
           subgoals 1-2 (code_tbl_built = 0).  The remaining 2 are for
           the code_tbl_built ≠ 0 branch and handle the main body.\<close>
-      \<comment> \<open>Subgoals 5-8 (as numbered after the first 14 closures and the
-          4 contradiction cases): the main decoder body in each of 4
-          branches (code_tbl=0 × has-src flag).  Each contains:
-          * near_init whileLoop (done)
-          * same_init whileLoop (done)
-          * win_ind read + checks
-          * 5 varints + di byte + section bounds
-          * outer whileLoop (the instruction dispatch — NEW WORK)
-          * post-loop cursor checks + out_len write
-          This is the main-loop refinement proof deferred as sorry; it
-          requires the strengthened decode_loop_inv with a progress
-          conjunct (carrying the pure-spec state alongside the C state).\<close>
+      \<comment> \<open>Subgoals 5-8: main body.  With the word-form preservation
+          lemmas supplied, runs_to_vcg advances through build_code_table'
+          and both init loops, landing at the win_ind read_byte' step.
+          The single residual goal has the shape:
+            ∃v. read_byte' patch patch_len (pos + val) taa_ = Some v ∧
+                do { unless ...; win_ind ← return val_C v; ...; whileLoop ... }
+                  ∙ taa_ ⦃ POST ⦄
+          where `taa_` is the state after build_code_table' and both
+          init loops, and the init-loop postconditions appear as
+          hypotheses with Skolem variables `buf__`, `n__`, `p__`.
+          Needs: (a) instantiate the Skolem vars to patch, unat patch_len,
+          out_len so the preservation facts are usable; (b) discharge the
+          ∃v via read_byte'_spec; (c) continue through the rest.
+          Deferred — see planning/refine-progress.md.\<close>
       sorry
   qed
   thus ?thesis by (simp add: Inl)
 next
   case (Inr e)
   \<comment> \<open>Completeness on rejection: if the spec rejects the input, the C
-      decoder returns a nonzero error code.\<close>
-  show ?thesis sorry
+      decoder returns a nonzero error code.  Strategy: run the full
+      supply-runs_to_vcg and let the residual subgoals identify the
+      specific failure path in C corresponding to each spec failure.\<close>
+  let ?Post = "\<lambda>r t. \<exists>e. r = Result (e :: int) \<and> e \<noteq> 0"
+  have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
+    sorry
+  thus ?thesis by (simp add: Inr)
 qed
 
 end
