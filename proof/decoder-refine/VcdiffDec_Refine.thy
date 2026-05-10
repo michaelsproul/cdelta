@@ -187,6 +187,47 @@ proof -
     using rb_eq by auto
 qed
 
+(*
+  Witness-discharge form of the gets_the residual.  The residual after
+  runs_to_vcg on `gets_the (read_byte' buf len pos)` is
+    `∃v. read_byte' buf len pos s = Some v ∧ P v`.
+  Under buf_valid + pos ≤ len, the witness is the if-expression; this
+  lemma reduces the residual to showing P holds of both branches.
+*)
+lemma read_byte'_gets_the_discharge:
+  assumes buf_ok: "buf_valid s buf (unat len)"
+      and pos_ok: "pos \<le> len"
+      and P_live: "pos < len \<Longrightarrow>
+           P (pr_t_C (pos + 1)
+                     (UCAST(8 \<rightarrow> 32) (heap_w8 s (buf +\<^sub>p uint pos)))
+                     VCD_OK)"
+      and P_trunc: "\<not> pos < len \<Longrightarrow>
+           P (pr_t_C pos 0 VCD_ERR_TRUNC)"
+  shows "\<exists>v. read_byte' buf len pos s = Some v \<and> P v"
+proof -
+  have ptr_ok: "pos < len \<longrightarrow> ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+    using buf_ok by (auto intro: buf_valid_uintD simp: word_less_nat_alt)
+  have rb_eq: "read_byte' buf len pos s =
+               (if pos < len
+                then Some (pr_t_C (pos + 1)
+                                  (UCAST(8 \<rightarrow> 32) (heap_w8 s (buf +\<^sub>p uint pos)))
+                                  VCD_OK)
+                else Some (pr_t_C pos 0 VCD_ERR_TRUNC))"
+    by (rule read_byte'_spec[OF ptr_ok])
+  show ?thesis
+  proof (cases "pos < len")
+    case True
+    show ?thesis
+      using P_live[OF True] rb_eq True
+      by (intro exI[where x = "pr_t_C (pos + 1) _ _"]) simp
+  next
+    case False
+    show ?thesis
+      using P_trunc[OF False] rb_eq False
+      by (intro exI[where x = "pr_t_C pos 0 _"]) simp
+  qed
+qed
+
 lemma read_byte'_list_spec:
   assumes "unat pos < unat len"
       and "unat len \<le> length (heap_bytes s buf (unat len))"
@@ -6774,10 +6815,15 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         give explicit witness via `rule exI[where x = explicit]`,
         then subst read_byte'_spec to unfold.  Each gets_the is the
         win_ind read at a different position and state.\<close>
-    \<comment> \<open>1st residual: position pos_C va + val_C va, state taa.
-        This is the app-header case with code_tbl_built = 0.\<close>
+    \<comment> \<open>The 4 top-level gets_the residuals: use read_byte'_gets_the_discharge
+        to reduce each to two branch obligations (live case + trunc case).
+        The live cases continue into the decoder body via runs_to_vcg; the
+        trunc cases are vacuous under ?WeakPost because err_C ≠ 0 makes
+        the `unless (err_C = 0) throw` throw, turning r into Exn — but
+        the antecedent `r = Result 0` then fails, discharging the goal.\<close>
+    \<comment> \<open>Helper: buf_valid taa = buf_valid s when heap_typing is preserved.\<close>
+    \<comment> \<open>1st residual: position pos_C va + val_C va, state taa (app-header, code_tbl=0).\<close>
     subgoal for va t ta taa
-      \<comment> \<open>Word bound pos + val ≤ patch_len from the C's truncation check.\<close>
       apply (subgoal_tac "pr_t_C.pos_C va + val_C va \<le> patch_len")
        prefer 2
        subgoal
@@ -6786,45 +6832,23 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
          apply (simp add: word_le_nat_alt unat_sub)
          apply (subst unat_word_ariths(1))
          using unat_lt2p[of patch_len] by auto
-      \<comment> \<open>Case split on pos + val vs patch_len: in the live case the
-          read succeeds, in the trunc case it returns err=-1 and the
-          continuation throws.\<close>
-      apply (cases "pr_t_C.pos_C va + val_C va < patch_len")
-       \<comment> \<open>Live case: pos + val < patch_len\<close>
-       apply (rule exI[where x =
-         "pr_t_C (pr_t_C.pos_C va + val_C va + 1)
-                 (UCAST(8 \<rightarrow> 32) (heap_w8 taa (patch +\<^sub>p uint (pr_t_C.pos_C va + val_C va))))
-                 VCD_OK"])
-       apply (rule conjI)
-        apply (subst read_byte'_spec[of "pr_t_C.pos_C va + val_C va" patch_len taa patch])
-         subgoal
-           apply (rule impI)
-           apply (subgoal_tac "heap_typing taa = heap_typing s")
-            prefer 2 apply simp
-           apply simp
-           apply (rule buf_valid_uintD[OF patch_ok])
-           apply (simp add: word_less_nat_alt word_le_nat_alt)
-           done
-        subgoal by simp
-      \<comment> \<open>Continuation after the gets_the.  At this point we have
-          concrete pr_t_C (pos+val+1, UCAST …, 0) as the win_ind result.
-          The continuation starts with `unless (err_C v = 0) throw`,
-          which under r = Result 0 requires err_C = 0 (which it is,
-          by construction), then proceeds with win_ind checks, varints,
-          outer whileLoop, post-checks.  Attempt runs_to_vcg to
-          advance.\<close>
-      apply runs_to_vcg
-      \<comment> \<open>Close the 6 buf_valid taa patch obligations via heap_typing
-          chain + patch_ok.\<close>
-      apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-      apply (tactic \<open>fn st =>
-        let
-          val n = Thm.nprems_of st;
-          val _ = File.write (Path.explode "/tmp/after-bv.txt")
-                    ("n=" ^ string_of_int n);
-        in all_tac st end\<close>)
-      sorry
-    \<comment> \<open>Truncation case and remaining 3 gets_the subgoals.\<close>
+      apply (subgoal_tac "buf_valid taa patch (unat patch_len)")
+       prefer 2 apply (simp add: buf_valid_def patch_ok[simplified buf_valid_def])
+      apply (rule read_byte'_gets_the_discharge
+               [of taa patch patch_len "pr_t_C.pos_C va + val_C va"])
+        subgoal by assumption
+       subgoal by assumption
+      \<comment> \<open>Live branch: pos+val < patch_len, err = 0, continuation advances.\<close>
+      subgoal
+        apply runs_to_vcg
+        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        sorry
+      \<comment> \<open>Trunc branch: pos+val = patch_len, err = -1.  unless throws,
+          making r = Exn _, so ?WeakPost's antecedent r = Result 0 fails.\<close>
+      subgoal
+        by runs_to_vcg
+      done
+    \<comment> \<open>Remaining 3 top-level gets_the subgoals.\<close>
     sorry
   have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
   proof -
