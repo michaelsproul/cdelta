@@ -6596,6 +6596,14 @@ lemma vcdiff_decode'_spec:
       and out_inj:
         "\<forall>i < unat out_cap. \<forall>j < unat out_cap.
              i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j"
+      \<comment> \<open>Precondition that the output buffer is large enough for whatever
+          target the spec produces.  Without this the theorem's Inl branch
+          is false: a spec that produces a large tgt but a small out_cap
+          causes C to return OVERRUN, not success.\<close>
+      and out_cap_enough:
+        "\<And>tgt. decode_spec (heap_bytes s patch (unat patch_len))
+                            (heap_bytes s src (unat src_len)) = Inl tgt \<Longrightarrow>
+               length tgt \<le> unat out_cap"
   shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
            \<lbrace> \<lambda>r t.
              case decode_spec (heap_bytes s patch (unat patch_len))
