@@ -6712,7 +6712,21 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         finally have "unat (val_C va) \<le> unat (patch_len - pr_t_C.pos_C va)" .
         with lt show False by (simp add: word_less_nat_alt)
       qed
-      \<comment> \<open>Subgoals 5-8: main body.  Remaining work.\<close>
+      \<comment> \<open>Subgoals 5-8: main body.  Apply build_code_table'_spec on
+          subgoals 1-2 (code_tbl_built = 0).  The remaining 2 are for
+          the code_tbl_built ≠ 0 branch and handle the main body.\<close>
+      \<comment> \<open>Subgoals 5-8 (as numbered after the first 14 closures and the
+          4 contradiction cases): the main decoder body in each of 4
+          branches (code_tbl=0 × has-src flag).  Each contains:
+          * near_init whileLoop (done)
+          * same_init whileLoop (done)
+          * win_ind read + checks
+          * 5 varints + di byte + section bounds
+          * outer whileLoop (the instruction dispatch — NEW WORK)
+          * post-loop cursor checks + out_len write
+          This is the main-loop refinement proof deferred as sorry; it
+          requires the strengthened decode_loop_inv with a progress
+          conjunct (carrying the pure-spec state alongside the C state).\<close>
       sorry
   qed
   thus ?thesis by (simp add: Inl)
