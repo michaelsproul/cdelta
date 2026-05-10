@@ -6806,9 +6806,25 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
            apply (simp add: word_less_nat_alt word_le_nat_alt)
            done
         subgoal by simp
-      \<comment> \<open>Continuation of the decoder body.  Deferred.\<close>
+      \<comment> \<open>Continuation after the gets_the.  At this point we have
+          concrete pr_t_C (pos+val+1, UCAST …, 0) as the win_ind result.
+          The continuation starts with `unless (err_C v = 0) throw`,
+          which under r = Result 0 requires err_C = 0 (which it is,
+          by construction), then proceeds with win_ind checks, varints,
+          outer whileLoop, post-checks.  Attempt runs_to_vcg to
+          advance.\<close>
+      apply runs_to_vcg
+      \<comment> \<open>Close the 6 buf_valid taa patch obligations via heap_typing
+          chain + patch_ok.\<close>
+      apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+      apply (tactic \<open>fn st =>
+        let
+          val n = Thm.nprems_of st;
+          val _ = File.write (Path.explode "/tmp/after-bv.txt")
+                    ("n=" ^ string_of_int n);
+        in all_tac st end\<close>)
       sorry
-    \<comment> \<open>Remaining 3 gets_the subgoals.\<close>
+    \<comment> \<open>Truncation case and remaining 3 gets_the subgoals.\<close>
     sorry
   have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
   proof -
