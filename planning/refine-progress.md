@@ -156,6 +156,38 @@ After this, `runs_to_vcg` inside the main-body subgoal advances
 through `build_code_table'` and both init loops, landing at
 the win_ind `read_byte'` (= `gets_the (…)` existential).
 
+### Mid-function whileLoop pattern (l4v / AutoCorres2)
+
+From a survey of seL4/l4v and AutoCorres2 examples:
+
+* **Pattern 2 (quicksort → partition)**: if the body contains a call
+  to a separately-proved helper with its own Hoare triple, use `note
+  helper_correct [runs_to_vcg]` and `runs_to_vcg` will step over the
+  call atomically.
+* **Pattern 3 (schorr_waite)**: for an **inline** whileLoop with no
+  named helper, pre-instantiate the loop rule via `supply
+  runs_to_whileLoop_exn5 [where I = …, R = …, runs_to_vcg]` (defining
+  `runs_to_whileLoop_exn5 = runs_to_whileLoop_exn' [split_tuple C
+  and B arity: 5]`).  Then `apply runs_to_vcg` consumes the loop by
+  discharging the 5 standard subgoals (wf, init, ¬C⟶P, Exn⟶P,
+  body).  This is what we need for our outer instruction-dispatch
+  loop.
+
+**Key caveat for our case**: the whileLoop is inside a `gets_the
+(read_byte' …)` continuation.  `runs_to_vcg` processes the `gets_the`
+via the default `runs_to_gets_the` rule, producing `∃v. read_byte' …
+= Some v ∧ (continuation with whileLoop)` as a residual.  The
+supplied `[runs_to_vcg]` rule for `gets_the_read_byte'_spec` does
+not fire first (priority issue).  So the whileLoop is buried inside
+the existential and can't be reached by the next `runs_to_vcg`.
+
+**Workaround** (template at `vcdiff_decode'_win_target_bit_nonok_built`,
+lines 3148-3229): discharge the gets_the manually with
+`rule exI[where x = explicit_witness]; rule conjI; subst
+read_byte'_spec[of ...]`, then `runs_to_vcg` again advances into the
+continuation and — with `supply runs_to_whileLoop_exn5 [where I=…,
+runs_to_vcg]` in scope — crosses the outer whileLoop atomically.
+
 ### Two-step strategy (KEY BREAKTHROUGH)
 
 Rather than prove the conjunctive `?Post = (r = Result 0 ∧ output

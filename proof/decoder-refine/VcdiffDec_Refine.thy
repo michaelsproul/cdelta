@@ -155,6 +155,38 @@ next
   show ?thesis using read_byte'_spec[OF ptr_ok] by simp
 qed
 
+(*
+  Hoare triple for `gets_the (read_byte' …)` suitable for `[runs_to_vcg]`.
+  Under `buf_valid s buf (unat len)` and `pos ≤ len`, the gets_the always
+  succeeds with a Some witness, and the postcondition is the if-expression
+  characterising the live/trunc branches.
+*)
+lemma gets_the_read_byte'_spec:
+  assumes buf_ok: "buf_valid s buf (unat len)"
+      and pos_ok: "pos \<le> len"
+  shows "gets_the (read_byte' buf len pos) \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and>
+                   r = Result (if pos < len
+                               then pr_t_C (pos + 1)
+                                           (UCAST(8 \<rightarrow> 32) (heap_w8 s (buf +\<^sub>p uint pos)))
+                                           VCD_OK
+                               else pr_t_C pos 0 VCD_ERR_TRUNC) \<rbrace>"
+proof -
+  have ptr_ok: "pos < len \<longrightarrow> ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+    using buf_ok by (auto intro: buf_valid_uintD simp: word_less_nat_alt)
+  have rb_eq: "read_byte' buf len pos s =
+               (if pos < len
+                then Some (pr_t_C (pos + 1)
+                                  (UCAST(8 \<rightarrow> 32) (heap_w8 s (buf +\<^sub>p uint pos)))
+                                  VCD_OK)
+                else Some (pr_t_C pos 0 VCD_ERR_TRUNC))"
+    by (rule read_byte'_spec[OF ptr_ok])
+  show ?thesis
+    unfolding gets_the_def
+    apply runs_to_vcg
+    using rb_eq by auto
+qed
+
 lemma read_byte'_list_spec:
   assumes "unat pos < unat len"
       and "unat len \<le> length (heap_bytes s buf (unat len))"
@@ -268,6 +300,8 @@ lemma heap_w32_code_tbl_built_update[simp]:
 *)
 
 lemmas runs_to_whileLoop3 = runs_to_whileLoop_res' [split_tuple C and B arity: 3]
+lemmas runs_to_whileLoop_exn5 =
+  runs_to_whileLoop_exn' [split_tuple C and B arity: 5]
 
 (*
   Use runs_to_whileLoop_exn (not runs_to_whileLoop3) — the loop body
@@ -6709,7 +6743,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
   have weak: "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
                 \<lbrace> ?WeakPost \<rbrace>"
     unfolding vcdiff_decode'_def
-    supply read_byte'_spec [runs_to_vcg]
+    supply gets_the_read_byte'_spec [runs_to_vcg]
     supply read_varint'_spec [runs_to_vcg]
     supply near_init_preserves_patch_heap_word
         [where buf = patch and n = "unat patch_len" and p = out_len,
@@ -6735,16 +6769,9 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
     subgoal using patchi_ok[of 4] by simp
     subgoal using patch_ok by simp
     subgoal using len_ge5_word by simp
-    \<comment> \<open>Remaining 4 subgoals: gets_the continuations.  Provide the
-        witness via read_byte'_spec (unfolded), then each continuation
-        is the full decoder body with win_ind bound.  Apply
-        runs_to_vcg again to advance.\<close>
-    \<comment> \<open>The 4 remaining gets_the continuations contain the full
-        outer whileLoop + post-checks.  Providing the witness via
-        subst read_byte'_spec produces 8 subgoals: 4 ptr_valid
-        preconditions and 4 continuations.  Both ptr_valid (via
-        heap_typing chain + patch_ok) and the continuations
-        (via decode_loop_inv + progress) are the main remaining work.\<close>
+    \<comment> \<open>Remaining 4 subgoals: ∃v. read_byte' ... = Some v ∧ (continuation).
+        Pattern from vcdiff_decode'_win_target_bit_nonok_built: give
+        explicit witness via rule exI, then subst read_byte'_spec.\<close>
     sorry
   have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
   proof -
