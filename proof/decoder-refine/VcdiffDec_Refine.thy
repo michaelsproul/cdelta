@@ -6505,12 +6505,8 @@ lemma exec_half_copy_conditions:
 
   States full functional correctness of the C decoder against the pure
   decode_spec, over the simplified-VCDIFF input class covered by the
-  spec layer.  Sub-lemmas (header_magic_refine, init_loops_refine,
-  window_meta_refine, section_cursors_refine, decode_window_loop_correct)
-  compose into this via runs_to_bind.
-
-  Currently sorry; this is Step 1 of the rescue plan — the statement
-  anchors the postcondition shape for every intermediate lemma.
+  spec layer.  Currently sorry; Step 1 of the rescue plan anchors the
+  postcondition shape for every intermediate lemma.
 *)
 lemma vcdiff_decode'_spec:
   fixes patch :: "8 word ptr" and patch_len :: "32 word"

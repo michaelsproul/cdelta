@@ -1,0 +1,206 @@
+vcdiff_decode' ?patch ?patch_len ?src ?src_len ?out ?out_cap ?out_len \<equiv> do {
+  guard (\<lambda>s. IS_VALID(32 word) s ?out_len);
+modify (heap_w32_update (\<lambda>h. h(?out_len := 0)));
+condition (\<lambda>s. ?patch_len < 5)
+  (return (- 1))
+  (do {
+  guard (\<lambda>s. IS_VALID(8 word) s ?patch);
+condition (\<lambda>s. uint (heap_w8 s ?patch) \<noteq> 214)
+  (return (- 2))
+  (do {
+  guard (\<lambda>s. IS_VALID(8 word) s (?patch +\<^sub>p 1));
+condition (\<lambda>s. uint (heap_w8 s (?patch +\<^sub>p 1)) \<noteq> 195)
+  (return (- 2))
+  (do {
+  guard (\<lambda>s. IS_VALID(8 word) s (?patch +\<^sub>p 2));
+condition (\<lambda>s. uint (heap_w8 s (?patch +\<^sub>p 2)) \<noteq> 196)
+  (return (- 2))
+  (do {
+  guard (\<lambda>s. IS_VALID(8 word) s (?patch +\<^sub>p 3));
+condition (\<lambda>s. uint (heap_w8 s (?patch +\<^sub>p 3)) \<noteq> 0)
+  (return (- 2))
+  (do {
+  guard (\<lambda>s. IS_VALID(8 word) s (?patch +\<^sub>p 4));
+hi \<leftarrow> gets (\<lambda>s. heap_w8 s (?patch +\<^sub>p 4));
+condition (\<lambda>s. UCAST(8 \<rightarrow> 32) hi && 3 \<noteq> 0)
+  (return (- 3))
+  (finally (do {
+  pos \<leftarrow> condition (\<lambda>s. UCAST(8 \<rightarrow> 32) hi && 4 \<noteq> 0)
+  (do {
+  p \<leftarrow> liftE (read_varint' ?patch ?patch_len 5);
+unless (pr_t_C.err_C p = 0) (throw (sint (pr_t_C.err_C p)));
+pos \<leftarrow> return (pr_t_C.pos_C p);
+app_len \<leftarrow> return (val_C p);
+when (?patch_len - pos < app_len) (throw (- 1));
+return (pos + app_len)
+})
+  (return 5);
+ret \<leftarrow> liftE (condition (\<lambda>s. code_tbl_built_'' s = 0)
+  build_code_table'
+  skip);
+i \<leftarrow> liftE (whileLoop (\<lambda>i s. i < 4)
+  (\<lambda>i. do {
+  modify (near_arr_''_update (\<lambda>a. Arrays.update a (unat i) 0));
+return (i + 1)
+}) 0);
+i \<leftarrow> liftE (whileLoop (\<lambda>i s. i < 0x300)
+  (\<lambda>i. do {
+  modify (same_arr_''_update (\<lambda>a. Arrays.update a (unat i) 0));
+return (i + 1)
+}) 0);
+p \<leftarrow> gets_the (read_byte' ?patch ?patch_len pos);
+unless (pr_t_C.err_C p = 0) (throw (sint (pr_t_C.err_C p)));
+pos \<leftarrow> return (pr_t_C.pos_C p);
+win_ind \<leftarrow> return (val_C p);
+unless (win_ind && 2 = 0) (throw (- 4));
+unless (win_ind && 0xFFFFFFFA = 0) (throw (- 4));
+(pos, src_seg_len, src_seg_off) \<leftarrow> condition (\<lambda>s. win_ind && 1 = 1)
+  (do {
+  when (?src = NULL) (throw (- 13));
+p \<leftarrow> liftE (read_varint' ?patch ?patch_len pos);
+unless (pr_t_C.err_C p = 0) (throw (sint (pr_t_C.err_C p)));
+src_seg_len \<leftarrow> return (val_C p);
+p \<leftarrow> liftE (read_varint' ?patch ?patch_len (pr_t_C.pos_C p));
+unless (pr_t_C.err_C p = 0) (throw (sint (pr_t_C.err_C p)));
+src_seg_off \<leftarrow> return (val_C p);
+when (?src_len < src_seg_off) (throw (- 10));
+when (?src_len - src_seg_off < src_seg_len) (throw (- 10));
+return (pr_t_C.pos_C p, src_seg_len, src_seg_off)
+})
+  (return (pos, 0, 0));
+p \<leftarrow> liftE (read_varint' ?patch ?patch_len pos);
+unless (pr_t_C.err_C p = 0) (throw (sint (pr_t_C.err_C p)));
+pos \<leftarrow> return (pr_t_C.pos_C p);
+dlen \<leftarrow> return (val_C p);
+when (?patch_len - pos < dlen) (throw (- 1));
+p \<leftarrow> liftE (read_varint' ?patch ?patch_len pos);
+unless (pr_t_C.err_C p = 0) (throw (sint (pr_t_C.err_C p)));
+tgt_len \<leftarrow> return (val_C p);
+when (?out_cap < tgt_len) (throw (- 12));
+p \<leftarrow> gets_the (read_byte' ?patch ?patch_len (pr_t_C.pos_C p));
+unless (pr_t_C.err_C p = 0) (throw (sint (pr_t_C.err_C p)));
+unless (val_C p = 0) (throw (- 5));
+p \<leftarrow> liftE (read_varint' ?patch ?patch_len (pr_t_C.pos_C p));
+unless (pr_t_C.err_C p = 0) (throw (sint (pr_t_C.err_C p)));
+data_len \<leftarrow> return (val_C p);
+p \<leftarrow> liftE (read_varint' ?patch ?patch_len (pr_t_C.pos_C p));
+unless (pr_t_C.err_C p = 0) (throw (sint (pr_t_C.err_C p)));
+inst_len \<leftarrow> return (val_C p);
+p \<leftarrow> liftE (read_varint' ?patch ?patch_len (pr_t_C.pos_C p));
+unless (pr_t_C.err_C p = 0) (throw (sint (pr_t_C.err_C p)));
+posa \<leftarrow> return (pr_t_C.pos_C p);
+addr_len \<leftarrow> return (val_C p);
+adler_len \<leftarrow> return (if win_ind && 4 \<noteq> 0 then 4 else 0);
+consumed \<leftarrow> return (posa - pos);
+when (dlen < consumed) (throw (- 8));
+unless (dlen - consumed = data_len + inst_len + addr_len + adler_len) (throw (- 8));
+data_pos \<leftarrow> return (posa + adler_len);
+inst_pos \<leftarrow> return (data_pos + data_len);
+addr_pos \<leftarrow> return (inst_pos + inst_len);
+data_end \<leftarrow> return (data_pos + data_len);
+inst_end \<leftarrow> return (inst_pos + inst_len);
+addr_end \<leftarrow> return (addr_pos + addr_len);
+(addr_cursor, data_cursor, inst_cursor, near_ptr, tgt_pos) \<leftarrow> whileLoop (\<lambda>(addr_cursor, data_cursor, inst_cursor, near_ptr, tgt_pos) s. inst_cursor < inst_end)
+  (\<lambda>(addr_cursor, data_cursor, inst_cursor, near_ptr, tgt_pos). do {
+  p \<leftarrow> gets_the (read_byte' ?patch inst_end inst_cursor);
+unless (pr_t_C.err_C p = 0) (throw (sint (pr_t_C.err_C p)));
+op \<leftarrow> return (val_C p);
+(addr_cursor, data_cursor, inst_cursor, near_ptr, tgt_pos, which) \<leftarrow> whileLoop (\<lambda>(addr_cursor, data_cursor, inst_cursor, near_ptr, tgt_pos, which) s. which < 2)
+  (\<lambda>(addr_cursor, data_cursor, inst_cursor, near_ptr, tgt_pos, which). do {
+  base \<leftarrow> return (which * 3);
+liftE (do {
+  guard (\<lambda>_. base < 6);
+guard (\<lambda>_. op < 0x100);
+guard (\<lambda>_. base + 1 < 6);
+guard (\<lambda>_. base + 2 < 6)
+});
+typ \<leftarrow> gets (\<lambda>s. UCAST(8 \<rightarrow> 32) (code_tbl_'' s.[unat op].[unat base]));
+sz \<leftarrow> gets (\<lambda>s. UCAST(8 \<rightarrow> 32) (code_tbl_'' s.[unat op].[unat (base + 1)]));
+md \<leftarrow> gets (\<lambda>s. UCAST(8 \<rightarrow> 32) (code_tbl_'' s.[unat op].[unat (base + 2)]));
+(addr_cursor, data_cursor, inst_cursor, near_ptr, tgt_pos) \<leftarrow> condition (\<lambda>s. typ = 0)
+  (return (addr_cursor, data_cursor, inst_cursor, near_ptr, tgt_pos))
+  (do {
+  (inst_cursor, sz) \<leftarrow> condition (\<lambda>s. sz = 0)
+  (do {
+  p \<leftarrow> liftE (read_varint' ?patch inst_end inst_cursor);
+unless (pr_t_C.err_C p = 0) (throw (sint (pr_t_C.err_C p)));
+return (pr_t_C.pos_C p, val_C p)
+})
+  (return (inst_cursor, sz));
+when (tgt_len < tgt_pos + sz) (throw (- 9));
+(addr_cursor, data_cursor, near_ptr, tgt_pos) \<leftarrow> condition (\<lambda>s. typ = 1)
+  (do {
+  when (data_end - data_cursor < sz) (throw (- 1));
+liftE (do {
+  j \<leftarrow> whileLoop (\<lambda>j s. j < sz)
+  (\<lambda>j. do {
+  guard (\<lambda>s. IS_VALID(8 word) s (?out +\<^sub>p uint (tgt_pos + j)));
+guard (\<lambda>s. IS_VALID(8 word) s (?patch +\<^sub>p uint (data_cursor + j)));
+modify (heap_w8_update (\<lambda>a. a(?out +\<^sub>p uint (tgt_pos + j) := a (?patch +\<^sub>p uint (data_cursor + j)))));
+return (j + 1)
+}) 0;
+return (addr_cursor, data_cursor + sz, near_ptr, tgt_pos + sz)
+})
+})
+  (condition (\<lambda>s. typ = 2)
+  (do {
+  when (data_end \<le> data_cursor) (throw (- 1));
+liftE (do {
+  guard (\<lambda>s. IS_VALID(8 word) s (?patch +\<^sub>p uint data_cursor));
+fill \<leftarrow> gets (\<lambda>s. heap_w8 s (?patch +\<^sub>p uint data_cursor));
+j \<leftarrow> whileLoop (\<lambda>j s. j < sz)
+  (\<lambda>j. do {
+  guard (\<lambda>s. IS_VALID(8 word) s (?out +\<^sub>p uint (tgt_pos + j)));
+modify (heap_w8_update (\<lambda>h. h(?out +\<^sub>p uint (tgt_pos + j) := fill)));
+return (j + 1)
+}) 0;
+return (addr_cursor, data_cursor + 1, near_ptr, tgt_pos + sz)
+})
+})
+  (do {
+  here_addr \<leftarrow> return (src_seg_len + tgt_pos);
+ar \<leftarrow> liftE (decode_address' ?patch addr_end addr_cursor here_addr md near_ptr);
+unless (ar_t_C.err_C ar = 0) (throw (sint (ar_t_C.err_C ar)));
+when (here_addr \<le> addr_C ar) (throw (- 10));
+j \<leftarrow> whileLoop (\<lambda>j s. j < sz)
+  (\<lambda>j. do {
+  a \<leftarrow> return (addr_C ar + j);
+byte \<leftarrow> condition (\<lambda>s. a < src_seg_len)
+  (liftE (do {
+  guard (\<lambda>s. IS_VALID(8 word) s (?src +\<^sub>p uint (src_seg_off + a)));
+gets (\<lambda>s. heap_w8 s (?src +\<^sub>p uint (src_seg_off + a)))
+}))
+  (do {
+  tgt_rel \<leftarrow> return (a - src_seg_len);
+when (tgt_pos + j \<le> tgt_rel) (throw (- 10));
+liftE (do {
+  guard (\<lambda>s. IS_VALID(8 word) s (?out +\<^sub>p uint tgt_rel));
+gets (\<lambda>s. heap_w8 s (?out +\<^sub>p uint tgt_rel))
+})
+});
+liftE (do {
+  guard (\<lambda>s. IS_VALID(8 word) s (?out +\<^sub>p uint (tgt_pos + j)));
+modify (heap_w8_update (\<lambda>h. h(?out +\<^sub>p uint (tgt_pos + j) := byte)));
+return (j + 1)
+})
+}) 0;
+return (ar_t_C.pos_C ar, data_cursor, near_ptr_C ar, tgt_pos + sz)
+}));
+return (addr_cursor, data_cursor, inst_cursor, near_ptr, tgt_pos)
+});
+return (addr_cursor, data_cursor, inst_cursor, near_ptr, tgt_pos, which + 1)
+}) (addr_cursor, data_cursor, pr_t_C.pos_C p, near_ptr, tgt_pos, 0);
+return (addr_cursor, data_cursor, inst_cursor, near_ptr, tgt_pos)
+}) (addr_pos, data_pos, inst_pos, 0, 0);
+unless (tgt_pos = tgt_len) (throw (- 8));
+unless (data_cursor = data_end) (throw (- 8));
+unless (addr_cursor = addr_end) (throw (- 8));
+modify (heap_w32_update (\<lambda>h. h(?out_len := tgt_len)));
+throw 0
+}))
+})
+})
+})
+})
+})
+}

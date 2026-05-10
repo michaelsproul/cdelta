@@ -201,66 +201,98 @@ The monadic step (add/run/copy_loop) is VCG-supplied; the invariant
 preservation is a *manual rule application* in the resulting residual
 subgoal. This matches l4v's `ctac` + subsequent `apply rule` pattern.
 
-### Step 3 — prove `decode_window_loop_correct`
+### Step 3 — prove the outer whileLoop inline (not as a separate lemma)
 
-Standalone lemma with postcondition in terms of `decode_loop_inv` at
-exit + `ds_tgt`-matches-decoded-bytes:
+**Design change** (after inspecting the lifted `vcdiff_decode'_def`
+dumped to `planning/vcdiff_decode_lifted.txt` and AutoCorres2's
+`IsPrime_Ex.is_prime_faster_correct`): do **not** extract
+`decode_window_loop_correct` as a standalone lemma.
+
+Rationale: the outer whileLoop body is not a named constant. Stating
+a standalone triple over it requires transcribing the ~80-line body
+as a lambda in the lemma statement, which couples the proof to the
+exact shape AutoCorres2 emits — any change to `vcdiff_dec.c` breaks
+the statement. AutoCorres2's idiom (per `IsPrime_Ex`) is to apply
+`runs_to_whileLoop_exn [where I = …, R = …]` *inline* as one of the
+residual subgoals after the top-level `runs_to_vcg`, with
+`decode_loop_inv` as the invariant. No separate lemma.
+
+Proof plan for the inline outer-loop subgoal (one of the residual
+subgoals of `vcdiff_decode'_spec`):
 
 ```
-lemma decode_window_loop_correct:
-  assumes decode_loop_inv s0 patch patch_n src src_n out
-                          src_seg_off src_seg_len tgt_len
-                          data_end inst_end addr_end src_seg
-                          data_cursor inst_cursor addr_cursor 0 0 t
-      and [numeric bounds]
-  shows "whileLoop C B (addr_cursor, data_cursor, inst_cursor, 0, 0) ∙ t
-           ⦃ λr t'.
-              case r of
-                Result (ac, dc, ic, np, tp) ⇒
-                  decode_loop_inv … ac dc ic np tp t' ∧
-                  ¬ ic < inst_end ∧
-                  [ds_tgt from final inv] = [decode_window-derived tgt]
-              | Exn _ ⇒ False ⦄"
+subgoal                                   ← outer while-loop obligation
+  apply (rule runs_to_whileLoop_exn
+    [where I = "λr t'. case r of
+                 Exn _ ⇒ True
+               | Result (ac, dc, ic, np, tp) ⇒
+                   decode_loop_inv … dc ic ac tp np t' ∧
+                   (∃dst. decode_loop (measure0 - unat (ic - inst_cursor_0))
+                             src_seg (unat src_seg_len) tgt_len dst0
+                           = Inl dst ∧
+                          ds_tgt dst = heap_bytes t' out (unat tp))"
+       and R = "measure (λ((_, _, ic, _, _), _). unat inst_end - unat ic)"])
+  subgoal …      (wf, trivial)
+  subgoal …      (init from decode_loop_inv_init)
+  subgoal …      (exit ⇒ post: inst_cursor = inst_end + ds_tgt correspondence)
+  subgoal …      (Exn vacuous)
+  subgoal                                 ← body preserves I
+    supply read_byte'_spec       [runs_to_vcg]
+    supply read_varint'_spec     [runs_to_vcg]
+    supply decode_address'_spec  [runs_to_vcg]
+    supply add_loop_correct      [runs_to_vcg]
+    supply run_loop_correct      [runs_to_vcg]
+    supply copy_loop_correct     [runs_to_vcg]
+    supply if_split [split del]
+    apply runs_to_vcg
+    …
+    (* Residual subgoals: invariant preservation — discharged via
+       decode_loop_inv_after_{add,run,copy} + decode_loop_inv_advance_inst
+       + exec_half_*_conditions + inv_* numeric bridges. *)
+    apply (rule decode_loop_inv_after_add) …
+    …
+    done
+  done
 ```
 
-Proof: `runs_to_whileLoop_exn` with `decode_loop_inv` as the invariant
-and `unat inst_end - unat inst_cursor` as the measure. Five subgoals:
+The inner `which < 2` loop is handled by `runs_to_whileLoop_exn`
+again (invariant: 0..2 counter, state evolves per half-instruction)
+or by `whileLoop_unroll` if that's simpler. Decide during proof
+based on what VCG leaves behind.
 
-1. wf — trivial.
-2. init — from hypothesis.
-3. `¬C ∧ I ⇒ Q` — ds_tgt correspondence at exit.
-4. Exn — vacuous (body doesn't throw in the success path).
-5. Body preserves I — `runs_to_vcg` with the Group-A inner-loop specs
-   + Group-B `decode_loop_inv_after_{add,run,copy}`,
-   `decode_loop_inv_advance_inst{,_n}`,
-   `exec_half_{add,run,copy}_conditions`, and the code_tbl /
-   byte_to_hi bridge lemmas all supplied.
+### Step 4 — monolithic `vcdiff_decode'_spec` proof
 
-The inner `for (which=0; which<2)` loop unrolls to two sequential
-half-instruction dispatches via `whileLoop_unroll` or a dedicated
-`runs_to_whileLoop_{res,exn}_bounded` helper. Check AutoCorres2 for a
-pre-existing rule before writing our own.
-
-### Step 4 — compose `vcdiff_decode'_spec`
-
-Monolithic proof:
+Since Step 3 no longer extracts a separate loop lemma, Steps 3 and 4
+become one proof.  Overall shape:
 
 ```
 theorem vcdiff_decode'_spec:
   …
   unfolding vcdiff_decode'_def
-  supply read_byte'_spec [runs_to_vcg]
-  supply read_varint'_spec [runs_to_vcg]
-  supply near_init_preserves_patch_heap [runs_to_vcg]
-  supply same_init_preserves_patch_heap [runs_to_vcg]
-  supply build_code_table'_spec [runs_to_vcg]
-  supply decode_window_loop_correct [runs_to_vcg]
+  supply read_byte'_spec                  [runs_to_vcg]
+  supply read_varint'_spec                [runs_to_vcg]
+  supply near_init_preserves_patch_heap   [runs_to_vcg]
+  supply same_init_preserves_patch_heap   [runs_to_vcg]
+  supply build_code_table'_spec           [runs_to_vcg]
   supply if_split [split del]
   apply runs_to_vcg
   subgoal … (magic-byte failure paths)
   subgoal … (header indicator)
   subgoal … (win_ind checks)
-  subgoal … (section bounds + decode_loop_inv at entry)
+  subgoal … (section bounds + establish decode_loop_inv at entry)
+  subgoal                                  ← the outer whileLoop
+    apply (rule runs_to_whileLoop_exn [where I = decode_loop_inv … and R = …])
+    subgoal … subgoal … subgoal …
+    subgoal                                ← body preserves I
+      supply add_loop_correct  [runs_to_vcg]
+      supply run_loop_correct  [runs_to_vcg]
+      supply copy_loop_correct [runs_to_vcg]
+      supply decode_address'_spec [runs_to_vcg]
+      apply runs_to_vcg
+      …
+      apply (rule decode_loop_inv_after_add) …
+      done
+    done
   subgoal … (post-loop cursor checks + final write + decode_spec = Inl tgt)
   subgoal … (Inr case discharges)
   done
@@ -269,8 +301,18 @@ theorem vcdiff_decode'_spec:
 Case-split on the value of `decode_spec patch src` at the top level
 (via `case_tac` or by unfolding `decode_spec` + `parse_header` +
 `parse_window` with `parse_header_no_app` / `parse_window_no_source`)
-so that each subgoal sees either `Inl tgt` or `Inr e` and discharges
+so each subgoal sees either `Inl tgt` or `Inr e` and discharges
 accordingly.
+
+**Size expectation.**  AutoCorres2 monolith proofs of comparable C
+functions (e.g. `is_prime_faster_correct`) close in <50 lines when
+the whileLoop has a well-chosen invariant.  `vcdiff_decode'` is
+bigger (more sequential steps, more branches, a deeper loop nest)
+but the invariant `decode_loop_inv` is already fully designed; much
+of the work is discharging residual arithmetic/bounds subgoals.
+Target: <500 lines of Isar total for the final `vcdiff_decode'_spec`.
+If it trends significantly over, pause and reassess which side
+lemmas are missing.
 
 ### Step 5 — cleanup
 
