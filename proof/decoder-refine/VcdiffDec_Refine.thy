@@ -6587,6 +6587,27 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
     \<comment> \<open>hdr_ok deferred: the C expresses it as UCAST(hi) AND 3 = 0; we have
         hi AND 0x03 = 0 at the byte level from parse_header.  Bridge below
         when closing the relevant subgoal.\<close>
+    \<comment> \<open>Further case analysis on the app-header bit.  If set, we get
+        the varint-decode fact needed to rule out the err≠0 branch.\<close>
+    have body_from_drop5:
+      "body = drop 5 (heap_bytes s patch (unat patch_len))"
+      using bs_form by simp
+    define app_bit where "app_bit = (hi AND 0x04 \<noteq> 0)"
+    have parse_header_app:
+      "app_bit \<Longrightarrow> \<exists>app_len rest'.
+          varint_decode body = Some (app_len, rest') \<and>
+          app_len \<le> length rest' \<and>
+          rest = drop app_len rest'"
+      using ph bs_form hdr3 unfolding parse_header_def app_bit_def
+      by (auto split: list.splits if_splits option.splits)
+    have parse_header_noapp:
+      "\<not> app_bit \<Longrightarrow> rest = body"
+      using ph bs_form hdr3 unfolding parse_header_def app_bit_def
+      by (auto split: list.splits if_splits option.splits)
+    \<comment> \<open>Bridge byte-level `hi AND 4 ≠ 0` to C-level UCAST AND 4 ≠ 0.\<close>
+    have ucast_and_4_equiv:
+      "(UCAST(8 \<rightarrow> 32) hi AND 4 \<noteq> 0) = (hi AND 4 \<noteq> 0)"
+      by word_bitwise
     show ?thesis
       unfolding vcdiff_decode'_def
       supply read_byte'_spec [runs_to_vcg]
@@ -6618,8 +6639,27 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       qed
       subgoal using patch_ok by simp
       subgoal using len_ge5_word by simp
-      \<comment> \<open>Remaining: 8 subgoals covering the app-header varint case (contradiction
-          from Inl), the build_code_table branch, and the main body.\<close>
+      \<comment> \<open>Remaining: 8 subgoals.  Subgoals 1-4 are the app-header branch with
+          varint-error path — contradiction from Inl (spec requires varint success).
+          Subgoals 5-8 are the main body with build_code_table'.\<close>
+      \<comment> \<open>Subgoals 1-4: contradiction from err ≠ 0 + Inl ⟹ varint succeeds.\<close>
+      subgoal for va
+        using parse_header_app[unfolded app_bit_def] ucast_and_4_equiv
+              body_from_drop5 hi_v
+        by (auto split: option.splits)
+      subgoal for va
+        using parse_header_app[unfolded app_bit_def] ucast_and_4_equiv
+              body_from_drop5 hi_v
+        by (auto split: option.splits)
+      subgoal for va
+        using parse_header_app[unfolded app_bit_def] ucast_and_4_equiv
+              body_from_drop5 hi_v
+        by (auto split: option.splits)
+      \<comment> \<open>Subgoal 4: patch_len - pos < val_C ⟹ False.  Need: the spec
+          succeeded with rest = drop app_len rest', hence app_len ≤ length rest',
+          hence pos + app_len ≤ patch_len (i.e. val_C ≤ patch_len - pos).\<close>
+      subgoal sorry
+      \<comment> \<open>Subgoals 5-8: main body with build_code_table'.\<close>
       sorry
   qed
   thus ?thesis by (simp add: Inl)
