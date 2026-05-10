@@ -91,19 +91,57 @@ failure), new per-failure-path lemmas may be needed — or we ride
 along with the Inl main-body proof if we structure it as a partial-
 refinement that covers both branches.
 
-### Unification issue with near_init_preserves_patch_heap
+### Word-level init-loop variants (done)
 
-Discovered during Inl main-body exploration: `apply (rule
-runs_to_weaken[OF near_init_preserves_patch_heap …])` doesn't
-unify with the subgoal's `whileLoop (λi s. i < 4)` loop guard
-(word-level) vs the lemma's `unat idx < 4` (nat-level), even
-after `subst word_less_nat_alt` rewrites.
+**Solved.** Added `near_init_preserves_patch_heap_word` and
+`same_init_preserves_patch_heap_word` with loop guards
+`idx < (4 :: 32 word)` (word level) matching what AutoCorres emits.
+Proved via `subst guard_eq` from the nat-form lemmas, where
+`guard_eq` is `(λidx st. idx < 4) = (λidx st. unat idx < 4)` on
+32-word.  Supplied as `[where buf = patch, n = unat patch_len,
+p = out_len, runs_to_vcg]` to pin the free vars to our concrete
+pointers.
 
-But `[runs_to_vcg]` on the same lemma does successfully fire it
-in the top-level `runs_to_vcg` pass, so `runs_to_vcg` is using
-some congruence/normalization machinery (`runs_to_vcg_cong_program_only`?)
-that `apply rule` bypasses.  Investigate `apply runs_to_vcg` inside
-the subgoal rather than `apply rule`.
+After this, `runs_to_vcg` inside the main-body subgoal advances
+through `build_code_table'` and both init loops, landing at
+the win_ind `read_byte'` (= `gets_the (…)` existential).
+
+### Current blocker: gets_the-existential for win_ind
+
+Residual goal shape:
+  `∃v. read_byte' patch patch_len (pos + val) taa_ = Some v ∧
+       REST_OF_DECODER • taa_ ⦃ POST ⦄`
+
+`read_byte'` is total (returns `Some` in both `pos < len` and
+`pos ≥ len` branches — the latter gives an error value).  Simp
+with `read_byte'_spec` doesn't fire because it requires a
+`ptr_valid` precondition under the `pos < len` case.  Best attack:
+a case-split on `pr_t_C.pos_C va + val_C va < patch_len` with
+explicit witnesses per branch.
+
+### Reality check on the outer whileLoop
+
+Even when we reach it, the outer whileLoop is a major undertaking:
+~200-400 lines of structured Isar covering invariant preservation
+across the ADD / RUN / COPY dispatch, the progress claim tying
+C cursors to pure-spec decode_loop execution, and termination.
+Realistically, the session budget for Step 3+4 is 2-3 full days
+of focused work from here.  Rescue branch currently at 16 commits
+covering the architectural restart plus ~20 substantive
+sub-lemma closures in the prefix.
+
+### Inr case
+
+Untouched.  Strategy sketched above (split on which parser
+rejected, reuse existing error-case lemmas).  Could also ride
+on Inl main-body proof by stating both in a unified
+contrapositive form — previously rejected because the contrapositive
+form requires the C to "compute the spec answer" even on failure,
+which is circular.  A cleaner approach: prove C's Hoare triple
+in the form "if r = Result 0 then ∃tgt. decode_spec = Inl tgt ∧
+output matches", and derive the Inr case by contrapositive.  This
+works as long as we don't need the Inr case to be stronger than
+"C doesn't succeed".
 
 ## Status (2026-05-10) — rescue branch
 
