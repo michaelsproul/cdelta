@@ -1,5 +1,110 @@
 # Refinement Layer Progress
 
+## Status (2026-05-10, evening) — rescue branch, Step 3+4 partial
+
+**Progress**: `vcdiff_decode'_spec` top-level stated with real
+`decode_spec` postcondition, case-split on `decode_spec = Inl tgt / Inr e`.
+Inl case 18/22 subgoals closed via supply-runs_to_vcg pattern:
+
+* 14 easy subgoals (ptr_valid / magic / hdr / length bounds) closed
+  via one-liner `subgoal using … by simp` lines.  The UCAST-bridge
+  needed `word_bitwise` to close.
+* 4 "app-header err-path contradiction" subgoals closed via
+  `parse_header_app` extraction from Inl + `auto split: option.splits`.
+* Remaining 4 subgoals: the full main body (win_ind + varints +
+  outer whileLoop + post-checks) across 4 branches (code_tbl ∈ {0,1}
+  × has-src flag ∈ {0,1}).
+
+The Inr case is still a single sorry.  Proof strategy for it:
+case-split on which parser failed (parse_header / parse_window /
+apply_window), use the existing error-case lemmas for magic/hdr
+failures, and discharge the rest by tracing the failure through
+the C body.
+
+## Main remaining work
+
+### The outer whileLoop (critical path)
+
+The single biggest remaining obligation.  Shape:
+
+```
+whileLoop (λ(ac, dc, ic, np, tp) s. ic < inst_end)
+  (λ(ac, dc, ic, np, tp). do {
+     p ← gets_the (read_byte' patch inst_end ic);
+     unless (err_C p = 0) (throw (sint (err_C p)));
+     (ac, dc, ic, np, tp, _) ← whileLoop (λ(_,_,_,_,_,w) _. w < 2)
+       (λ(ac, dc, ic, np, tp, w). BODY_DISPATCH)
+       (ac, dc, pos_C p, np, tp, 0);
+     return (ac, dc, ic, np, tp)
+  }) (addr_pos, data_pos, inst_pos, 0, 0)
+```
+
+Apply via `runs_to_whileLoop_exn [where I = decode_loop_inv_plus,
+R = measure (\<lambda>((_,_,ic,_,_), _). unat inst_end - unat ic)]`
+with the invariant extended to carry a progress claim linking the
+pure spec state to the C cursor state (see "Invariant strengthening"
+below).  Body obligation decomposes via another
+`runs_to_whileLoop_exn` on the inner `which < 2` loop.
+
+### Invariant strengthening (plan option c from discussion)
+
+`decode_loop_inv` currently tracks the abstract `dec_state` at the
+current moment but has no claim about the pure spec having produced
+that state via a fixed number of `decode_one` applications.  For the
+postcondition `heap_bytes t out = tgt` we need to know the abstract
+state equals what `decode_loop` (the pure spec fuel-iterated) would
+produce.
+
+**Conjunctive extension** (preferred):
+
+```
+decode_loop_inv_plus s0 ... data_cursor inst_cursor addr_cursor tgt_pos np t \<equiv>
+  decode_loop_inv s0 ... data_cursor inst_cursor addr_cursor tgt_pos np t \<and>
+  (\<exists>dst dst0.
+    decode_loop_inv_extract dst s0 ... data_cursor inst_cursor addr_cursor tgt_pos np t \<and>
+    dst0 = initial_state_at_inst_pos \<and>
+    (\<exists>k. decode_loop k src_seg (unat src_seg_len) tgt_len dst0 = Inl dst) \<and>
+    (inst_cursor = inst_end \<longrightarrow>
+       decode_loop (length (pw_inst win)) src_seg (unat src_seg_len) tgt_len dst0 = Inl dst))
+```
+
+Where `k` is the number of iterations the C loop has completed.  The
+body-preservation shows this claim advances by exactly 1 per C
+iteration via `decode_loop_inv_after_add/run/copy` (one `decode_one`
+per iteration, with the two half-instructions internally corresponding
+to two `exec_half` calls).
+
+### Inr case
+
+Strategy: split on which of parse_header / parse_window /
+apply_window produced the Inr.  Each is closed by showing the
+corresponding C path takes a throw.
+
+Available lemmas: `vcdiff_decode'_short_patch`,
+`vcdiff_decode'_magic{0,1,2,3}_nonok`, `vcdiff_decode'_hdr_nonok`,
+`vcdiff_decode'_appheader_len5_nonok`,
+`vcdiff_decode'_win_{ind,target_bit,mask,srcneed}_nonok_built`.
+
+For failures not covered by the existing lemmas (varint truncation in
+header-app, window varint, section-size mismatch, instruction-decode
+failure), new per-failure-path lemmas may be needed — or we ride
+along with the Inl main-body proof if we structure it as a partial-
+refinement that covers both branches.
+
+### Unification issue with near_init_preserves_patch_heap
+
+Discovered during Inl main-body exploration: `apply (rule
+runs_to_weaken[OF near_init_preserves_patch_heap …])` doesn't
+unify with the subgoal's `whileLoop (λi s. i < 4)` loop guard
+(word-level) vs the lemma's `unat idx < 4` (nat-level), even
+after `subst word_less_nat_alt` rewrites.
+
+But `[runs_to_vcg]` on the same lemma does successfully fire it
+in the top-level `runs_to_vcg` pass, so `runs_to_vcg` is using
+some congruence/normalization machinery (`runs_to_vcg_cong_program_only`?)
+that `apply rule` bypasses.  Investigate `apply runs_to_vcg` inside
+the subgoal rather than `apply rule`.
+
 ## Status (2026-05-10) — rescue branch
 
 The previous approach on `refine/close-loop-sorry` has been abandoned.
