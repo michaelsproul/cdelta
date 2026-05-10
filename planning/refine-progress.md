@@ -1,5 +1,55 @@
 # Refinement Layer Progress
 
+## Session 2026-05-10 summary (rescue branch, 28 commits)
+
+**Major breakthroughs:**
+1. **Two-step postcondition strategy (22+31 → 12 subgoals).**
+   Replaced the conjunctive `?Post = r = Result 0 ∧ output matches`
+   (which generates unprovable Exn-branch obligations for every throw
+   point) with `?WeakPost = r = Result 0 ⟶ output matches`.  Under
+   `?WeakPost`, throw branches are vacuous; only 12 subgoals remain
+   (8 trivial + 4 meaningful gets_the continuations).  Full derivation
+   of `?Post` from `?WeakPost` + a separate "no failure" claim via
+   `runs_to_weaken`.
+2. **Word-level init-loop variants.**  `near_init_preserves_patch_heap_word`
+   and `same_init_preserves_patch_heap_word` bridge AutoCorres's
+   emitted `i < N` (word) guards to the original lemmas' `unat idx < N`
+   (nat) form.  Enables `supply [where buf = patch, n = unat patch_len,
+   p = out_len, runs_to_vcg]` to fire on the init loops in the body.
+3. **`build_code_table'_preserves_typing`.**  Stronger variant
+   extending `build_code_table'_spec` with `heap_typing` preservation,
+   needed downstream to derive `buf_valid` across the build_code_table'
+   call.  Currently sorry; proof is re-running the body's VCG with a
+   heavier invariant that includes heap_typing.
+4. **`read_byte'_total`.**  `read_byte'` always returns `Some` under
+   `buf_valid s buf (unat len)` + `pos ≤ len`, discharging the
+   `gets_the` existential obligations uniformly.
+5. **`out_cap_enough` precondition.**  Added to `vcdiff_decode'_spec`
+   because without it the Inl branch of the theorem is false.
+
+**Closed subgoals:**
+- 14 of 22 from the original strong-form runs_to_vcg (magic/hdr/bounds).
+- 4 app-header contradictions from Inl via `parse_header_app`.
+- 8 of 12 in the weak-form (all trivial via supply).
+
+**Remaining work:**
+- 4 gets_the continuations in the weak form, each containing the outer
+  whileLoop + post-checks.  These 4 are structurally identical (differ
+  only in entry state).
+- The outer whileLoop proof itself.  Needs `decode_loop_inv` with a
+  progress conjunct; current `decode_loop_inv` has everything except
+  the "this state equals `decode_loop k init` for some k" claim.
+- The strong-form derivation via `runs_to_weaken`.
+- The Inr case.
+- 1 inner sorry in `build_code_table'_preserves_typing`.
+
+**5 sorries total** in `VcdiffDec_Refine.thy`.
+Build green, ~35s incremental.
+
+---
+
+
+
 ## Status (2026-05-10, evening) — rescue branch, Step 3+4 partial
 
 **Progress**: `vcdiff_decode'_spec` top-level stated with real
