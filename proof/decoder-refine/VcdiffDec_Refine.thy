@@ -6735,9 +6735,16 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
     subgoal using patchi_ok[of 4] by simp
     subgoal using patch_ok by simp
     subgoal using len_ge5_word by simp
-    \<comment> \<open>Remaining 4 subgoals: gets_the continuations.  Deferred —
-        these contain the outer whileLoop and require the strengthened
-        decode_loop_inv with progress conjunct.\<close>
+    \<comment> \<open>Remaining 4 subgoals: gets_the continuations.  Provide the
+        witness via read_byte'_spec (unfolded), then each continuation
+        is the full decoder body with win_ind bound.  Apply
+        runs_to_vcg again to advance.\<close>
+    \<comment> \<open>The 4 remaining gets_the continuations contain the full
+        outer whileLoop + post-checks.  Providing the witness via
+        subst read_byte'_spec produces 8 subgoals: 4 ptr_valid
+        preconditions and 4 continuations.  Both ptr_valid (via
+        heap_typing chain + patch_ok) and the continuations
+        (via decode_loop_inv + progress) are the main remaining work.\<close>
     sorry
   have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
   proof -
