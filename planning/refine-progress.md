@@ -158,21 +158,48 @@ Replaced `vcdiff_decode'_prefix_correct`'s body with `sorry`.
 `vcdiff_decode'_spec` stated as sorry at the end of
 `VcdiffDec_Refine.thy` with the real `decode_spec` postcondition.
 
-### Step 2 — smoke-test the supply pattern
+### Step 2 — smoke-test the supply pattern ✅ (completed, not committed)
 
-Before investing in `decode_window_loop_correct`, write a minimal
-scratch lemma that wraps the inner body of the outer whileLoop and
-proves one iteration of invariant preservation using `runs_to_vcg`
-with the Group-A leaf specs + Group-B preservation helpers supplied.
-Goal: confirm `runs_to_vcg` actually decomposes cleanly through the
-bind tree when the invariant-preservation lemmas are supplied, rather
-than getting stuck the way the old proof did.
+Re-proved the existing `vcdiff_decode'_win_ind_len5_nonok_built` with
+`supply near/same_init_preserves_patch_heap [runs_to_vcg]; apply
+runs_to_vcg`. Findings:
 
-If this test is **fast and closes**, the monolith approach works and
-we proceed with confidence. If it gets stuck, diagnose which supplied
-rule is failing to unify and fix *that specific issue* before scaling
-up. Under no circumstances fall back to manual `apply (rule
-runs_to_weaken[OF …])` peel chains.
+* `runs_to_vcg` ran in 30s (did not hang), and the init-loop steps
+  were consumed automatically by the supplied triples. The supply
+  pattern genuinely works and does not blow up the way the old
+  `runs_to_weaken`-peel pattern did.
+* Did **not close** the full lemma because the smoke test inherited
+  its too-weak postcondition `r ≠ Result 0`; VCG propagated it as
+  `∀v. r = Result v ⟶ v ≠ 0 ∧ …` which is unprovable without stronger
+  constraint. **Lesson: VCG needs a semantic postcondition to guide
+  decomposition.** Our real target theorem has one (`decode_spec =
+  Inl tgt ⇒ r = Result 0`) so this is not a blocker — it's evidence
+  the weak intermediate postconditions of the old proof were doubly
+  wrong.
+* **Key structural finding**: `decode_loop_inv_after_{add,run,copy}`
+  are **not** Hoare triples. They're meta-level state-to-state
+  implications ("inv at t + add_loop produced these changes ⇒ inv at
+  t′"). They cannot be supplied as `[runs_to_vcg]` rules.
+
+**Revised expectation for Step 3.** The outer-loop body subgoal is
+**not** a single `runs_to_vcg` blast. It's:
+
+```
+subgoal                              ← body preserves I
+  apply (rule runs_to_bind) ...      ← or: runs_to_vcg with
+                                          add_loop_correct supplied
+  …                                   ← monadic step discharged
+  apply (rule decode_loop_inv_after_add)
+   apply assumption                   ← inv at t
+  …                                   ← side conditions from
+                                          exec_half_add_conditions +
+                                          inv_* lemmas
+  done
+```
+
+The monadic step (add/run/copy_loop) is VCG-supplied; the invariant
+preservation is a *manual rule application* in the resulting residual
+subgoal. This matches l4v's `ctac` + subsequent `apply rule` pattern.
 
 ### Step 3 — prove `decode_window_loop_correct`
 
