@@ -1,6 +1,91 @@
 # Refinement Layer Progress
 
-## Session 2026-05-11 evening — outer whileLoop attack assessed
+## Session 2026-05-11 final — outer whileLoop API designed
+
+Designed the full invariant + lemma chain for the outer whileLoop
+proof, with stubs (sorry) for the heavy-lifting pieces.  Build green.
+
+### New definitions
+
+* `decode_loop_inv_core` — parameterised form of `decode_loop_inv`
+  taking `dst :: dec_state` and `c :: cache` explicitly (no existential).
+* `decode_loop_inv_plus` — core + "future fuel" progress conjunct:
+  ```
+  ∃dst c dst_final.
+    decode_loop_inv_core … dst c t ∧
+    decode_loop (length (ds_inst_rem dst)) src_seg src_seg_len tgt_len dst
+      = Inl dst_final ∧
+    length (ds_tgt dst_final) = tgt_len ∧
+    ds_tgt dst_final = tgt
+  ```
+  This holds at entry (fuel = whole inst list) and is preserved by
+  each iteration (fuel decreases strictly).
+
+### New lemmas (proved)
+
+* `decode_loop_inv_eq_core` — equivalence.
+* `decode_loop_inv_plus_entry` — given core + decode_loop termination
+  witness, the plus-form holds.  Proved by blast.
+* `decode_loop_inv_plus_coreD` — extract the core and termination
+  facts from the plus form.
+* `apply_window_from_decode_spec` — Inl decode_spec ⇒ Inl apply_window.
+* `decode_loop_from_apply_window` — Inl apply_window ⇒ decode_loop
+  terminates with correct output.
+
+### Sorry'd lemmas (proof obligations remaining)
+
+* `decode_loop_inv_plus_exit` — at inst_cursor = inst_end, conclude
+  heap_bytes t out (unat tgt_pos) = tgt, tgt_pos = tgt_len, and the
+  cursor equalities data_cursor = data_end, addr_cursor = addr_end.
+  Proof: from inv_plus's dst with ds_inst_rem dst = [] (since
+  inst_cursor = inst_end ⇒ drop ... take ... = []), decode_loop 0 ...
+  dst = Inl dst, which combined with ds_tgt dst_final = tgt (progress
+  conjunct) gives dst_final = dst, so ds_tgt dst = tgt.
+
+* `decode_loop_inv_plus_advance` — one outer-loop body iteration
+  preserves the invariant.  Proof: use
+  `decode_loop_inv_after_{add,run,copy}` + `_advance_inst{,_n}` to
+  step the core invariant; the progress conjunct's fuel decreases by
+  1 (or more if varint-size-read consumed extra bytes).
+
+* `outer_whileLoop_correct_abstract` — the abstract outer-loop
+  correctness theorem, parameterised over the body B.  Given body
+  preservation per iteration, conclude loop terminates with
+  cursors_at_end and heap_bytes t out = tgt.  Proof: standard
+  runs_to_whileLoop_exn' application with
+  `decode_loop_inv_plus`-derived invariant.
+
+### Wiring into vcdiff_decode'_spec
+
+At each of the 8 whileLoop subgoals:
+1. Derive `decode_loop_inv_plus` at entry using
+   `decode_loop_inv_plus_entry` with the parsed-window data
+   (available as `decode_loop_terminates` after `apply_window_from
+   _decode_spec` + `decode_loop_from_apply_window`).
+2. Apply `rule runs_to_weaken[OF outer_whileLoop_correct_abstract]`.
+3. The resulting subgoals: inv_entry (from step 1) and body_preserves.
+4. Prove body_preserves as a Hoare triple about the specific captured
+   body, using runs_to_vcg + decode_loop_inv_plus_advance + the
+   existing add/run/copy_loop_correct lemmas.
+5. Use the conclusion to discharge the post-loop unless-checks and
+   the final heap_bytes-match obligation.
+
+### Remaining sorries
+
+* `decode_loop_inv_plus_exit` (1)
+* `decode_loop_inv_plus_advance` (1)
+* `outer_whileLoop_correct_abstract` (1)
+* Applications at the 8 whileLoop subgoals (4 sorries, one per
+  top-level branch)
+* Strong form `?Post` derivation (1-2 sorries)
+* Inr case (1 sorry)
+* `build_code_table'_preserves_typing` (1 sorry)
+
+**Total: ~11 sorries.**  The API is designed; closing each
+individual sorry is the remaining mechanical (but substantial) work.
+Each is a well-scoped proof obligation with clear hypotheses.
+
+### Session 2026-05-11 evening — outer whileLoop attack assessed
 
 Attempted the outer whileLoop proof.  Key findings:
 
