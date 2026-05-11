@@ -7219,6 +7219,44 @@ qed
 
 
 (*
+  ----------------------------------------------------------------------
+  Outer-loop residual obligations in vcdiff_decode'_spec.
+
+  Each of the 4 top-level branches (code_tbl ∈ {0,1} × has-app-header
+  ∈ {0,1}) reaches the same outer whileLoop after its setup prefix.
+  Applying `runs_to_weaken[OF outer_whileLoop_correct_abstract]` at
+  those 4 sites unifies cleanly and leaves 4 per-branch subgoals:
+
+    (a) inv_entry     — decode_loop_inv_plus at the entry state
+                        (data_cursor = data_pos, inst_cursor = inst_pos,
+                        addr_cursor = addr_pos, tp = 0, np = 0).
+                        Follows from decode_loop_inv_init +
+                        decode_loop_inv_plus_entry, using the pure-spec
+                        decode_loop_terminates fact.
+    (b) body_preserves — one outer-iteration VCG: reads the opcode,
+                        dispatches through the nested `which ∈ {0,1}`
+                        whileLoop (add/run/copy bodies with inner byte-
+                        copy whileLoops), and restores the invariant
+                        with strict ic advancement.  Proof uses
+                        decode_loop_inv_plus_advance after identifying
+                        the abstract decode_one step.
+    (c) ie_le         — unat inst_end ≤ patch_n.  Follows from
+                        the window prefix's cursor bounds.
+    (d) exit_weakening — after the whileLoop post gives
+                        ic = inst_end ∧ heap_bytes t' out (unat tp) = tgt
+                        ∧ unat tp = tgt_len, the trailing cursor-
+                        consistency asserts and out_len write achieve
+                        the overall postcondition; identical across all
+                        4 branches.
+
+  The four branches share the same body_preserves shape — they differ
+  only in which captured values bind to `data_end, inst_end, addr_end,
+  src_seg_off, src_seg_len, tgt_len, src_seg, tgt`.  Instantiating each
+  against the concrete witness names (e.g. `pos_C vaaaab + ...`) is the
+  remaining work.
+  ---------------------------------------------------------------------- *)
+
+(*
   Target theorem for the rescue plan (planning/refine-progress.md).
 
   States full functional correctness of the C decoder against the pure
