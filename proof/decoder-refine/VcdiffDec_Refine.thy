@@ -5820,6 +5820,75 @@ proof -
 qed
 
 (*
+  Core-form variant: same hypotheses, but the conclusion gives the
+  explicit dst0 witness needed by decode_loop_inv_plus_entry.
+*)
+lemma decode_loop_inv_init_core:
+  assumes heap_eq: "\<forall>i < patch_n. heap_w8 t (patch +\<^sub>p int i) = heap_w8 s0 (patch +\<^sub>p int i)"
+      and src_eq: "\<forall>i < src_n. heap_w8 t (src +\<^sub>p int i) = heap_w8 s0 (src +\<^sub>p int i)"
+      and patch_valid: "buf_valid t patch patch_n"
+      and src_valid: "buf_valid t src src_n"
+      and out_valid: "buf_valid t out tgt_len"
+      and cache_init_abs: "cache_abs t cache_init 0"
+      and cursor_bounds: "data_cursor \<le> data_end" "inst_cursor \<le> inst_end"
+                         "addr_cursor \<le> addr_end"
+      and end_bounds: "unat data_end \<le> patch_n" "unat inst_end \<le> patch_n"
+                      "unat addr_end \<le> patch_n"
+      and code_tbl_ok: "code_tbl_matches t"
+      and typing_eq: "heap_typing t = heap_typing s0"
+      and out_disj_patch: "\<forall>i < tgt_len. \<forall>j < patch_n. out +\<^sub>p int i \<noteq> patch +\<^sub>p int j"
+      and out_disj_src: "\<forall>i < tgt_len. \<forall>j < src_n. out +\<^sub>p int i \<noteq> src +\<^sub>p int j"
+      and out_inj: "\<forall>i < tgt_len. \<forall>j < tgt_len. i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j"
+      and tgt_len_fits: "tgt_len < 2 ^ 32"
+      and src_seg_bounds: "unat src_seg_off + unat src_seg_len \<le> src_n"
+                          "unat src_seg_off + unat src_seg_len < 2 ^ 32"
+      and src_seg_eq: "src_seg = heap_bytes s0 (src +\<^sub>p uint src_seg_off) (unat src_seg_len)"
+  shows "decode_loop_inv_core s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+           data_end inst_end addr_end src_seg
+           data_cursor inst_cursor addr_cursor 0 0
+           \<lparr> ds_data_rem = drop (unat data_cursor) (take (unat data_end)
+                                   (heap_bytes s0 patch patch_n)),
+             ds_inst_rem = drop (unat inst_cursor) (take (unat inst_end)
+                                   (heap_bytes s0 patch patch_n)),
+             ds_addr_rem = drop (unat addr_cursor) (take (unat addr_end)
+                                   (heap_bytes s0 patch patch_n)),
+             ds_cache = cache_init,
+             ds_tgt = [] \<rparr>
+           cache_init t"
+proof -
+  have wf: "cache_wf cache_init"
+  proof (unfold cache_wf_def, intro conjI allI impI)
+    show "length (near cache_init) = s_near"
+      by (simp add: cache_init_def s_near_def)
+    show "length (same cache_init) = same_buckets"
+      by (simp add: cache_init_def same_buckets_def s_same_def)
+    show "AddressCache.near_ptr cache_init < s_near"
+      by (simp add: cache_init_def s_near_def)
+    fix i :: nat assume "i < s_near"
+    hence "i < length (near cache_init)" by (simp add: cache_init_def s_near_def)
+    hence "near cache_init ! i \<in> set (near cache_init)" by (rule nth_mem)
+    moreover have "set (near cache_init) = {0}" by (simp add: cache_init_def s_near_def)
+    ultimately show "near cache_init ! i < 2 ^ 32" by simp
+  next
+    fix i :: nat assume "i < same_buckets"
+    hence "i < length (same cache_init)"
+      by (simp add: cache_init_def same_buckets_def s_same_def)
+    hence "same cache_init ! i \<in> set (same cache_init)" by (rule nth_mem)
+    moreover have "set (same cache_init) = {0}"
+      by (simp add: cache_init_def same_buckets_def s_same_def set_replicate_conv_if)
+    ultimately show "same cache_init ! i < 2 ^ 32" by simp
+  qed
+  have tgt0: "heap_bytes t out (unat (0 :: 32 word)) = []"
+    by (simp add: heap_bytes_def)
+  show ?thesis
+    unfolding decode_loop_inv_core_def
+    using heap_eq src_eq patch_valid src_valid out_valid cache_init_abs
+          cursor_bounds end_bounds code_tbl_ok typing_eq out_disj_patch out_disj_src
+          out_inj tgt_len_fits src_seg_bounds src_seg_eq wf tgt0
+    by simp
+qed
+
+(*
   Key lemma: reading a byte at inst_cursor in the C corresponds to pop_byte
   on ds_inst_rem in the invariant.
 *)
