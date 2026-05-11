@@ -5366,6 +5366,10 @@ lemma decode_loop_inv_plus_exit:
   shows "heap_bytes t out (unat tgt_pos) = tgt \<and>
          unat tgt_pos = tgt_len \<and>
          unat tgt_pos = length tgt"
+  \<comment> \<open>Note: exit does NOT in general imply data_cursor = data_end or
+      addr_cursor = addr_end.  Those are runtime checks that the
+      well-formed patch exhausts each section; derivable for the Inl
+      spec class only.  Currently proven separately.\<close>
 proof -
   obtain dst c dst_final k where
     core: "decode_loop_inv_core s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len data_end inst_end addr_end src_seg data_cursor inst_end addr_cursor tgt_pos np dst c t"
@@ -5506,46 +5510,54 @@ lemma outer_whileLoop_correct_abstract:
         data_end inst_end addr_end src_seg tgt
         dc ic ac tp np t \<Longrightarrow>
       B (ac, dc, ic, np, tp) \<bullet> t
-        \<lbrace> \<lambda>r t'. \<forall>ac' dc' ic' np' tp'. r = Result (ac', dc', ic', np', tp') \<longrightarrow>
+        \<lbrace> \<lambda>r t'. (\<forall>ac' dc' ic' np' tp'. r = Result (ac', dc', ic', np', tp') \<longrightarrow>
               decode_loop_inv_plus s0 patch patch_n src src_n out
                 src_seg_off src_seg_len tgt_len
                 data_end inst_end addr_end src_seg tgt
                 dc' ic' ac' tp' np' t' \<and>
-              ic < ic' \<rbrace>"
+              ic < ic') \<and>
+              (\<forall>e. r = Exn e \<longrightarrow> e \<noteq> 0) \<rbrace>"
   shows "(whileLoop (\<lambda>(ac, dc, ic, np, tp) s. ic < inst_end) B
                     (addr_pos, data_pos, inst_pos, 0, 0)) \<bullet> t0
-         \<lbrace> \<lambda>r t. \<forall>ac dc ic np tp. r = Result (ac, dc, ic, np, tp) \<longrightarrow>
+         \<lbrace> \<lambda>r t. (\<forall>ac dc ic np tp. r = Result (ac, dc, ic, np, tp) \<longrightarrow>
                ic = inst_end \<and>
                heap_bytes t out (unat tp) = tgt \<and>
-               unat tp = tgt_len \<rbrace>"
+               unat tp = tgt_len) \<and>
+               (\<forall>e. r = Exn e \<longrightarrow> e \<noteq> 0) \<rbrace>"
 proof -
   have ie_le: "unat inst_end \<le> patch_n"
     using inv_entry by (rule decode_loop_inv_plus_ie_le)
-  let ?I = "\<lambda>r t. \<forall>ac dc ic np tp. r = Result (ac, dc, ic, np, tp) \<longrightarrow>
-               decode_loop_inv_plus s0 patch patch_n src src_n out
-                 src_seg_off src_seg_len tgt_len
-                 data_end inst_end addr_end src_seg tgt
-                 dc ic ac tp np t"
+  let ?I = "\<lambda>r t.
+        (\<forall>ac dc ic np tp. r = Result (ac, dc, ic, np, tp) \<longrightarrow>
+            decode_loop_inv_plus s0 patch patch_n src src_n out
+              src_seg_off src_seg_len tgt_len
+              data_end inst_end addr_end src_seg tgt
+              dc ic ac tp np t) \<and>
+        (\<forall>e. r = Exn e \<longrightarrow> e \<noteq> 0)"
   show ?thesis
     apply (rule runs_to_whileLoop_exn'
       [where I = ?I
          and R = "measure (\<lambda>((ac, dc, ic, np, tp), _). unat inst_end - unat ic)"])
-    \<comment> \<open>Body preserves I.\<close>
+    \<comment> \<open>Body preserves I.  I = (Result conj) ∧ (Exn conj).\<close>
     subgoal for a t
       apply clarsimp
       apply (rule runs_to_weaken[OF body_preserves])
         apply assumption
        apply blast
+      apply (elim conjE)
       apply (intro conjI allI impI)
+        \<comment> \<open>I r t' — Result conj.\<close>
+        apply blast
+       \<comment> \<open>I r t' — Exn conj.\<close>
        apply blast
-      \<comment> \<open>Measure decrease from the post-state invariant's ic' ≤ inst_end.\<close>
+      \<comment> \<open>Measure decrease.\<close>
       apply clarsimp
       apply (drule decode_loop_inv_plus_ic_le)
       apply (simp add: word_less_nat_alt word_le_nat_alt)
       done
-    \<comment> \<open>Exit ⇒ postcondition.\<close>
+    \<comment> \<open>Exit (Result, guard false) ⇒ postcondition.\<close>
     subgoal for a t
-      apply clarsimp
+      apply (clarsimp simp: split_def)
       apply (frule decode_loop_inv_plus_ic_le)
       apply (subgoal_tac "ic = inst_end")
        prefer 2 apply (simp add: word_le_not_less)
@@ -5553,7 +5565,7 @@ proof -
       apply (drule decode_loop_inv_plus_exit[OF _ ie_le])
       apply auto
       done
-    \<comment> \<open>Exn vacuous.\<close>
+    \<comment> \<open>Exit (Exn e): carries e ≠ 0 from invariant.\<close>
     subgoal for a t by simp
     \<comment> \<open>wf.\<close>
     subgoal by simp
@@ -7499,22 +7511,16 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
             and leaves body_preserves as a subgoal — proved via VCG on
             one iteration with decode_loop_inv_plus_advance.\<close>
         apply (all \<open>(rule runs_to_weaken[OF outer_whileLoop_correct_abstract
-                        [where patch_n = "unat patch_len"]])?\<close>)
-        \<comment> \<open>Instantiating patch_n = unat patch_len leaves 8 residuals =
-            4 obligations × 2 whileLoop instances.  Per-instance:
-              1. inv_entry       (decode_loop_inv_plus at entry)
-              2. body_preserves  (one outer-iteration VCG; huge)
-              3. ie_le           (unat inst_end \<le> unat patch_len)
-              4. exit_weakening  (post-loop cursor asserts + out_len write)
-            Attempted ie_le directly: `unat_arith` with the full
-            ~70-hypothesis context (including 8 varint case_splits) hangs
-            >500s.  Thinning case_splits via `thin_tac "case varint_decode
-            _ of _ \<Rightarrow> _"` does not help — the word-overflow linear
-            system stays large.  Path forward: prove an abstract word
-            lemma ie_le_word_bound over a small set of facts
-            (p_a + v_a \<le> patch_len + the chain equation), then
-            discharge each of goals 3 and 7 by pattern-matching premises
-            and invoking the helper.  Left as sorry.\<close>
+                        [where patch_n = "unat patch_len"
+                           and tgt = tgt
+                           and out = out
+                           and tgt_len = "length tgt"]])?\<close>)
+        \<comment> \<open>After instantiating patch_n, tgt, out, tgt_len, the exit
+            postcondition's schematics unify with the concrete ?WeakPost.
+            6 residuals remain = 3 obligations × 2 whileLoop instances.
+            Try the exit_weakening goals first (indices 3 and 6): the
+            C's trailing unless-chain throws, making r = Exn, and the
+            Exn 0 branch is closed by VCG from the whileLoop's post.\<close>
         sorry
       \<comment> \<open>Trunc branch: pos+val = patch_len, err = -1.  unless throws,
           making r = Exn _, so ?WeakPost's antecedent r = Result 0 fails.\<close>
