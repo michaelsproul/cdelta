@@ -1079,6 +1079,89 @@ lemma cache_abs_wf:
   by (auto simp add: cache_abs_def word_less_nat_alt s_near_def)
 
 (*
+  cache_abs is functional in c: given the same state and near_ptr word,
+  any two cache_wf caches abstracting to them must be equal.  Used to
+  prove dst_prev = dst in the loop-invariant advance lemma.
+*)
+lemma cache_abs_unique:
+  assumes a1: "cache_abs t c1 np"
+      and w1: "cache_wf c1"
+      and a2: "cache_abs t c2 np"
+      and w2: "cache_wf c2"
+  shows "c1 = c2"
+proof -
+  have np_eq: "near_ptr c1 = near_ptr c2"
+    using a1 a2 unfolding cache_abs_def by simp
+  have len_near1: "length (near c1) = s_near"
+    using a1 unfolding cache_abs_def by simp
+  have len_near2: "length (near c2) = s_near"
+    using a2 unfolding cache_abs_def by simp
+  have len_same1: "length (same c1) = same_buckets"
+    using a1 unfolding cache_abs_def by simp
+  have len_same2: "length (same c2) = same_buckets"
+    using a2 unfolding cache_abs_def by simp
+  have near_arr_1: "\<forall>i. i < s_near \<longrightarrow> near_arr_'' t .[i] = of_nat (near c1 ! i)"
+    using a1 unfolding cache_abs_def by simp
+  have near_arr_2: "\<forall>i. i < s_near \<longrightarrow> near_arr_'' t .[i] = of_nat (near c2 ! i)"
+    using a2 unfolding cache_abs_def by simp
+  have same_arr_1: "\<forall>i. i < same_buckets \<longrightarrow> same_arr_'' t .[i] = of_nat (same c1 ! i)"
+    using a1 unfolding cache_abs_def by simp
+  have same_arr_2: "\<forall>i. i < same_buckets \<longrightarrow> same_arr_'' t .[i] = of_nat (same c2 ! i)"
+    using a2 unfolding cache_abs_def by simp
+  have bnd_near1: "\<forall>i. i < s_near \<longrightarrow> near c1 ! i < 2^32"
+    using w1 unfolding cache_wf_def by simp
+  have bnd_near2: "\<forall>i. i < s_near \<longrightarrow> near c2 ! i < 2^32"
+    using w2 unfolding cache_wf_def by simp
+  have bnd_same1: "\<forall>i. i < same_buckets \<longrightarrow> same c1 ! i < 2^32"
+    using w1 unfolding cache_wf_def by simp
+  have bnd_same2: "\<forall>i. i < same_buckets \<longrightarrow> same c2 ! i < 2^32"
+    using w2 unfolding cache_wf_def by simp
+  have near_eq: "near c1 = near c2"
+  proof (rule nth_equalityI)
+    show "length (near c1) = length (near c2)"
+      using len_near1 len_near2 by simp
+  next
+    fix i assume i_lt: "i < length (near c1)"
+    hence i_sn: "i < s_near" using len_near1 by simp
+    have w_eq: "(of_nat (near c1 ! i) :: 32 word) = of_nat (near c2 ! i)"
+      using near_arr_1 near_arr_2 i_sn by metis
+    have b1: "near c1 ! i < 2^32" using bnd_near1 i_sn by simp
+    have b2: "near c2 ! i < 2^32" using bnd_near2 i_sn by simp
+    have unat_eq: "unat ((of_nat (near c1 ! i)) :: 32 word) =
+                    unat ((of_nat (near c2 ! i)) :: 32 word)"
+      using w_eq by simp
+    have u1: "unat ((of_nat (near c1 ! i)) :: 32 word) = near c1 ! i"
+      using b1 by (simp add: unat_of_nat_eq)
+    have u2: "unat ((of_nat (near c2 ! i)) :: 32 word) = near c2 ! i"
+      using b2 by (simp add: unat_of_nat_eq)
+    from unat_eq u1 u2 show "near c1 ! i = near c2 ! i" by argo
+  qed
+  have same_eq: "same c1 = same c2"
+  proof (rule nth_equalityI)
+    show "length (same c1) = length (same c2)"
+      using len_same1 len_same2 by simp
+  next
+    fix i assume i_lt: "i < length (same c1)"
+    hence i_sb: "i < same_buckets" using len_same1 by simp
+    have w_eq: "(of_nat (same c1 ! i) :: 32 word) = of_nat (same c2 ! i)"
+      using same_arr_1 same_arr_2 i_sb by metis
+    have b1: "same c1 ! i < 2^32" using bnd_same1 i_sb by simp
+    have b2: "same c2 ! i < 2^32" using bnd_same2 i_sb by simp
+    have unat_eq: "unat ((of_nat (same c1 ! i)) :: 32 word) =
+                    unat ((of_nat (same c2 ! i)) :: 32 word)"
+      using w_eq by simp
+    have u1: "unat ((of_nat (same c1 ! i)) :: 32 word) = same c1 ! i"
+      using b1 by (simp add: unat_of_nat_eq)
+    have u2: "unat ((of_nat (same c2 ! i)) :: 32 word) = same c2 ! i"
+      using b2 by (simp add: unat_of_nat_eq)
+    from unat_eq u1 u2 show "same c1 ! i = same c2 ! i" by argo
+  qed
+  show ?thesis
+    using np_eq near_eq same_eq
+    by (cases c1; cases c2; simp)
+qed
+
+(*
   Mirror for the pure cache_update. Writing `addr` at slot `np` of
   near_arr and at `addr mod same_buckets` of same_arr preserves cache_abs.
 
@@ -5235,13 +5318,13 @@ definition decode_loop_inv_plus ::
   "decode_loop_inv_plus s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
      data_end inst_end addr_end src_seg tgt
      data_cursor inst_cursor addr_cursor tgt_pos np t =
-   (\<exists>dst c dst_final.
+   (\<exists>dst c dst_final k.
       decode_loop_inv_core s0 patch patch_n src src_n out
                             src_seg_off src_seg_len tgt_len
                             data_end inst_end addr_end src_seg
                             data_cursor inst_cursor addr_cursor tgt_pos np
                             dst c t \<and>
-      decode_loop (length (ds_inst_rem dst)) src_seg (unat src_seg_len) tgt_len dst
+      decode_loop k src_seg (unat src_seg_len) tgt_len dst
         = Inl dst_final \<and>
       length (ds_tgt dst_final) = tgt_len \<and>
       ds_tgt dst_final = tgt)"
@@ -5284,9 +5367,9 @@ lemma decode_loop_inv_plus_exit:
          unat tgt_pos = tgt_len \<and>
          unat tgt_pos = length tgt"
 proof -
-  obtain dst c dst_final where
+  obtain dst c dst_final k where
     core: "decode_loop_inv_core s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len data_end inst_end addr_end src_seg data_cursor inst_end addr_cursor tgt_pos np dst c t"
-    and decloop: "decode_loop (length (ds_inst_rem dst)) src_seg (unat src_seg_len) tgt_len dst = Inl dst_final"
+    and decloop: "decode_loop k src_seg (unat src_seg_len) tgt_len dst = Inl dst_final"
     and len: "length (ds_tgt dst_final) = tgt_len"
     and tgt_eq: "ds_tgt dst_final = tgt"
     using inv unfolding decode_loop_inv_plus_def by blast
@@ -5297,9 +5380,8 @@ proof -
       unfolding decode_loop_inv_core_def by simp
     thus ?thesis by simp
   qed
-  have "decode_loop (length (ds_inst_rem dst)) src_seg (unat src_seg_len) tgt_len dst
-         = Inl dst"
-    using inst_rem_empty by simp
+  have "decode_loop k src_seg (unat src_seg_len) tgt_len dst = Inl dst"
+    using inst_rem_empty by (cases k) auto
   with decloop have "dst = dst_final" by simp
   with tgt_eq have ds_tgt_eq: "ds_tgt dst = tgt" by simp
   from core have "ds_tgt dst = heap_bytes t out (unat tgt_pos)"
@@ -5321,12 +5403,12 @@ lemma decode_loop_inv_plus_coreD:
              src_seg_off src_seg_len tgt_len
              data_end inst_end addr_end src_seg tgt
              data_cursor inst_cursor addr_cursor tgt_pos np t"
-  shows "\<exists>dst c dst_final.
+  shows "\<exists>dst c dst_final k.
            decode_loop_inv_core s0 patch patch_n src src_n out
              src_seg_off src_seg_len tgt_len
              data_end inst_end addr_end src_seg
              data_cursor inst_cursor addr_cursor tgt_pos np dst c t \<and>
-           decode_loop (length (ds_inst_rem dst)) src_seg (unat src_seg_len) tgt_len dst
+           decode_loop k src_seg (unat src_seg_len) tgt_len dst
              = Inl dst_final \<and>
            length (ds_tgt dst_final) = tgt_len \<and>
            ds_tgt dst_final = tgt"
@@ -5465,6 +5547,51 @@ proof -
     done
 qed
 
+(*
+  Fuel monotonicity: if decode_loop k dst = Inl f, then for any
+  k' ≥ k, decode_loop k' dst = Inl f.  Once the decoder reaches
+  ds_inst_rem = [], extra fuel is ignored.
+*)
+lemma decode_loop_fuel_mono:
+  "decode_loop k src_seg src_seg_len tgt_len dst = Inl f \<Longrightarrow>
+   k \<le> k' \<Longrightarrow>
+   decode_loop k' src_seg src_seg_len tgt_len dst = Inl f"
+proof (induction k arbitrary: k' dst)
+  case 0
+  hence "ds_inst_rem dst = []" by (cases "ds_inst_rem dst = []") auto
+  with 0 show ?case by (cases k') (auto)
+next
+  case (Suc k)
+  show ?case
+  proof (cases "ds_inst_rem dst = []")
+    case True
+    with Suc.prems(1) have "f = dst" by simp
+    with True Suc.prems(2) show ?thesis by (cases k') auto
+  next
+    case False
+    from Suc.prems(1) False obtain st' where
+      do: "decode_one src_seg src_seg_len tgt_len dst = Inl st'" and
+      rec: "decode_loop k src_seg src_seg_len tgt_len st' = Inl f"
+      by (cases "decode_one src_seg src_seg_len tgt_len dst") auto
+    from Suc.prems(2) obtain k'' where k'_eq: "k' = Suc k''" "k \<le> k''"
+      by (cases k') auto
+    from Suc.IH[OF rec \<open>k \<le> k''\<close>] have
+      "decode_loop k'' src_seg src_seg_len tgt_len st' = Inl f" .
+    with k'_eq do False show ?thesis by simp
+  qed
+qed
+
+(*
+  Step lemma: decode_loop from dst reduces to decode_loop from dst'
+  when decode_one dst = Inl dst'.
+*)
+lemma decode_loop_step:
+  assumes "ds_inst_rem dst \<noteq> []"
+      and "decode_one src_seg src_seg_len tgt_len dst = Inl dst'"
+  shows "decode_loop (Suc k) src_seg src_seg_len tgt_len dst =
+         decode_loop k src_seg src_seg_len tgt_len dst'"
+  using assms by simp
+
 lemma decode_loop_inv_plus_advance:
   assumes inv: "decode_loop_inv_plus s0 patch patch_n src src_n out
                   src_seg_off src_seg_len tgt_len
@@ -5490,7 +5617,74 @@ lemma decode_loop_inv_plus_advance:
            src_seg_off src_seg_len tgt_len
            data_end inst_end addr_end src_seg tgt
            data_cursor' inst_cursor' addr_cursor' tgt_pos' np' t'"
-  sorry
+proof -
+  obtain dst_prev c_prev dst_final k_prev where
+    prev_core: "decode_loop_inv_core s0 patch patch_n src src_n out
+                  src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg
+                  data_cursor inst_cursor addr_cursor tgt_pos np dst_prev c_prev t"
+    and decloop: "decode_loop k_prev src_seg (unat src_seg_len) tgt_len dst_prev = Inl dst_final"
+    and len: "length (ds_tgt dst_final) = tgt_len"
+    and tgt_eq: "ds_tgt dst_final = tgt"
+    using inv unfolding decode_loop_inv_plus_def by blast
+  \<comment> \<open>Show dst_prev = dst (records fully determined by fields).\<close>
+  have dst_eq: "dst_prev = dst"
+  proof -
+    from prev_core core_before have fields:
+      "ds_inst_rem dst_prev = ds_inst_rem dst"
+      "ds_data_rem dst_prev = ds_data_rem dst"
+      "ds_addr_rem dst_prev = ds_addr_rem dst"
+      "ds_tgt dst_prev = ds_tgt dst"
+      unfolding decode_loop_inv_core_def by auto
+    have cache_eq: "ds_cache dst_prev = ds_cache dst"
+    proof -
+      have prev_cache_eq: "ds_cache dst_prev = c_prev"
+        using prev_core unfolding decode_loop_inv_core_def by simp
+      have prev_abs: "cache_abs t c_prev np"
+        using prev_core unfolding decode_loop_inv_core_def by simp
+      have prev_wf: "cache_wf c_prev"
+        using prev_core unfolding decode_loop_inv_core_def by simp
+      have cur_abs: "cache_abs t (ds_cache dst) np"
+        using core_before unfolding decode_loop_inv_core_def by simp
+      have cur_wf: "cache_wf (ds_cache dst)"
+        using core_before unfolding decode_loop_inv_core_def by simp
+      from cache_abs_unique[OF prev_abs prev_wf cur_abs cur_wf]
+      show ?thesis by (simp add: prev_cache_eq)
+    qed
+    show ?thesis
+      apply (rule dec_state.equality)
+      using fields cache_eq by auto
+  qed
+  \<comment> \<open>ds_inst_rem dst is non-empty (progress check).\<close>
+  have inst_nonempty: "ds_inst_rem dst \<noteq> []"
+  proof -
+    from core_before have
+      "ds_inst_rem dst = drop (unat inst_cursor) (take (unat inst_end) (heap_bytes s0 patch patch_n))"
+      unfolding decode_loop_inv_core_def by simp
+    moreover from core_before have "unat inst_end \<le> patch_n"
+      unfolding decode_loop_inv_core_def by simp
+    moreover from progressing have "unat inst_cursor < unat inst_end"
+      by (simp add: word_less_nat_alt)
+    ultimately show ?thesis by simp
+  qed
+  \<comment> \<open>k_prev must be ≥ 1 (decode_loop 0 on non-empty inst_rem returns Inr).\<close>
+  have k_prev_pos: "k_prev \<ge> 1"
+  proof (rule ccontr)
+    assume "\<not> k_prev \<ge> 1"
+    hence "k_prev = 0" by simp
+    with decloop inst_nonempty dst_eq show False by simp
+  qed
+  then obtain k' where k_eq: "k_prev = Suc k'" by (cases k_prev) auto
+  \<comment> \<open>Step: decloop = decode_loop k' dst'.\<close>
+  have rec: "decode_loop k' src_seg (unat src_seg_len) tgt_len dst' = Inl dst_final"
+    using decloop[unfolded dst_eq k_eq] inst_nonempty step
+    by (subst (asm) decode_loop_step[OF inst_nonempty step]) simp
+  \<comment> \<open>The new invariant with fuel k'.\<close>
+  show ?thesis
+    unfolding decode_loop_inv_plus_def
+    using core_after rec len tgt_eq
+    by blast
+qed
 
 
 (*
