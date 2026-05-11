@@ -7296,6 +7296,7 @@ lemma vcdiff_decode'_spec:
     and src   :: "8 word ptr" and src_len   :: "32 word"
     and out   :: "8 word ptr" and out_cap   :: "32 word"
     and out_len :: "32 word ptr"
+    and s :: lifted_globals
   assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
       and patch_ok: "buf_valid s patch (unat patch_len)"
       and src_ok:   "buf_valid s src   (unat src_len)"
@@ -7514,17 +7515,14 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
                         [where patch_n = "unat patch_len"
                            and tgt = tgt
                            and out = out
-                           and tgt_len = "length tgt"]])?\<close>)
-        \<comment> \<open>6 residuals remain = 3 obligations × 2 whileLoop instances.
-            Close exit_weakening (indices 3 and 6) via runs_to_vcg.
-            The whileLoop's post now includes `r = Exn e → e ≠ 0`,
-            which contradicts `Exn e = Exn 0`, so that branch is vacuous.\<close>
+                           and tgt_len = "length tgt"
+                           and patch = patch
+                           and src = src
+                           and src_n = "unat src_len"]])?\<close>)
         prefer 3
-        subgoal \<comment> \<open>exit_weakening (1st whileLoop instance)\<close>
-          by (clarsimp simp: runs_to_iff split: if_splits)
+        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
         prefer 5
-        subgoal \<comment> \<open>exit_weakening (2nd whileLoop instance)\<close>
-          by (clarsimp simp: runs_to_iff split: if_splits)
+        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
         sorry
       \<comment> \<open>Trunc branch: pos+val = patch_len, err = -1.  unless throws,
           making r = Exn _, so ?WeakPost's antecedent r = Result 0 fails.\<close>
@@ -7565,7 +7563,10 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
                         [where patch_n = "unat patch_len"
                            and tgt = tgt
                            and out = out
-                           and tgt_len = "length tgt"]])?\<close>)
+                           and tgt_len = "length tgt"
+                           and patch = patch
+                           and src = src
+                           and src_n = "unat src_len"]])?\<close>)
         prefer 3
         subgoal by (clarsimp simp: runs_to_iff split: if_splits)
         prefer 5
@@ -7599,7 +7600,10 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
                         [where patch_n = "unat patch_len"
                            and tgt = tgt
                            and out = out
-                           and tgt_len = "length tgt"]])?\<close>)
+                           and tgt_len = "length tgt"
+                           and patch = patch
+                           and src = src
+                           and src_n = "unat src_len"]])?\<close>)
         prefer 3
         subgoal by (clarsimp simp: runs_to_iff split: if_splits)
         prefer 5
@@ -7633,7 +7637,10 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
                         [where patch_n = "unat patch_len"
                            and tgt = tgt
                            and out = out
-                           and tgt_len = "length tgt"]])?\<close>)
+                           and tgt_len = "length tgt"
+                           and patch = patch
+                           and src = src
+                           and src_n = "unat src_len"]])?\<close>)
         prefer 3
         subgoal by (clarsimp simp: runs_to_iff split: if_splits)
         prefer 5
