@@ -7523,6 +7523,16 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         subgoal by (clarsimp simp: runs_to_iff split: if_splits)
         prefer 5
         subgoal by (clarsimp simp: runs_to_iff split: if_splits)
+        \<comment> \<open>4 remaining: 2×inv_entry (indices 1,3) + 2×body_preserves (indices 2,4).
+            inv_entry requires building decode_loop_inv_plus_entry from
+            decode_loop_inv_init (for the initial dst0) + decode_loop_terminates
+            (for the apply_ok conjunct).  Blocker: the parsed window's
+            pw_data/pw_inst/pw_addr fields need to be linked to the C-side
+            `take (val_C vaab) (drop ... (heap_bytes ...))` slices, which
+            requires a parse_window_with_source bridge lemma (we only have
+            parse_window_no_source).  Body_preserves requires the VCG chain
+            through the which∈{0,1} inner whileLoop, proved via
+            decode_loop_inv_plus_advance after identifying the decode_one step.\<close>
         sorry
       \<comment> \<open>Trunc branch: pos+val = patch_len, err = -1.  unless throws,
           making r = Exn _, so ?WeakPost's antecedent r = Result 0 fails.\<close>
@@ -7571,6 +7581,13 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         subgoal by (clarsimp simp: runs_to_iff split: if_splits)
         prefer 5
         subgoal by (clarsimp simp: runs_to_iff split: if_splits)
+        \<comment> \<open>4 remaining: 2×inv_entry (indices 1,3) + 2×body_preserves (indices 2,4).
+            inv_entry wants decode_loop_inv_plus at 0 0 taa with the
+            captured section offsets/lengths (val_C vaab, vaaab, vaaaab).
+            Proof via decode_loop_inv_plus_entry + decode_loop_inv_init
+            applied with the parsed window's pw_data/pw_inst/pw_addr
+            bound to the varint-decoded byte slices.  Deferred to
+            next iteration.\<close>
         sorry
       subgoal
         by runs_to_vcg
@@ -7608,6 +7625,13 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         subgoal by (clarsimp simp: runs_to_iff split: if_splits)
         prefer 5
         subgoal by (clarsimp simp: runs_to_iff split: if_splits)
+        \<comment> \<open>4 remaining: 2×inv_entry (indices 1,3) + 2×body_preserves (indices 2,4).
+            inv_entry wants decode_loop_inv_plus at 0 0 taa with the
+            captured section offsets/lengths (val_C vaab, vaaab, vaaaab).
+            Proof via decode_loop_inv_plus_entry + decode_loop_inv_init
+            applied with the parsed window's pw_data/pw_inst/pw_addr
+            bound to the varint-decoded byte slices.  Deferred to
+            next iteration.\<close>
         sorry
       subgoal
         by runs_to_vcg
@@ -7645,6 +7669,13 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         subgoal by (clarsimp simp: runs_to_iff split: if_splits)
         prefer 5
         subgoal by (clarsimp simp: runs_to_iff split: if_splits)
+        \<comment> \<open>4 remaining: 2×inv_entry (indices 1,3) + 2×body_preserves (indices 2,4).
+            inv_entry wants decode_loop_inv_plus at 0 0 taa with the
+            captured section offsets/lengths (val_C vaab, vaaab, vaaaab).
+            Proof via decode_loop_inv_plus_entry + decode_loop_inv_init
+            applied with the parsed window's pw_data/pw_inst/pw_addr
+            bound to the varint-decoded byte slices.  Deferred to
+            next iteration.\<close>
         sorry
       subgoal
         by runs_to_vcg
