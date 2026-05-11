@@ -1,6 +1,32 @@
 # Refinement Layer Progress
 
-## Session 2026-05-10 evening 2 — continuation method confirmed
+## Session 2026-05-11 — all gets_the's closed, outer whileLoop is next
+
+Extended the `read_byte'_gets_the_discharge` helper to cover all 4
+top-level `gets_the` branches in the weak-form proof of
+`vcdiff_decode'_spec`:
+
+  1. App-header × code_tbl=0 (state taa, pos = pos_C va + val_C va)
+  2. App-header × code_tbl≠0 (state ta, pos = pos_C va + val_C va)
+  3. No-app × code_tbl=0 (state taa, pos = 5)
+  4. No-app × code_tbl≠0 (state ta, pos = 5)
+
+Each branch:
+* Discharge the gets_the via `rule read_byte'_gets_the_discharge`,
+  producing 4 subgoals (buf_valid, pos_ok, live, trunc).
+* `buf_valid` and `pos_ok` close by `simp add: buf_valid_def
+  patch_ok[simplified buf_valid_def]`.
+* Trunc branch: `by runs_to_vcg` (err ≠ 0 ⇒ Exn ⇒ ?WeakPost antecedent
+  fails).
+* Live branch: `runs_to_vcg` advances through win_ind checks, varint
+  reads, di-byte read; bulk simps close accumulated buf_valid and
+  pos-bound obligations; inner gets_the's dispatched via
+  `rule read_byte'_gets_the_discharge` again.
+
+All 4 branches now reach the outer instruction-dispatch whileLoop,
+with 2 whileLoop subgoals per branch = 8 total.
+
+### Session 2026-05-10 evening 2 — continuation method confirmed
 
 After the survey of l4v/AutoCorres2 patterns, applied the
 `vcdiff_decode'_win_target_bit_nonok_built` template to discharge the
