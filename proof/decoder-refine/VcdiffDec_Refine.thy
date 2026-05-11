@@ -5466,6 +5466,20 @@ lemma decode_loop_inv_plus_ic_le:
   by blast
 
 (*
+  Corollary: decode_loop_inv_plus implies unat inst_end \<le> patch_n.
+  Used to avoid passing ie_le as a separate hypothesis to the abstract
+  whileLoop lemma.
+*)
+lemma decode_loop_inv_plus_ie_le:
+  assumes "decode_loop_inv_plus s0 patch patch_n src src_n out src_seg_off src_seg_len
+             tgt_len data_end inst_end addr_end src_seg tgt
+             data_cursor inst_cursor addr_cursor tgt_pos np t"
+  shows "unat inst_end \<le> patch_n"
+  using assms
+  unfolding decode_loop_inv_plus_def decode_loop_inv_core_def
+  by blast
+
+(*
   Abstract outer-loop correctness: given a body B that preserves
   decode_loop_inv_plus per iteration with strictly decreasing inst_rem,
   the whileLoop terminates with inst_cursor = inst_end and the
@@ -5498,7 +5512,6 @@ lemma outer_whileLoop_correct_abstract:
                 data_end inst_end addr_end src_seg tgt
                 dc' ic' ac' tp' np' t' \<and>
               ic < ic' \<rbrace>"
-      and ie_le: "unat inst_end \<le> patch_n"
   shows "(whileLoop (\<lambda>(ac, dc, ic, np, tp) s. ic < inst_end) B
                     (addr_pos, data_pos, inst_pos, 0, 0)) \<bullet> t0
          \<lbrace> \<lambda>r t. \<forall>ac dc ic np tp. r = Result (ac, dc, ic, np, tp) \<longrightarrow>
@@ -5506,6 +5519,8 @@ lemma outer_whileLoop_correct_abstract:
                heap_bytes t out (unat tp) = tgt \<and>
                unat tp = tgt_len \<rbrace>"
 proof -
+  have ie_le: "unat inst_end \<le> patch_n"
+    using inv_entry by (rule decode_loop_inv_plus_ie_le)
   let ?I = "\<lambda>r t. \<forall>ac dc ic np tp. r = Result (ac, dc, ic, np, tp) \<longrightarrow>
                decode_loop_inv_plus s0 patch patch_n src src_n out
                  src_seg_off src_seg_len tgt_len
