@@ -5279,20 +5279,38 @@ lemma decode_loop_inv_plus_exit:
                   src_seg_off src_seg_len tgt_len
                   data_end inst_end addr_end src_seg tgt
                   data_cursor inst_end addr_cursor tgt_pos np t"
-      \<comment> \<open>At exit inst_cursor = inst_end, so ds_inst_rem dst = [] for the
-          invariant's witness.  decode_loop 0 ... dst = Inl dst, and since
-          the "future fuel" conjunct says decode_loop terminates with
-          length (ds_tgt dst_final) = tgt_len AND ds_tgt dst_final = tgt,
-          we have dst_final = dst, so ds_tgt dst = tgt.
-          Combined with ds_tgt dst = heap_bytes t out (unat tgt_pos)
-          gives heap_bytes t out (unat tgt_pos) = tgt.  Also tgt_pos = tgt_len
-          (since |ds_tgt dst| = tgt_len and ds_tgt dst = heap_bytes t out).\<close>
+      and ie_le: "unat inst_end \<le> patch_n"
   shows "heap_bytes t out (unat tgt_pos) = tgt \<and>
          unat tgt_pos = tgt_len \<and>
-         unat tgt_pos = length tgt \<and>
-         data_cursor = data_end \<and>
-         addr_cursor = addr_end"
-  sorry
+         unat tgt_pos = length tgt"
+proof -
+  obtain dst c dst_final where
+    core: "decode_loop_inv_core s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len data_end inst_end addr_end src_seg data_cursor inst_end addr_cursor tgt_pos np dst c t"
+    and decloop: "decode_loop (length (ds_inst_rem dst)) src_seg (unat src_seg_len) tgt_len dst = Inl dst_final"
+    and len: "length (ds_tgt dst_final) = tgt_len"
+    and tgt_eq: "ds_tgt dst_final = tgt"
+    using inv unfolding decode_loop_inv_plus_def by blast
+  have inst_rem_empty: "ds_inst_rem dst = []"
+  proof -
+    from core have "ds_inst_rem dst =
+         drop (unat inst_end) (take (unat inst_end) (heap_bytes s0 patch patch_n))"
+      unfolding decode_loop_inv_core_def by simp
+    thus ?thesis by simp
+  qed
+  have "decode_loop (length (ds_inst_rem dst)) src_seg (unat src_seg_len) tgt_len dst
+         = Inl dst"
+    using inst_rem_empty by simp
+  with decloop have "dst = dst_final" by simp
+  with tgt_eq have ds_tgt_eq: "ds_tgt dst = tgt" by simp
+  from core have "ds_tgt dst = heap_bytes t out (unat tgt_pos)"
+    unfolding decode_loop_inv_core_def by simp
+  with ds_tgt_eq have hb_eq: "heap_bytes t out (unat tgt_pos) = tgt" by simp
+  have len_hb: "length (heap_bytes t out (unat tgt_pos)) = unat tgt_pos" by simp
+  from hb_eq len_hb have pos_tgt: "unat tgt_pos = length tgt" by simp
+  from len \<open>dst = dst_final\<close> ds_tgt_eq have "unat tgt_pos = tgt_len"
+    using pos_tgt by simp
+  with pos_tgt hb_eq show ?thesis by simp
+qed
 
 (*
   Helper: under decode_loop_inv_plus, the core inv holds with witness
