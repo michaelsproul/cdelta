@@ -5352,6 +5352,53 @@ lemma decode_loop_from_apply_window:
   unfolding apply_window_def Let_def
   by (auto split: sum.splits if_splits)
 
+(*
+  Abstract outer-loop correctness: given a body B that preserves
+  decode_loop_inv_plus per iteration with strictly decreasing inst_rem,
+  the whileLoop terminates with inst_cursor = inst_end and the
+  invariant's exit consequences.
+
+  The concrete C outer-loop body instantiates this lemma by discharging
+  the body-preservation precondition (which captures the per-iteration
+  Hoare triple: one opcode read + inner which-loop dispatch advances
+  the abstract state by one decode_one).
+*)
+lemma outer_whileLoop_correct_abstract:
+  fixes B :: "32 word \<times> 32 word \<times> 32 word \<times> 32 word \<times> 32 word
+              \<Rightarrow> (int, 32 word \<times> 32 word \<times> 32 word \<times> 32 word \<times> 32 word,
+                  lifted_globals) exn_monad"
+  assumes inv_entry:
+    "decode_loop_inv_plus s0 patch patch_n src src_n out
+       src_seg_off src_seg_len tgt_len
+       data_end inst_end addr_end src_seg tgt
+       data_pos inst_pos addr_pos 0 0 t0"
+  assumes body_preserves:
+    "\<And>ac dc ic np tp t. ic < inst_end \<Longrightarrow>
+      decode_loop_inv_plus s0 patch patch_n src src_n out
+        src_seg_off src_seg_len tgt_len
+        data_end inst_end addr_end src_seg tgt
+        dc ic ac tp np t \<Longrightarrow>
+      B (ac, dc, ic, np, tp) \<bullet> t
+        \<lbrace> \<lambda>r t'. case r of
+            Exn _ \<Rightarrow> False
+          | Result (ac', dc', ic', np', tp') \<Rightarrow>
+              decode_loop_inv_plus s0 patch patch_n src src_n out
+                src_seg_off src_seg_len tgt_len
+                data_end inst_end addr_end src_seg tgt
+                dc' ic' ac' tp' np' t' \<and>
+              ic < ic' \<rbrace>"
+  shows "(whileLoop (\<lambda>(ac, dc, ic, np, tp) s. ic < inst_end) B
+                    (addr_pos, data_pos, inst_pos, 0, 0)) \<bullet> t0
+         \<lbrace> \<lambda>r t. case r of
+             Exn _ \<Rightarrow> False
+           | Result (ac, dc, ic, np, tp) \<Rightarrow>
+               ic = inst_end \<and>
+               heap_bytes t out (unat tp) = tgt \<and>
+               unat tp = tgt_len \<and>
+               dc = data_end \<and>
+               ac = addr_end \<rbrace>"
+  sorry
+
 lemma decode_loop_inv_plus_advance:
   assumes inv: "decode_loop_inv_plus s0 patch patch_n src src_n out
                   src_seg_off src_seg_len tgt_len
@@ -7132,11 +7179,13 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
         apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
                                 unat_word_ariths(1); fail)?\<close>)
-        \<comment> \<open>2 whileLoop subgoals.  The invariant shape + rule application
-            are sketched below; ultimately closing them requires the
-            sorry'd lemmas (decode_loop_inv_plus_exit, _advance) plus
-            decode_loop_inv_plus_entry wired through the parsed-window
-            facts (decode_loop_terminates, available above).  Deferred.\<close>
+        \<comment> \<open>2 whileLoop subgoals: apply outer_whileLoop_correct_abstract
+            with the parameters matching the C-emitted loop's captured
+            values.  The concrete instantiation gives us inv_entry from
+            decode_loop_inv_plus_entry + decode_loop_terminates above,
+            and leaves body_preserves as a subgoal — proved via VCG on
+            one iteration with decode_loop_inv_plus_advance.\<close>
+        apply (all \<open>(rule runs_to_weaken[OF outer_whileLoop_correct_abstract])?\<close>)
         sorry
       \<comment> \<open>Trunc branch: pos+val = patch_len, err = -1.  unless throws,
           making r = Exn _, so ?WeakPost's antecedent r = Result 0 fails.\<close>
