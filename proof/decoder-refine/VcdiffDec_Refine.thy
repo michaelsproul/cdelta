@@ -7484,6 +7484,9 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
             and leaves body_preserves as a subgoal — proved via VCG on
             one iteration with decode_loop_inv_plus_advance.\<close>
         apply (all \<open>(rule runs_to_weaken[OF outer_whileLoop_correct_abstract])?\<close>)
+        \<comment> \<open>4 residual obligations per whileLoop instance (2 instances):
+            inv_entry, body_preserves, ie_le, exit_weakening.
+            See block-comment before vcdiff_decode'_spec for details.\<close>
         sorry
       \<comment> \<open>Trunc branch: pos+val = patch_len, err = -1.  unless throws,
           making r = Exn _, so ?WeakPost's antecedent r = Result 0 fails.\<close>
