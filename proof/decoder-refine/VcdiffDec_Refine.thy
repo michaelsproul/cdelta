@@ -7483,10 +7483,23 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
             decode_loop_inv_plus_entry + decode_loop_terminates above,
             and leaves body_preserves as a subgoal — proved via VCG on
             one iteration with decode_loop_inv_plus_advance.\<close>
-        apply (all \<open>(rule runs_to_weaken[OF outer_whileLoop_correct_abstract])?\<close>)
-        \<comment> \<open>4 residual obligations per whileLoop instance (2 instances):
-            inv_entry, body_preserves, ie_le, exit_weakening.
-            See block-comment before vcdiff_decode'_spec for details.\<close>
+        apply (all \<open>(rule runs_to_weaken[OF outer_whileLoop_correct_abstract
+                        [where patch_n = "unat patch_len"]])?\<close>)
+        \<comment> \<open>Instantiating patch_n = unat patch_len leaves 8 residuals =
+            4 obligations × 2 whileLoop instances.  Per-instance:
+              1. inv_entry       (decode_loop_inv_plus at entry)
+              2. body_preserves  (one outer-iteration VCG; huge)
+              3. ie_le           (unat inst_end \<le> unat patch_len)
+              4. exit_weakening  (post-loop cursor asserts + out_len write)
+            Attempted ie_le directly: `unat_arith` with the full
+            ~70-hypothesis context (including 8 varint case_splits) hangs
+            >500s.  Thinning case_splits via `thin_tac "case varint_decode
+            _ of _ \<Rightarrow> _"` does not help — the word-overflow linear
+            system stays large.  Path forward: prove an abstract word
+            lemma ie_le_word_bound over a small set of facts
+            (p_a + v_a \<le> patch_len + the chain equation), then
+            discharge each of goals 3 and 7 by pattern-matching premises
+            and invoking the helper.  Left as sorry.\<close>
         sorry
       \<comment> \<open>Trunc branch: pos+val = patch_len, err = -1.  unless throws,
           making r = Exn _, so ?WeakPost's antecedent r = Result 0 fails.\<close>
