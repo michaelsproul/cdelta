@@ -7515,12 +7515,14 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
                            and tgt = tgt
                            and out = out
                            and tgt_len = "length tgt"]])?\<close>)
-        \<comment> \<open>After instantiating patch_n, tgt, out, tgt_len, the exit
-            postcondition's schematics unify with the concrete ?WeakPost.
-            6 residuals remain = 3 obligations × 2 whileLoop instances.
-            Try the exit_weakening goals first (indices 3 and 6): the
-            C's trailing unless-chain throws, making r = Exn, and the
-            Exn 0 branch is closed by VCG from the whileLoop's post.\<close>
+        \<comment> \<open>6 residuals remain = 3 obligations × 2 whileLoop instances.
+            Close exit_weakening (indices 3 and 6) via runs_to_vcg.
+            The whileLoop's post now includes `r = Exn e → e ≠ 0`,
+            which contradicts `Exn e = Exn 0`, so that branch is vacuous.\<close>
+        prefer 3
+        subgoal
+          apply (clarsimp simp: runs_to_iff split: if_splits)
+          done
         sorry
       \<comment> \<open>Trunc branch: pos+val = patch_len, err = -1.  unless throws,
           making r = Exn _, so ?WeakPost's antecedent r = Result 0 fails.\<close>
