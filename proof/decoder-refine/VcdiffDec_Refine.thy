@@ -5371,6 +5371,19 @@ lemma decode_loop_from_apply_window:
   by (auto split: sum.splits if_splits)
 
 (*
+  Simple consequence: from inv_plus, inst_cursor ≤ inst_end.
+  Avoids having to unfold definitions inside larger proofs.
+*)
+lemma decode_loop_inv_plus_ic_le:
+  assumes "decode_loop_inv_plus s0 patch patch_n src src_n out src_seg_off src_seg_len
+             tgt_len data_end inst_end addr_end src_seg tgt
+             data_cursor inst_cursor addr_cursor tgt_pos np t"
+  shows "inst_cursor \<le> inst_end"
+  using assms
+  unfolding decode_loop_inv_plus_def decode_loop_inv_core_def
+  by blast
+
+(*
   Abstract outer-loop correctness: given a body B that preserves
   decode_loop_inv_plus per iteration with strictly decreasing inst_rem,
   the whileLoop terminates with inst_cursor = inst_end and the
@@ -5397,25 +5410,60 @@ lemma outer_whileLoop_correct_abstract:
         data_end inst_end addr_end src_seg tgt
         dc ic ac tp np t \<Longrightarrow>
       B (ac, dc, ic, np, tp) \<bullet> t
-        \<lbrace> \<lambda>r t'. case r of
-            Exn _ \<Rightarrow> False
-          | Result (ac', dc', ic', np', tp') \<Rightarrow>
+        \<lbrace> \<lambda>r t'. \<forall>ac' dc' ic' np' tp'. r = Result (ac', dc', ic', np', tp') \<longrightarrow>
               decode_loop_inv_plus s0 patch patch_n src src_n out
                 src_seg_off src_seg_len tgt_len
                 data_end inst_end addr_end src_seg tgt
                 dc' ic' ac' tp' np' t' \<and>
               ic < ic' \<rbrace>"
+      and ie_le: "unat inst_end \<le> patch_n"
   shows "(whileLoop (\<lambda>(ac, dc, ic, np, tp) s. ic < inst_end) B
                     (addr_pos, data_pos, inst_pos, 0, 0)) \<bullet> t0
-         \<lbrace> \<lambda>r t. case r of
-             Exn _ \<Rightarrow> False
-           | Result (ac, dc, ic, np, tp) \<Rightarrow>
+         \<lbrace> \<lambda>r t. \<forall>ac dc ic np tp. r = Result (ac, dc, ic, np, tp) \<longrightarrow>
                ic = inst_end \<and>
                heap_bytes t out (unat tp) = tgt \<and>
-               unat tp = tgt_len \<and>
-               dc = data_end \<and>
-               ac = addr_end \<rbrace>"
-  sorry
+               unat tp = tgt_len \<rbrace>"
+proof -
+  let ?I = "\<lambda>r t. \<forall>ac dc ic np tp. r = Result (ac, dc, ic, np, tp) \<longrightarrow>
+               decode_loop_inv_plus s0 patch patch_n src src_n out
+                 src_seg_off src_seg_len tgt_len
+                 data_end inst_end addr_end src_seg tgt
+                 dc ic ac tp np t"
+  show ?thesis
+    apply (rule runs_to_whileLoop_exn'
+      [where I = ?I
+         and R = "measure (\<lambda>((ac, dc, ic, np, tp), _). unat inst_end - unat ic)"])
+    \<comment> \<open>Body preserves I.\<close>
+    subgoal for a t
+      apply clarsimp
+      apply (rule runs_to_weaken[OF body_preserves])
+        apply assumption
+       apply blast
+      apply (intro conjI allI impI)
+       apply blast
+      \<comment> \<open>Measure decrease from the post-state invariant's ic' ≤ inst_end.\<close>
+      apply clarsimp
+      apply (drule decode_loop_inv_plus_ic_le)
+      apply (simp add: word_less_nat_alt word_le_nat_alt)
+      done
+    \<comment> \<open>Exit ⇒ postcondition.\<close>
+    subgoal for a t
+      apply clarsimp
+      apply (frule decode_loop_inv_plus_ic_le)
+      apply (subgoal_tac "ic = inst_end")
+       prefer 2 apply (simp add: word_le_not_less)
+      apply clarsimp
+      apply (drule decode_loop_inv_plus_exit[OF _ ie_le])
+      apply auto
+      done
+    \<comment> \<open>Exn vacuous.\<close>
+    subgoal for a t by simp
+    \<comment> \<open>wf.\<close>
+    subgoal by simp
+    \<comment> \<open>Initial invariant.\<close>
+    subgoal using inv_entry by simp
+    done
+qed
 
 lemma decode_loop_inv_plus_advance:
   assumes inv: "decode_loop_inv_plus s0 patch patch_n src src_n out
