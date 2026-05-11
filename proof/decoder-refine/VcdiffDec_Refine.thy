@@ -3891,6 +3891,35 @@ lemma parse_window_no_source:
   by (simp add: pop_byte_def Let_def add.commute add.left_commute
            split: list.splits option.splits)
 
+lemma parse_window_with_source:
+  assumes win_byte: "pop_byte wbs = Some (win_ind, wbs1)"
+      and no_target: "win_ind AND 0x02 = 0"
+      and mask_ok: "win_ind AND 0xFA = 0"
+      and has_source: "win_ind AND 0x01 \<noteq> 0"
+      and sl_ok: "varint_decode wbs1 = Some (src_seg_len, wbs1a)"
+      and so_ok: "varint_decode wbs1a = Some (src_seg_off, wbs3)"
+      and dlen_ok: "varint_decode wbs3 = Some (dlen, wbs4)"
+      and tgt_ok: "varint_decode wbs4 = Some (tgt_len, wbs5)"
+      and di_pop: "pop_byte wbs5 = Some (di, wbs6)"
+      and di_zero: "di = 0"
+      and data_ok: "varint_decode wbs6 = Some (data_len, wbs7)"
+      and inst_ok: "varint_decode wbs7 = Some (inst_len, wbs8)"
+      and addr_ok: "varint_decode wbs8 = Some (addr_len, wbs9)"
+      and sizes_ok: "data_len + inst_len + addr_len \<le> length wbs9"
+  shows "parse_window wbs = Inl (\<lparr>
+           pw_src_seg_len = src_seg_len,
+           pw_src_seg_off = src_seg_off,
+           pw_tgt_len = tgt_len,
+           pw_data = take data_len wbs9,
+           pw_inst = take inst_len (drop data_len wbs9),
+           pw_addr = take addr_len (drop (data_len + inst_len) wbs9)
+         \<rparr>, drop (data_len + inst_len + addr_len) wbs9)"
+  unfolding parse_window_def
+  using win_byte no_target mask_ok has_source sl_ok so_ok dlen_ok tgt_ok
+        di_pop di_zero data_ok inst_ok addr_ok sizes_ok
+  by (simp add: pop_byte_def Let_def add.commute add.left_commute
+           split: list.splits option.splits)
+
 (* ---------- Phase 1: Output-write infrastructure ---------- *)
 
 (*
