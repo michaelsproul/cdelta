@@ -1,5 +1,74 @@
 # Refinement Layer Progress
 
+## Session 2026-05-11 evening — outer whileLoop attack assessed
+
+Attempted the outer whileLoop proof.  Key findings:
+
+### The Exn-branch-vacuity shortcut doesn't work
+
+Initial hope: under `?WeakPost = r = Result 0 ⟶ output matches`,
+the whileLoop's Exn cases would all be vacuously true since the
+post-loop ends with `throw 0`.
+
+**Wrong.**  The `finally` wrapper at the outer level converts
+`throw e` inside into `Result (sint e)` outside.  AutoCorres2's
+goal pushback reflects this as both clauses in the whileLoop's
+postcondition:
+
+```
+⦃ λr t. (r = Result 0 ⟶ output matches) ∧
+        (r = Exn 0 ⟶ output matches) ⦄
+```
+
+The `Exn 0 ⟶ output matches` clause is real — it's what the
+outer `finally` will check when the inner `throw 0` fires after
+a successful decode.  So proving the whileLoop really does
+require `output matches` at some exit state.
+
+### Invariant shape needed
+
+The outer whileLoop's invariant must carry (at exit when
+`inst_cursor = inst_end`):
+
+1. `decode_loop_inv` holding — already have this, with
+   `ds_tgt dst = heap_bytes t out (unat tp)`.
+2. **Progress claim**: `∃k. decode_loop k src_seg (unat src_seg_len)
+   tgt_len initial_dst = Inl dst` where the `dst` is the same one
+   `decode_loop_inv` witnesses existentially.
+
+Combining these at exit gives `ds_inst_rem dst = [] ⟹ decode_loop
+terminates with this dst ⟹ ds_tgt dst = final tgt bytes`, which
+with `decode_loop_inv`'s `ds_tgt = heap_bytes` gives `heap_bytes t
+out (unat tp) = tgt`.  That's the claim.
+
+For this to work, either:
+* Strengthen `decode_loop_inv` to take `dst` as a parameter (not
+  existential), or
+* Define `decode_loop_inv_plus` carrying the progress claim alongside.
+
+Either way, the 6 sorry-free invariant preservation lemmas
+(`decode_loop_inv_after_{add,run,copy}`, `_advance_inst{,_n}`) will
+need re-proving (or adapting) to match the strengthened form.
+
+### Realistic estimate
+
+The outer whileLoop proof from here is the **1-2 day chunk** flagged
+since early in the rescue plan.  It requires:
+
+1. Design + prove `decode_loop_inv_plus` (or strengthen existing inv).
+2. Re-prove the 6 preservation lemmas for the new form (~4 hours each,
+   mostly mechanical re-runs).
+3. State the outer loop as `vcdiff_outer_loop_correct` with the
+   `runs_to_whileLoop_exn5` shape.
+4. Prove the 5 standard subgoals (wf, init, exit-post, Exn, body).
+   The body subgoal re-runs `runs_to_vcg` with `add/run/copy_loop
+   _correct` supplied, then discharges the invariant-preservation
+   obligations via the preservation lemmas applied as `rule`.
+5. Supply `vcdiff_outer_loop_correct [runs_to_vcg]` at the 8 whileLoop
+   subgoals in the weak-form `vcdiff_decode'_spec` proof.
+
+### Current progress: the 4 gets_the branches all reach the whileLoop
+
 ## Session 2026-05-11 — all gets_the's closed, outer whileLoop is next
 
 Extended the `read_byte'_gets_the_discharge` helper to cover all 4
