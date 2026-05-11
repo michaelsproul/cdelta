@@ -866,3 +866,105 @@ isabelle build -d . -o system_log=true -v CdeltaRefine \
 Foreground only. The `system_log=true -v` flags surface timing lines
 that indicate a stuck command (this is how the old proof's blow-up
 was detected — running > 5 minutes on one tactic).
+
+## Session 2026-05-12 — exit_weakening closed on all 4 branches
+
+Completed significant progress on `vcdiff_decode'_spec`'s Inl case.
+With the strengthened abstract lemma applied at each of the 4 top-level
+branches, 8 residuals (2 per branch × 4 branches) of the form
+**exit_weakening** (the post-loop unless-chain + out_len write + throw 0)
+are now closed uniformly via:
+```isabelle
+by (clarsimp simp: runs_to_iff split: if_splits)
+```
+
+### New lemmas proved
+
+* `cache_abs_unique` (~80 lines) — cache_abs is functional in c.
+  Uses `nth_equalityI` on near/same arrays with word/nat round-trip
+  (via `unat_of_nat_eq` + `cache_wf` bound).  This closes the
+  previously-sorry'd cache equality step inside
+  `decode_loop_inv_plus_advance`, so body-preservation is fully
+  proved.
+
+* `decode_loop_inv_plus_ie_le` — corollary that `unat inst_end ≤ patch_n`
+  is derivable from `decode_loop_inv_plus`.  Folded into
+  `outer_whileLoop_correct_abstract` as an internal `have`, eliminating
+  ie_le from the per-branch residuals.
+
+* `decode_loop_inv_init_core` — core-form variant of
+  `decode_loop_inv_init` that returns an explicit dst0 witness.
+  Needed to feed `decode_loop_inv_plus_entry` without the existential.
+
+* `parse_window_with_source` — companion of `parse_window_no_source`
+  for the has_source decoding branch.
+
+### Strengthened abstract lemma
+
+`outer_whileLoop_correct_abstract`'s body_preserves hypothesis and
+conclusion now both carry `(∀e. r = Exn e → e ≠ 0)`.  Since every
+throw in the AutoCorres-lifted body uses a non-zero error code
+(VCD_ERR_*), this is preserved.  Crucial for closing exit_weakening,
+which otherwise gets stuck on the Exn 0 → out_len_updated branch.
+
+### Current residuals
+
+4 × {inv_entry + body_preserves} = 8 residuals across 4 branches.
+
+#### inv_entry (4 instances)
+
+Each inv_entry goal wants:
+```
+decode_loop_inv_plus s0 patch (unat patch_len) src (unat src_len) out
+  src_seg_off src_seg_len (length tgt) data_end inst_end addr_end
+  src_seg tgt data_pos inst_pos addr_pos 0 0 taa
+```
+
+**Path to closure:**
+1. Apply `decode_loop_inv_plus_entry` (gives plus from core + apply_ok).
+2. Use `decode_loop_inv_init_core` for the core witness (provides dst0).
+3. Derive apply_ok from the pure-spec's `decode_loop_terminates` fact,
+   using `parse_window_no_source` or `parse_window_with_source` (per
+   branch) to link pw_data/pw_inst/pw_addr to the C-side byte slices.
+
+Each branch needs:
+* Branch 1 (app + src_src, code_tbl=0): src_seg_off = val_C vaaa,
+  src_seg_len = val_C vaa.  Use `parse_window_with_source`.
+* Branch 2 (app + src, code_tbl≠0): same but simpler state chain.
+* Branch 3 (no-app + no-src, code_tbl=0): src_seg_off = src_seg_len = 0.
+  Use `parse_window_no_source`.
+* Branch 4 (no-app + no-src, code_tbl≠0): simplest.
+
+#### body_preserves (4 instances)
+
+Each body_preserves goal is a one-iteration Hoare triple:
+```
+do {
+  p <- gets_the (read_byte' patch inst_end ic);
+  unless (err p ≠ 0) (throw err p);
+  (ac, dc, ic, np, tp, which) <- whileLoop (which < 2) body_inner
+                                           (ac, dc, pos_C p, np, tp, 0);
+  return (ac, dc, ic, np, tp)
+} • tb ⦃ λr t'. post-conditions (inv_plus preserved + ic < ic'
+                                  + e ≠ 0 if Exn) ⦄
+```
+
+**Path to closure:**
+1. `read_byte'_gets_the_discharge` for the opcode read.
+2. Inner whileLoop: invariant parameterised by `which ∈ {0,1,2}`,
+   with invariant preservation for each opcode dispatch (add/run/copy).
+3. For add: `add_loop_correct` + `decode_loop_inv_after_add`.
+   For run: `run_loop_correct` + `decode_loop_inv_after_run`.
+   For copy: `decode_address'_spec` + `copy_loop_correct` +
+   `decode_loop_inv_after_copy`.
+4. After the inner whileLoop completes (which=2), apply
+   `decode_loop_inv_plus_advance` to fold the two decode_one steps
+   back into plus preservation.
+
+This is the biggest remaining piece (est. 300-500 lines per branch,
+but factorable via supply lemmas + a shared iteration-body lemma).
+
+## Build stats
+
+Full rebuild: ~4:30 elapsed.  Current file 7901 lines, 11 sorries
+(down from 12).  Last verified green: 2026-05-12 00:54 local.
