@@ -6863,10 +6863,12 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
         apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
                                 unat_word_ariths(1); fail)?\<close>)
-        \<comment> \<open>2 subgoals remain: both are the outer instruction-dispatch
-            whileLoop (from the two paths through the win_ind branches).
-            STOPPING HERE per plan — the next step is the outer loop
-            invariant.\<close>
+        \<comment> \<open>2 whileLoop subgoals for the outer instruction-dispatch loop.
+            The post-loop's `throw 0` is converted to `Result 0` at the
+            outer finally, so the Exn 0 branch of the pushed-back
+            postcondition still requires the output to match — which
+            means we need a proper invariant carrying progress.
+            Deferred.\<close>
         sorry
       \<comment> \<open>Trunc branch: pos+val = patch_len, err = -1.  unless throws,
           making r = Exn _, so ?WeakPost's antecedent r = Result 0 fails.\<close>
