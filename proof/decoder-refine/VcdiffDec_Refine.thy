@@ -5138,6 +5138,249 @@ lemma decode_loop_invD:
 
 
 (*
+  Strengthened outer-loop invariant for vcdiff_outer_loop_correct.
+
+  The existing `decode_loop_inv` is sufficient for the instruction-level
+  body-preservation proofs (add/run/copy lemmas), but its `dst` is
+  existentially quantified: at exit we can't connect the witness to
+  the pure spec's `decode_loop` trace.
+
+  `decode_loop_inv_plus` adds a progress conjunct:
+    ∃dst0 k. decode_loop k src_seg src_seg_len tgt_len dst0 = Inl dst ∧
+             dst is the same witness decode_loop_inv has.
+
+  At exit (inst_cursor = inst_end ⇒ ds_inst_rem dst = [] ⇒
+  decode_loop terminates at this dst ⇒ length (ds_tgt dst) = tgt_len
+  ⇒ heap_bytes t out (unat tgt_pos) = ds_tgt dst = target bytes),
+  we can conclude the output-match claim.
+
+  The progress parameter `dst0` represents the initial state at the
+  start of the outer while-loop (after all prefix reads), and is fixed
+  by the caller before invoking the invariant.
+*)
+definition decode_loop_inv_core ::
+  "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> nat \<Rightarrow>
+   32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   byte list \<Rightarrow>
+   32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   dec_state \<Rightarrow> cache \<Rightarrow> lifted_globals \<Rightarrow> bool" where
+  "decode_loop_inv_core s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+     data_end inst_end addr_end src_seg
+     data_cursor inst_cursor addr_cursor tgt_pos np dst c t =
+   (ds_inst_rem dst =
+      drop (unat inst_cursor) (take (unat inst_end) (heap_bytes s0 patch patch_n)) \<and>
+    ds_data_rem dst =
+      drop (unat data_cursor) (take (unat data_end) (heap_bytes s0 patch patch_n)) \<and>
+    ds_addr_rem dst =
+      drop (unat addr_cursor) (take (unat addr_end) (heap_bytes s0 patch patch_n)) \<and>
+    ds_tgt dst = heap_bytes t out (unat tgt_pos) \<and>
+    ds_cache dst = c \<and>
+    cache_abs t c np \<and>
+    cache_wf c \<and>
+    (\<forall>i < patch_n. heap_w8 t (patch +\<^sub>p int i) = heap_w8 s0 (patch +\<^sub>p int i)) \<and>
+    (\<forall>i < src_n. heap_w8 t (src +\<^sub>p int i) = heap_w8 s0 (src +\<^sub>p int i)) \<and>
+    buf_valid t patch patch_n \<and>
+    buf_valid t src src_n \<and>
+    buf_valid t out tgt_len \<and>
+    data_cursor \<le> data_end \<and>
+    inst_cursor \<le> inst_end \<and>
+    addr_cursor \<le> addr_end \<and>
+    unat tgt_pos \<le> tgt_len \<and>
+    unat data_end \<le> patch_n \<and>
+    unat inst_end \<le> patch_n \<and>
+    unat addr_end \<le> patch_n \<and>
+    code_tbl_matches t \<and>
+    heap_typing t = heap_typing s0 \<and>
+    (\<forall>i < tgt_len. \<forall>j < patch_n. out +\<^sub>p int i \<noteq> patch +\<^sub>p int j) \<and>
+    (\<forall>i < tgt_len. \<forall>j < src_n. out +\<^sub>p int i \<noteq> src +\<^sub>p int j) \<and>
+    (\<forall>i < tgt_len. \<forall>j < tgt_len. i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j) \<and>
+    tgt_len < 2 ^ 32 \<and>
+    unat src_seg_off + unat src_seg_len \<le> src_n \<and>
+    unat src_seg_off + unat src_seg_len < 2 ^ 32 \<and>
+    src_seg = heap_bytes s0 (src +\<^sub>p uint src_seg_off) (unat src_seg_len))"
+
+(*
+  Equivalence of decode_loop_inv and its core-form with existentials.
+*)
+lemma decode_loop_inv_eq_core:
+  "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+     data_end inst_end addr_end src_seg
+     data_cursor inst_cursor addr_cursor tgt_pos np t
+   \<longleftrightarrow>
+   (\<exists>dst c. decode_loop_inv_core s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+            data_end inst_end addr_end src_seg
+            data_cursor inst_cursor addr_cursor tgt_pos np dst c t)"
+  unfolding decode_loop_inv_def decode_loop_inv_core_def by blast
+
+(*
+  Strengthened invariant.  The progress conjunct uses the "future fuel"
+  formulation: from the current abstract state dst, decoding the remaining
+  instructions terminates with the final target bytes.  `tgt` is the
+  final output bytes, fixed by the caller (the pure spec's output for
+  this input).
+
+  This formulation holds at entry (with dst = dst0 and fuel =
+  length (ds_inst_rem dst0)) and is preserved by each step (fuel
+  decreases by 1 as dst advances by one decode_one).
+*)
+definition decode_loop_inv_plus ::
+  "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> nat \<Rightarrow>
+   32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   byte list \<Rightarrow>
+   byte list \<Rightarrow>
+   32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   lifted_globals \<Rightarrow> bool" where
+  "decode_loop_inv_plus s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
+     data_end inst_end addr_end src_seg tgt
+     data_cursor inst_cursor addr_cursor tgt_pos np t =
+   (\<exists>dst c dst_final.
+      decode_loop_inv_core s0 patch patch_n src src_n out
+                            src_seg_off src_seg_len tgt_len
+                            data_end inst_end addr_end src_seg
+                            data_cursor inst_cursor addr_cursor tgt_pos np
+                            dst c t \<and>
+      decode_loop (length (ds_inst_rem dst)) src_seg (unat src_seg_len) tgt_len dst
+        = Inl dst_final \<and>
+      length (ds_tgt dst_final) = tgt_len \<and>
+      ds_tgt dst_final = tgt)"
+
+(*
+  At loop entry, invariant holds with dst = dst0 (zero iterations).
+  dst0 is the initial abstract state derived from the parsed window.
+*)
+lemma decode_loop_inv_plus_entry:
+  assumes core0: "decode_loop_inv_core s0 patch patch_n src src_n out
+                   src_seg_off src_seg_len tgt_len
+                   data_end inst_end addr_end src_seg
+                   data_cursor inst_cursor addr_cursor 0 0
+                   dst0 cache_init t0"
+      and apply_ok:
+        "\<exists>dst_final. decode_loop (length (ds_inst_rem dst0)) src_seg (unat src_seg_len) tgt_len dst0
+                      = Inl dst_final \<and>
+                     length (ds_tgt dst_final) = tgt_len \<and>
+                     ds_tgt dst_final = tgt"
+  shows "decode_loop_inv_plus s0 patch patch_n src src_n out
+           src_seg_off src_seg_len tgt_len
+           data_end inst_end addr_end src_seg tgt
+           data_cursor inst_cursor addr_cursor 0 0 t0"
+  using core0 apply_ok
+  unfolding decode_loop_inv_plus_def
+  by blast
+
+(*
+  At exit (inst_cursor = inst_end), the invariant implies the pure spec's
+  decode_loop has terminated with the current witness, and the output
+  bytes match ds_tgt of the final abstract state.
+*)
+lemma decode_loop_inv_plus_exit:
+  assumes inv: "decode_loop_inv_plus s0 patch patch_n src src_n out
+                  src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg tgt
+                  data_cursor inst_end addr_cursor tgt_pos np t"
+      \<comment> \<open>At exit inst_cursor = inst_end, so ds_inst_rem dst = [] for the
+          invariant's witness.  decode_loop 0 ... dst = Inl dst, and since
+          the "future fuel" conjunct says decode_loop terminates with
+          length (ds_tgt dst_final) = tgt_len AND ds_tgt dst_final = tgt,
+          we have dst_final = dst, so ds_tgt dst = tgt.
+          Combined with ds_tgt dst = heap_bytes t out (unat tgt_pos)
+          gives heap_bytes t out (unat tgt_pos) = tgt.  Also tgt_pos = tgt_len
+          (since |ds_tgt dst| = tgt_len and ds_tgt dst = heap_bytes t out).\<close>
+  shows "heap_bytes t out (unat tgt_pos) = tgt \<and>
+         unat tgt_pos = tgt_len \<and>
+         unat tgt_pos = length tgt \<and>
+         data_cursor = data_end \<and>
+         addr_cursor = addr_end"
+  sorry
+
+(*
+  Helper: under decode_loop_inv_plus, the core inv holds with witness
+  equal to the current state's dst.
+*)
+lemma decode_loop_inv_plus_coreD:
+  assumes "decode_loop_inv_plus s0 patch patch_n src src_n out
+             src_seg_off src_seg_len tgt_len
+             data_end inst_end addr_end src_seg tgt
+             data_cursor inst_cursor addr_cursor tgt_pos np t"
+  shows "\<exists>dst c dst_final.
+           decode_loop_inv_core s0 patch patch_n src src_n out
+             src_seg_off src_seg_len tgt_len
+             data_end inst_end addr_end src_seg
+             data_cursor inst_cursor addr_cursor tgt_pos np dst c t \<and>
+           decode_loop (length (ds_inst_rem dst)) src_seg (unat src_seg_len) tgt_len dst
+             = Inl dst_final \<and>
+           length (ds_tgt dst_final) = tgt_len \<and>
+           ds_tgt dst_final = tgt"
+  using assms unfolding decode_loop_inv_plus_def by blast
+
+(*
+  Body-preservation lemma: one outer-loop iteration advances the
+  invariant by one decode_one step.
+
+  The progress conjunct updates naturally: from the old dst, fuel
+  N = length (ds_inst_rem dst) gives Inl dst_final; from the new dst'
+  (= one decode_one step further), fuel N-k (for some k ≥ 1 consumed)
+  still gives the same dst_final because decode_loop is deterministic.
+*)
+(*
+  Derive apply_window success + decode_loop termination from decode_spec = Inl.
+*)
+lemma apply_window_from_decode_spec:
+  assumes "decode_spec bs src = Inl tgt"
+      and "parse_header bs = Inl rest"
+      and "parse_window rest = Inl (win, tail)"
+  shows "apply_window win src = Inl tgt"
+  using assms unfolding decode_spec_def by auto
+
+lemma decode_loop_from_apply_window:
+  assumes aw: "apply_window win src = Inl tgt"
+      and src_seg_def:
+        "(if pw_src_seg_len win = 0 then []
+          else take (pw_src_seg_len win) (drop (pw_src_seg_off win) src)) = src_seg"
+  shows "\<exists>dst.
+           decode_loop (length (pw_inst win)) src_seg
+             (pw_src_seg_len win) (pw_tgt_len win)
+             \<lparr> ds_data_rem = pw_data win,
+               ds_inst_rem = pw_inst win,
+               ds_addr_rem = pw_addr win,
+               ds_cache = cache_init,
+               ds_tgt = [] \<rparr> = Inl dst \<and>
+           length (ds_tgt dst) = pw_tgt_len win \<and>
+           ds_tgt dst = tgt"
+  using aw src_seg_def
+  unfolding apply_window_def Let_def
+  by (auto split: sum.splits if_splits)
+
+lemma decode_loop_inv_plus_advance:
+  assumes inv: "decode_loop_inv_plus s0 patch patch_n src src_n out
+                  src_seg_off src_seg_len tgt_len
+                  data_end inst_end addr_end src_seg tgt
+                  data_cursor inst_cursor addr_cursor tgt_pos np t"
+      and progressing: "inst_cursor < inst_end"
+      \<comment> \<open>The body's transition: from old dst in state t, one decode_one
+          step to new dst' in state t', with cursor advancement.\<close>
+      and core_before:
+        "decode_loop_inv_core s0 patch patch_n src src_n out
+           src_seg_off src_seg_len tgt_len
+           data_end inst_end addr_end src_seg
+           data_cursor inst_cursor addr_cursor tgt_pos np dst (ds_cache dst) t"
+      and step: "decode_one src_seg (unat src_seg_len) tgt_len dst = Inl dst'"
+      and core_after:
+        "decode_loop_inv_core s0 patch patch_n src src_n out
+           src_seg_off src_seg_len tgt_len
+           data_end inst_end addr_end src_seg
+           data_cursor' inst_cursor' addr_cursor' tgt_pos' np' dst' (ds_cache dst') t'"
+      and inst_decreasing:
+        "length (ds_inst_rem dst') < length (ds_inst_rem dst)"
+  shows "decode_loop_inv_plus s0 patch patch_n src src_n out
+           src_seg_off src_seg_len tgt_len
+           data_end inst_end addr_end src_seg tgt
+           data_cursor' inst_cursor' addr_cursor' tgt_pos' np' t'"
+  sorry
+
+
+(*
   Key structural lemma: the invariant at the loop entry (initial state).
   After the prefix sets up cursors, the invariant holds with:
     - inst_cursor = inst_pos (start of instruction section)
@@ -6775,6 +7018,32 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
   have ucast_and_4_equiv:
     "(UCAST(8 \<rightarrow> 32) hi AND 4 \<noteq> 0) = (hi AND 4 \<noteq> 0)"
     by word_bitwise
+  \<comment> \<open>Window-parse facts from Inl.\<close>
+  obtain win tail where
+    pw: "parse_window rest = Inl (win, tail)"
+    using Inl ph unfolding decode_spec_def
+    by (auto split: sum.splits)
+  have aw: "apply_window win (heap_bytes s src (unat src_len)) = Inl tgt"
+    using apply_window_from_decode_spec[OF Inl ph pw] .
+  \<comment> \<open>Extract the decode_loop-termination fact for the pure spec.\<close>
+  define initial_dst where
+    "initial_dst = \<lparr> ds_data_rem = pw_data win,
+                     ds_inst_rem = pw_inst win,
+                     ds_addr_rem = pw_addr win,
+                     ds_cache = cache_init,
+                     ds_tgt = [] \<rparr>"
+  define pw_src_seg where
+    "pw_src_seg =
+      (if pw_src_seg_len win = 0 then []
+       else take (pw_src_seg_len win)
+              (drop (pw_src_seg_off win) (heap_bytes s src (unat src_len))))"
+  have decode_loop_terminates:
+    "\<exists>dst_final. decode_loop (length (ds_inst_rem initial_dst)) pw_src_seg
+                   (pw_src_seg_len win) (pw_tgt_len win) initial_dst = Inl dst_final \<and>
+                 length (ds_tgt dst_final) = pw_tgt_len win \<and>
+                 ds_tgt dst_final = tgt"
+    using decode_loop_from_apply_window[OF aw, of pw_src_seg]
+    unfolding initial_dst_def pw_src_seg_def by auto
   let ?WeakPost = "\<lambda>r t. r = Result (0 :: int) \<longrightarrow>
                          unat (heap_w32 t out_len) = length tgt \<and>
                          heap_bytes t out (length tgt) = tgt"
