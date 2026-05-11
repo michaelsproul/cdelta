@@ -6873,8 +6873,91 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       subgoal
         by runs_to_vcg
       done
-    \<comment> \<open>Remaining 3 top-level gets_the subgoals.\<close>
-    sorry
+    \<comment> \<open>2nd residual: pos+val, state ta (app-header, code_tbl≠0, ie no
+        build_code_table call).\<close>
+    subgoal for va t ta
+      apply (subgoal_tac "pr_t_C.pos_C va + val_C va \<le> patch_len")
+       prefer 2
+       subgoal
+         apply (subgoal_tac "val_C va \<le> patch_len - pr_t_C.pos_C va")
+          prefer 2 apply (simp add: word_le_not_less)
+         apply (simp add: word_le_nat_alt unat_sub)
+         apply (subst unat_word_ariths(1))
+         using unat_lt2p[of patch_len] by auto
+      apply (subgoal_tac "buf_valid ta patch (unat patch_len)")
+       prefer 2 apply (simp add: buf_valid_def patch_ok[simplified buf_valid_def])
+      apply (rule read_byte'_gets_the_discharge
+               [of ta patch patch_len "pr_t_C.pos_C va + val_C va"])
+        subgoal by assumption
+       subgoal by assumption
+      subgoal
+        apply runs_to_vcg
+        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
+                                unat_word_ariths(1); fail)?\<close>)
+        apply (all \<open>(rule read_byte'_gets_the_discharge)?\<close>)
+        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        apply (all \<open>(assumption | simp)?\<close>)
+        apply (all \<open>(simp add: ; runs_to_vcg; fail)?\<close>)
+        apply (all \<open>runs_to_vcg?\<close>)
+        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
+                                unat_word_ariths(1); fail)?\<close>)
+        sorry
+      subgoal
+        by runs_to_vcg
+      done
+    \<comment> \<open>3rd residual: position 5, state taa (no-app-header, code_tbl=0).\<close>
+    subgoal for t ta taa
+      apply (rule read_byte'_gets_the_discharge
+               [of taa patch patch_len 5])
+        subgoal
+          apply (simp add: buf_valid_def patch_ok[simplified buf_valid_def])
+          done
+       subgoal using len_ge5_word by simp
+      subgoal
+        apply runs_to_vcg
+        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
+                                unat_word_ariths(1); fail)?\<close>)
+        apply (all \<open>(rule read_byte'_gets_the_discharge)?\<close>)
+        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        apply (all \<open>(assumption | simp)?\<close>)
+        apply (all \<open>(simp add: ; runs_to_vcg; fail)?\<close>)
+        apply (all \<open>runs_to_vcg?\<close>)
+        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
+                                unat_word_ariths(1); fail)?\<close>)
+        sorry
+      subgoal
+        by runs_to_vcg
+      done
+    \<comment> \<open>4th residual: position 5, state ta (no-app-header, code_tbl≠0).\<close>
+    subgoal for t ta
+      apply (rule read_byte'_gets_the_discharge
+               [of ta patch patch_len 5])
+        subgoal
+          apply (simp add: buf_valid_def patch_ok[simplified buf_valid_def])
+          done
+       subgoal using len_ge5_word by simp
+      subgoal
+        apply runs_to_vcg
+        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
+                                unat_word_ariths(1); fail)?\<close>)
+        apply (all \<open>(rule read_byte'_gets_the_discharge)?\<close>)
+        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        apply (all \<open>(assumption | simp)?\<close>)
+        apply (all \<open>(simp add: ; runs_to_vcg; fail)?\<close>)
+        apply (all \<open>runs_to_vcg?\<close>)
+        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
+        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
+                                unat_word_ariths(1); fail)?\<close>)
+        sorry
+      subgoal
+        by runs_to_vcg
+      done
+    done
   have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
   proof -
     show ?thesis
