@@ -7561,6 +7561,15 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
         apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
                                 unat_word_ariths(1); fail)?\<close>)
+        apply (all \<open>(rule runs_to_weaken[OF outer_whileLoop_correct_abstract
+                        [where patch_n = "unat patch_len"
+                           and tgt = tgt
+                           and out = out
+                           and tgt_len = "length tgt"]])?\<close>)
+        prefer 3
+        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
+        prefer 5
+        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
         sorry
       subgoal
         by runs_to_vcg
@@ -7586,6 +7595,15 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
         apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
                                 unat_word_ariths(1); fail)?\<close>)
+        apply (all \<open>(rule runs_to_weaken[OF outer_whileLoop_correct_abstract
+                        [where patch_n = "unat patch_len"
+                           and tgt = tgt
+                           and out = out
+                           and tgt_len = "length tgt"]])?\<close>)
+        prefer 3
+        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
+        prefer 5
+        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
         sorry
       subgoal
         by runs_to_vcg
@@ -7611,6 +7629,15 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
         apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
                                 unat_word_ariths(1); fail)?\<close>)
+        apply (all \<open>(rule runs_to_weaken[OF outer_whileLoop_correct_abstract
+                        [where patch_n = "unat patch_len"
+                           and tgt = tgt
+                           and out = out
+                           and tgt_len = "length tgt"]])?\<close>)
+        prefer 3
+        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
+        prefer 5
+        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
         sorry
       subgoal
         by runs_to_vcg
