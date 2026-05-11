@@ -7520,9 +7520,11 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
             The whileLoop's post now includes `r = Exn e → e ≠ 0`,
             which contradicts `Exn e = Exn 0`, so that branch is vacuous.\<close>
         prefer 3
-        subgoal
-          apply (clarsimp simp: runs_to_iff split: if_splits)
-          done
+        subgoal \<comment> \<open>exit_weakening (1st whileLoop instance)\<close>
+          by (clarsimp simp: runs_to_iff split: if_splits)
+        prefer 5
+        subgoal \<comment> \<open>exit_weakening (2nd whileLoop instance)\<close>
+          by (clarsimp simp: runs_to_iff split: if_splits)
         sorry
       \<comment> \<open>Trunc branch: pos+val = patch_len, err = -1.  unless throws,
           making r = Exn _, so ?WeakPost's antecedent r = Result 0 fails.\<close>
