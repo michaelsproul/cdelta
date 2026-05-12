@@ -477,7 +477,7 @@ lemma read_varint'_no_modify:
       apply (subgoal_tac "unat x1 < unat len")
        apply (simp only: uint_nat)
       apply (simp add: word_le_nat_alt)
-		           sorry
+		           done
     subgoal for x1 x1a x2a
       \<comment> \<open>Measure decreases: under the loop guard x1a < 5, so x1a + 1 cannot
           wrap, and unat (x1a + 1) = unat x1a + 1.\<close>
@@ -4219,6 +4219,55 @@ proof -
     using dlen_ge dlen_rem by arith
   show ?thesis
     using dec1 dec2 dec3 dec4 di0 dec5 dec6 dec7 sizes_ok dlen_exact by blast
+qed
+
+lemma parse_window_no_source_full_decodes:
+  assumes parsed: "parse_window (drop k bs) = Inl (win, tail)"
+      and k_lt: "k < length bs"
+      and no_source: "(bs ! k) AND 0x01 = 0"
+  shows "\<exists>rest3 rest4 rest5 rest6 rest7 rest8 dlen data_len inst_len addr_len.
+           varint_decode (drop (Suc k) bs) = Some (dlen, rest3) \<and>
+           varint_decode rest3 = Some (pw_tgt_len win, rest4) \<and>
+           pop_byte rest4 = Some (0, rest5) \<and>
+           varint_decode rest5 = Some (data_len, rest6) \<and>
+           varint_decode rest6 = Some (inst_len, rest7) \<and>
+           varint_decode rest7 = Some (addr_len, rest8) \<and>
+           (if (bs ! k) AND 0x04 \<noteq> 0 then 4 else 0) +
+             data_len + inst_len + addr_len \<le> length rest8 \<and>
+           dlen = (length rest3 - length rest8) +
+                  (if (bs ! k) AND 0x04 \<noteq> 0 then 4 else 0) +
+                  data_len + inst_len + addr_len"
+proof -
+  have drop_eq: "drop k bs = bs ! k # drop (Suc k) bs"
+    using k_lt by (simp add: Cons_nth_drop_Suc)
+  obtain rest3 rest4 rest5 rest6 rest7 rest8 dlen data_len inst_len addr_len where
+    dec3: "varint_decode (drop (Suc k) bs) = Some (dlen, rest3)"
+    and dec4: "varint_decode rest3 = Some (pw_tgt_len win, rest4)"
+    and di0: "pop_byte rest4 = Some (0, rest5)"
+    and dec5: "varint_decode rest5 = Some (data_len, rest6)"
+    and dec6: "varint_decode rest6 = Some (inst_len, rest7)"
+    and dec7: "varint_decode rest7 = Some (addr_len, rest8)"
+    and dlen_ge: "\<not> dlen < length rest3 - length rest8"
+    and dlen_rem:
+      "dlen - (length rest3 - length rest8) =
+         (if (bs ! k) AND 0x04 \<noteq> 0 then 4 else 0) + data_len + inst_len + addr_len"
+    and payload_fit:
+      "\<not> length rest8 <
+         (if (bs ! k) AND 0x04 \<noteq> 0 then 4 else 0) + data_len + inst_len + addr_len"
+    using parsed no_source
+    unfolding parse_window_def drop_eq pop_byte_def
+    by (auto simp: Let_def split: if_splits option.splits)
+  have sizes_ok:
+    "(if (bs ! k) AND 0x04 \<noteq> 0 then 4 else 0) +
+       data_len + inst_len + addr_len \<le> length rest8"
+    using payload_fit by simp
+  have dlen_exact:
+    "dlen = (length rest3 - length rest8) +
+            (if (bs ! k) AND 0x04 \<noteq> 0 then 4 else 0) +
+            data_len + inst_len + addr_len"
+    using dlen_ge dlen_rem by arith
+  show ?thesis
+    using dec3 dec4 di0 dec5 dec6 dec7 sizes_ok dlen_exact by blast
 qed
 
 (* ---------- Phase 1: Output-write infrastructure ---------- *)
