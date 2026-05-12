@@ -3855,6 +3855,50 @@ lemma same_init_loop_zeros:
     done
   done
 
+lemma near_init_loop_zeros_word:
+  "(whileLoop (\<lambda>idx st. idx < (4 :: 32 word))
+      (\<lambda>idx. do {
+          modify (near_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (4 :: 32 word)
+          \<and> (\<forall>i < (4::nat). near_arr_'' t .[i] = (0 :: 32 word))
+          \<and> heap_w8 t = heap_w8 s0
+          \<and> heap_w32 t = heap_w32 s0
+          \<and> same_arr_'' t = same_arr_'' s0
+          \<and> code_tbl_'' t = code_tbl_'' s0
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+proof -
+  have guard_eq: "(\<lambda>idx (st :: lifted_globals). idx < (4 :: 32 word))
+                = (\<lambda>idx st. unat idx < 4)"
+    by (auto simp: fun_eq_iff word_less_nat_alt unat_numeral)
+  show ?thesis
+    by (subst guard_eq) (rule near_init_loop_zeros)
+qed
+
+lemma same_init_loop_zeros_word:
+  "(whileLoop (\<lambda>idx st. idx < (0x300 :: 32 word))
+      (\<lambda>idx. do {
+          modify (same_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (0x300 :: 32 word)
+          \<and> (\<forall>i < (768::nat). same_arr_'' t .[i] = (0 :: 32 word))
+          \<and> heap_w8 t = heap_w8 s0
+          \<and> heap_w32 t = heap_w32 s0
+          \<and> near_arr_'' t = near_arr_'' s0
+          \<and> code_tbl_'' t = code_tbl_'' s0
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+proof -
+  have guard_eq: "(\<lambda>idx (st :: lifted_globals). idx < (0x300 :: 32 word))
+                = (\<lambda>idx st. unat idx < 768)"
+    by (auto simp: fun_eq_iff word_less_nat_alt unat_numeral)
+  show ?thesis
+    by (subst guard_eq) (rule same_init_loop_zeros)
+qed
+
 (*
   Header parse prefix refinement (no-source, no-app-header, code_tbl built).
 
@@ -7818,6 +7862,52 @@ lemma same_init_preserves_setup_word:
           [where buf = src and n = src_n and p = out_len]
   by (simp add: runs_to_conj)
 
+lemma near_init_setup_zero_word:
+  "(whileLoop (\<lambda>idx st. idx < (4 :: 32 word))
+      (\<lambda>idx. do {
+          modify (near_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (4 :: 32 word)
+          \<and> (\<forall>i < (4::nat). near_arr_'' t .[i] = (0 :: 32 word))
+          \<and> heap_bytes t patch patch_n = heap_bytes s0 patch patch_n
+          \<and> heap_bytes t src src_n = heap_bytes s0 src src_n
+          \<and> buf_valid t patch patch_n = buf_valid s0 patch patch_n
+          \<and> buf_valid t src src_n = buf_valid s0 src src_n
+          \<and> heap_w32 t out_len = heap_w32 s0 out_len
+          \<and> same_arr_'' t = same_arr_'' s0
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+          \<and> code_tbl_'' t = code_tbl_'' s0
+          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+  using near_init_loop_zeros_word
+        near_init_preserves_setup_word
+          [where patch = patch and patch_n = patch_n
+             and src = src and src_n = src_n and out_len = out_len]
+  by (simp add: runs_to_conj)
+
+lemma same_init_setup_zero_word:
+  "(whileLoop (\<lambda>idx st. idx < (0x300 :: 32 word))
+      (\<lambda>idx. do {
+          modify (same_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (0x300 :: 32 word)
+          \<and> (\<forall>i < (768::nat). same_arr_'' t .[i] = (0 :: 32 word))
+          \<and> heap_bytes t patch patch_n = heap_bytes s0 patch patch_n
+          \<and> heap_bytes t src src_n = heap_bytes s0 src src_n
+          \<and> buf_valid t patch patch_n = buf_valid s0 patch patch_n
+          \<and> buf_valid t src src_n = buf_valid s0 src src_n
+          \<and> heap_w32 t out_len = heap_w32 s0 out_len
+          \<and> near_arr_'' t = near_arr_'' s0
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+          \<and> code_tbl_'' t = code_tbl_'' s0
+          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+  using same_init_loop_zeros_word
+        same_init_preserves_setup_word
+          [where patch = patch and patch_n = patch_n
+             and src = src and src_n = src_n and out_len = out_len]
+  by (simp add: runs_to_conj)
+
 
 (*
   ----------------------------------------------------------------------
@@ -9404,11 +9494,11 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       unfolding vcdiff_decode'_def
       supply read_byte'_spec [runs_to_vcg]
       supply read_varint'_spec [runs_to_vcg]
-      supply near_init_preserves_setup_word
+      supply near_init_setup_zero_word
           [where patch = patch and patch_n = "unat patch_len"
              and src = src and src_n = "unat src_len" and out_len = out_len,
            runs_to_vcg]
-      supply same_init_preserves_setup_word
+      supply same_init_setup_zero_word
           [where patch = patch and patch_n = "unat patch_len"
              and src = src and src_n = "unat src_len" and out_len = out_len,
            runs_to_vcg]
