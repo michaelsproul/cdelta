@@ -63,6 +63,20 @@ struct ar_t {
     int err;
 };
 
+/* Parsed single-window prefix. */
+struct win_t {
+    unsigned int src_seg_len;
+    unsigned int src_seg_off;
+    unsigned int tgt_len;
+    unsigned int data_pos;
+    unsigned int inst_pos;
+    unsigned int addr_pos;
+    unsigned int data_end;
+    unsigned int inst_end;
+    unsigned int addr_end;
+    int err;
+};
+
 /* ---------- Input cursor helpers ---------- */
 
 static struct pr_t read_byte(unsigned char *buf, unsigned int len,
@@ -276,6 +290,169 @@ static struct ar_t decode_address(unsigned char *patch,
     return r;
 }
 
+/* ---------- Window prefix parsing ---------- */
+
+static struct win_t parse_window_prefix(unsigned char *patch,
+                                        unsigned int patch_len,
+                                        unsigned char *src,
+                                        unsigned int src_len,
+                                        unsigned int out_cap,
+                                        unsigned int pos)
+{
+    struct win_t w;
+    struct pr_t p;
+    unsigned int win_ind;
+    unsigned int dlen;
+    unsigned int delta_start;
+    unsigned int data_len;
+    unsigned int inst_len;
+    unsigned int addr_len;
+    unsigned int adler_len;
+    unsigned int consumed;
+    unsigned int remaining;
+
+    w.src_seg_len = 0U;
+    w.src_seg_off = 0U;
+    w.tgt_len = 0U;
+    w.data_pos = 0U;
+    w.inst_pos = 0U;
+    w.addr_pos = 0U;
+    w.data_end = 0U;
+    w.inst_end = 0U;
+    w.addr_end = 0U;
+    w.err = VCD_OK;
+
+    p = read_byte(patch, patch_len, pos);
+    if (p.err != VCD_OK) {
+        w.err = p.err;
+        return w;
+    }
+    pos = p.pos;
+    win_ind = p.val;
+
+    if ((win_ind & 0x02U) != 0U) {
+        w.err = VCD_ERR_WIN;
+        return w;
+    }
+    if ((win_ind & ~(0x01U | 0x04U)) != 0U) {
+        w.err = VCD_ERR_WIN;
+        return w;
+    }
+
+    if ((win_ind & 0x01U) != 0U) {
+        if (src == (unsigned char *)0) {
+            w.err = VCD_ERR_SRCNEED;
+            return w;
+        }
+        p = read_varint(patch, patch_len, pos);
+        if (p.err != VCD_OK) {
+            w.err = p.err;
+            return w;
+        }
+        pos = p.pos;
+        w.src_seg_len = p.val;
+        p = read_varint(patch, patch_len, pos);
+        if (p.err != VCD_OK) {
+            w.err = p.err;
+            return w;
+        }
+        pos = p.pos;
+        w.src_seg_off = p.val;
+        if (w.src_seg_off > src_len) {
+            w.err = VCD_ERR_SRC;
+            return w;
+        }
+        if (w.src_seg_len > src_len - w.src_seg_off) {
+            w.err = VCD_ERR_SRC;
+            return w;
+        }
+    }
+
+    p = read_varint(patch, patch_len, pos);
+    if (p.err != VCD_OK) {
+        w.err = p.err;
+        return w;
+    }
+    pos = p.pos;
+    dlen = p.val;
+    delta_start = pos;
+    if (dlen > patch_len - pos) {
+        w.err = VCD_ERR_TRUNC;
+        return w;
+    }
+
+    p = read_varint(patch, patch_len, pos);
+    if (p.err != VCD_OK) {
+        w.err = p.err;
+        return w;
+    }
+    pos = p.pos;
+    w.tgt_len = p.val;
+    if (w.tgt_len > out_cap) {
+        w.err = VCD_ERR_OUTCAP;
+        return w;
+    }
+
+    p = read_byte(patch, patch_len, pos);
+    if (p.err != VCD_OK) {
+        w.err = p.err;
+        return w;
+    }
+    pos = p.pos;
+    if (p.val != 0U) {
+        w.err = VCD_ERR_DI;
+        return w;
+    }
+
+    p = read_varint(patch, patch_len, pos);
+    if (p.err != VCD_OK) {
+        w.err = p.err;
+        return w;
+    }
+    pos = p.pos;
+    data_len = p.val;
+
+    p = read_varint(patch, patch_len, pos);
+    if (p.err != VCD_OK) {
+        w.err = p.err;
+        return w;
+    }
+    pos = p.pos;
+    inst_len = p.val;
+
+    p = read_varint(patch, patch_len, pos);
+    if (p.err != VCD_OK) {
+        w.err = p.err;
+        return w;
+    }
+    pos = p.pos;
+    addr_len = p.val;
+
+    adler_len = 0U;
+    if ((win_ind & 0x04U) != 0U) adler_len = 4U;
+
+    consumed = pos - delta_start;
+    if (dlen < consumed) {
+        w.err = VCD_ERR_SIZE;
+        return w;
+    }
+    remaining = dlen - consumed;
+    if (remaining != data_len + inst_len + addr_len + adler_len) {
+        w.err = VCD_ERR_SIZE;
+        return w;
+    }
+
+    pos = pos + adler_len;
+
+    w.data_pos = pos;
+    w.inst_pos = w.data_pos + data_len;
+    w.addr_pos = w.inst_pos + inst_len;
+    w.data_end = w.data_pos + data_len;
+    w.inst_end = w.inst_pos + inst_len;
+    w.addr_end = w.addr_pos + addr_len;
+    return w;
+}
+
 /* ---------- Main decoder ---------- */
 
 int vcdiff_decode(unsigned char *patch, unsigned int patch_len,
@@ -284,18 +461,9 @@ int vcdiff_decode(unsigned char *patch, unsigned int patch_len,
                   unsigned int *out_len)
 {
     unsigned int pos;
-    unsigned int win_ind;
     unsigned int src_seg_len;
     unsigned int src_seg_off;
-    unsigned int dlen;
-    unsigned int delta_start;
     unsigned int tgt_len;
-    unsigned int data_len;
-    unsigned int inst_len;
-    unsigned int addr_len;
-    unsigned int adler_len;
-    unsigned int consumed;
-    unsigned int remaining;
     unsigned int data_pos;
     unsigned int inst_pos;
     unsigned int addr_pos;
@@ -309,6 +477,7 @@ int vcdiff_decode(unsigned char *patch, unsigned int patch_len,
     unsigned int i;
     unsigned char hi;
     struct pr_t p;
+    struct win_t w;
     unsigned int near_ptr;
 
     *out_len = 0U;
@@ -344,85 +513,21 @@ int vcdiff_decode(unsigned char *patch, unsigned int patch_len,
     for (i = 0U; i < NEAR_SZ; i = i + 1U) near_arr[i] = 0U;
     for (i = 0U; i < SAME_SZ * 256U; i = i + 1U) same_arr[i] = 0U;
 
-    p = read_byte(patch, patch_len, pos);
-    if (p.err != VCD_OK) return p.err;
-    pos = p.pos;
-    win_ind = p.val;
+    w = parse_window_prefix(patch, patch_len, src, src_len, out_cap, pos);
+    if (w.err != VCD_OK) return w.err;
 
-    if ((win_ind & 0x02U) != 0U) return VCD_ERR_WIN;
-    if ((win_ind & ~(0x01U | 0x04U)) != 0U) return VCD_ERR_WIN;
-
-    src_seg_len = 0U;
-    src_seg_off = 0U;
-    if ((win_ind & 0x01U) != 0U) {
-        if (src == (unsigned char *)0) return VCD_ERR_SRCNEED;
-        p = read_varint(patch, patch_len, pos);
-        if (p.err != VCD_OK) return p.err;
-        pos = p.pos;
-        src_seg_len = p.val;
-        p = read_varint(patch, patch_len, pos);
-        if (p.err != VCD_OK) return p.err;
-        pos = p.pos;
-        src_seg_off = p.val;
-        if (src_seg_off > src_len) return VCD_ERR_SRC;
-        if (src_seg_len > src_len - src_seg_off) return VCD_ERR_SRC;
-    }
-
-    p = read_varint(patch, patch_len, pos);
-    if (p.err != VCD_OK) return p.err;
-    pos = p.pos;
-    dlen = p.val;
-    delta_start = pos;
-    if (dlen > patch_len - pos) return VCD_ERR_TRUNC;
-
-    p = read_varint(patch, patch_len, pos);
-    if (p.err != VCD_OK) return p.err;
-    pos = p.pos;
-    tgt_len = p.val;
-    if (tgt_len > out_cap) return VCD_ERR_OUTCAP;
-
-    p = read_byte(patch, patch_len, pos);
-    if (p.err != VCD_OK) return p.err;
-    pos = p.pos;
-    if (p.val != 0U) return VCD_ERR_DI;
-
-    p = read_varint(patch, patch_len, pos);
-    if (p.err != VCD_OK) return p.err;
-    pos = p.pos;
-    data_len = p.val;
-
-    p = read_varint(patch, patch_len, pos);
-    if (p.err != VCD_OK) return p.err;
-    pos = p.pos;
-    inst_len = p.val;
-
-    p = read_varint(patch, patch_len, pos);
-    if (p.err != VCD_OK) return p.err;
-    pos = p.pos;
-    addr_len = p.val;
-
-    adler_len = 0U;
-    if ((win_ind & 0x04U) != 0U) adler_len = 4U;
-
-    consumed = pos - delta_start;
-    if (dlen < consumed) return VCD_ERR_SIZE;
-    remaining = dlen - consumed;
-    if (remaining != data_len + inst_len + addr_len + adler_len) {
-        return VCD_ERR_SIZE;
-    }
-
-    pos = pos + adler_len;
-
-    data_pos = pos;
-    inst_pos = data_pos + data_len;
-    addr_pos = inst_pos + inst_len;
-
+    src_seg_len = w.src_seg_len;
+    src_seg_off = w.src_seg_off;
+    tgt_len = w.tgt_len;
+    data_pos = w.data_pos;
+    inst_pos = w.inst_pos;
+    addr_pos = w.addr_pos;
     data_cursor = data_pos;
     inst_cursor = inst_pos;
     addr_cursor = addr_pos;
-    data_end = data_pos + data_len;
-    inst_end = inst_pos + inst_len;
-    addr_end = addr_pos + addr_len;
+    data_end = w.data_end;
+    inst_end = w.inst_end;
+    addr_end = w.addr_end;
     tgt_pos = 0U;
 
     while (inst_cursor < inst_end) {
