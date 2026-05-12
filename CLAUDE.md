@@ -3,6 +3,7 @@
   You have access to `kill`, but you MUST only use it to kill processes you have started
   (e.g. a stuck Isabelle build).
 * Pipe build output to files so you don't need to re-run build commands. Avoid piping directly to
-  head, tail, etc.
+  head, tail, etc. But don't rely on build logs from disk unless you *just* wrote them as part
+  of the same session.
 * Always use `-o system_log=true -v` flags with `isabelle build` to be able to detect stuckness.
 * Never use `is` as a variable name.
