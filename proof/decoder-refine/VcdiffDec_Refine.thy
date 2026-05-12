@@ -42,6 +42,39 @@ lemma heap_bytes_nth:
   "i < n \<Longrightarrow> heap_bytes s buf n ! i = heap_w8 s (buf +\<^sub>p int i)"
   by (simp add: heap_bytes_def)
 
+lemma heap_bytes_slice:
+  assumes "off + n \<le> len"
+  shows "take n (drop off (heap_bytes s buf len)) =
+         heap_bytes s (buf +\<^sub>p int off) n"
+proof (rule nth_equalityI)
+  show "length (take n (drop off (heap_bytes s buf len))) =
+        length (heap_bytes s (buf +\<^sub>p int off) n)"
+    using assms by simp
+next
+  fix i
+  assume "i < length (take n (drop off (heap_bytes s buf len)))"
+  hence i_lt: "i < n" and off_i_lt: "off + i < len"
+    using assms by auto
+  have ptr_eq: "buf +\<^sub>p int (off + i) = buf +\<^sub>p int off +\<^sub>p int i"
+    by (simp add: ptr_add_def)
+  show "take n (drop off (heap_bytes s buf len)) ! i =
+        heap_bytes s (buf +\<^sub>p int off) n ! i"
+    using i_lt off_i_lt ptr_eq
+    by (simp add: heap_bytes_nth)
+qed
+
+lemma heap_bytes_slice_word:
+  fixes off n :: "32 word"
+  assumes "unat off + unat n \<le> len"
+  shows "take (unat n) (drop (unat off) (heap_bytes s buf len)) =
+         heap_bytes s (buf +\<^sub>p uint off) (unat n)"
+proof -
+  have ptr_eq: "buf +\<^sub>p int (unat off) = buf +\<^sub>p uint off"
+    by (simp only: uint_nat)
+  from heap_bytes_slice[OF assms, of s buf] show ?thesis
+    by (simp only: ptr_eq)
+qed
+
 (* ---------- Buffer validity ---------- *)
 
 definition buf_valid :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> bool" where
