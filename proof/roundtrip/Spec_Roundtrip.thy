@@ -182,6 +182,12 @@ lemma parse_window_no_source_head:
   assumes caps:
      "dlen < 2 ^ 32" "tgt_len < 2 ^ 32"
      "length data < 2 ^ 32" "length inst < 2 ^ 32" "length addr < 2 ^ 32"
+    and dlen_eq:
+     "dlen = varint_size tgt_len + 1
+           + varint_size (length data)
+           + varint_size (length inst)
+           + varint_size (length addr)
+           + length data + length inst + length addr"
   shows
     "parse_window
        (0x00 # varint_encode dlen @ varint_encode tgt_len @ [0x00]
@@ -210,7 +216,8 @@ proof -
   have di_tests: "(0x00 :: byte) \<noteq> 0 \<longleftrightarrow> False" by simp
   show ?thesis
     unfolding parse_window_def pop_byte_def Let_def
-    by (simp add: vdlen vtgt vdata vinst vaddr wi_tests di_tests)
+    apply (simp add: vdlen vtgt vdata vinst vaddr wi_tests di_tests)
+    by (simp add: dlen_eq)
 qed
 
 (*
@@ -712,6 +719,12 @@ lemma parse_window_with_source_head:
   assumes caps:
      "dlen < 2 ^ 32" "tgt_len < 2 ^ 32" "src_len < 2 ^ 32"
      "length data < 2 ^ 32" "length inst < 2 ^ 32" "length addr < 2 ^ 32"
+    and dlen_eq:
+     "dlen = varint_size tgt_len + 1
+           + varint_size (length data)
+           + varint_size (length inst)
+           + varint_size (length addr)
+           + length data + length inst + length addr"
   shows
     "parse_window
        (0x01 # varint_encode src_len @ varint_encode 0 @ varint_encode dlen
@@ -745,7 +758,8 @@ proof -
   have di_tests: "(0x00 :: byte) \<noteq> 0 \<longleftrightarrow> False" by simp
   show ?thesis
     unfolding parse_window_def pop_byte_def Let_def
-    by (simp add: vsl vso vdlen vtgt vdata vinst vaddr wi_tests_1 di_tests)
+    apply (simp add: vsl vso vdlen vtgt vdata vinst vaddr wi_tests_1 di_tests)
+    by (simp add: dlen_eq)
 qed
 
 (* ---------- encode_spec for non-empty source (small/large tgt) ---------- *)
@@ -2291,7 +2305,8 @@ proof -
       = Inl ( \<lparr> pw_src_seg_len = 0, pw_src_seg_off = 0
               , pw_tgt_len = length tgt
               , pw_data = data, pw_inst = inst, pw_addr = addr \<rparr>, [])"
-      using parse_window_no_source_head[OF dlen_bd tgt_bd assms(3,4,5)] .
+      using parse_window_no_source_head[OF dlen_bd tgt_bd assms(3,4,5)]
+      by simp
     show ?thesis
       using ph' pw len_zero
       by (simp add: decode_spec_def Let_def)

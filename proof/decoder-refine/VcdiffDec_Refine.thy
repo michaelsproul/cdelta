@@ -102,6 +102,22 @@ lemma ptr_valid_code_tbl_built_update[simp]:
   "ptr_valid (heap_typing (code_tbl_built_''_update f s)) p = ptr_valid (heap_typing s) p"
   by simp
 
+lemma heap_typing_near_arr_update[simp]:
+  "heap_typing (near_arr_''_update f s) = heap_typing s"
+  by simp
+
+lemma heap_typing_same_arr_update[simp]:
+  "heap_typing (same_arr_''_update f s) = heap_typing s"
+  by simp
+
+lemma heap_typing_code_tbl_update[simp]:
+  "heap_typing (code_tbl_''_update f s) = heap_typing s"
+  by simp
+
+lemma heap_typing_code_tbl_built_update[simp]:
+  "heap_typing (code_tbl_built_''_update f s) = heap_typing s"
+  by simp
+
 (* ---------- Return-code constants ---------- *)
 
 abbreviation VCD_OK  :: "32 signed word" where "VCD_OK  \<equiv> 0"
@@ -2805,9 +2821,9 @@ lemma build_code_table'_spec:
   Stronger variant of build_code_table'_spec used downstream: also
   states that heap_typing is preserved.  (build_code_table' only
   modifies code_tbl_'' and code_tbl_built_'', neither of which
-  affects heap_typing.)  Sorried for now — run by re-stating with
-  heap_typing carried in the invariant, or via AutoCorres's
-  runs_to_partial_weaken.
+  affects heap_typing.)  Sorried for now — the first direct VCG
+  attempt re-entered the full nested code-table proof and produced
+  unhelpfully long builds.
 *)
 lemma build_code_table'_preserves_typing:
   "build_code_table' \<bullet> s
@@ -3869,6 +3885,7 @@ lemma parse_window_no_source:
       and no_target: "win_ind AND 0x02 = 0"
       and mask_ok: "win_ind AND 0xFA = 0"
       and no_source: "win_ind AND 0x01 = 0"
+      and no_adler: "win_ind AND 0x04 = 0"
       and dlen_ok: "varint_decode wbs1 = Some (dlen, wbs2)"
       and tgt_ok: "varint_decode wbs2 = Some (tgt_len, wbs3)"
       and di_pop: "pop_byte wbs3 = Some (di, wbs4)"
@@ -3877,6 +3894,7 @@ lemma parse_window_no_source:
       and inst_ok: "varint_decode wbs5 = Some (inst_len, wbs6)"
       and addr_ok: "varint_decode wbs6 = Some (addr_len, wbs7)"
       and sizes_ok: "data_len + inst_len + addr_len \<le> length wbs7"
+      and dlen_exact: "dlen = (length wbs2 - length wbs7) + data_len + inst_len + addr_len"
   shows "parse_window wbs = Inl (\<lparr>
            pw_src_seg_len = 0,
            pw_src_seg_off = 0,
@@ -3887,7 +3905,7 @@ lemma parse_window_no_source:
          \<rparr>, drop (data_len + inst_len + addr_len) wbs7)"
   unfolding parse_window_def
   using win_byte no_target mask_ok no_source dlen_ok tgt_ok di_pop di_zero
-        data_ok inst_ok addr_ok sizes_ok
+        data_ok inst_ok addr_ok sizes_ok no_adler dlen_exact
   by (simp add: pop_byte_def Let_def add.commute add.left_commute
            split: list.splits option.splits)
 
@@ -3896,6 +3914,7 @@ lemma parse_window_with_source:
       and no_target: "win_ind AND 0x02 = 0"
       and mask_ok: "win_ind AND 0xFA = 0"
       and has_source: "win_ind AND 0x01 \<noteq> 0"
+      and no_adler: "win_ind AND 0x04 = 0"
       and sl_ok: "varint_decode wbs1 = Some (src_seg_len, wbs1a)"
       and so_ok: "varint_decode wbs1a = Some (src_seg_off, wbs3)"
       and dlen_ok: "varint_decode wbs3 = Some (dlen, wbs4)"
@@ -3906,6 +3925,7 @@ lemma parse_window_with_source:
       and inst_ok: "varint_decode wbs7 = Some (inst_len, wbs8)"
       and addr_ok: "varint_decode wbs8 = Some (addr_len, wbs9)"
       and sizes_ok: "data_len + inst_len + addr_len \<le> length wbs9"
+      and dlen_exact: "dlen = (length wbs4 - length wbs9) + data_len + inst_len + addr_len"
   shows "parse_window wbs = Inl (\<lparr>
            pw_src_seg_len = src_seg_len,
            pw_src_seg_off = src_seg_off,
@@ -3916,7 +3936,7 @@ lemma parse_window_with_source:
          \<rparr>, drop (data_len + inst_len + addr_len) wbs9)"
   unfolding parse_window_def
   using win_byte no_target mask_ok has_source sl_ok so_ok dlen_ok tgt_ok
-        di_pop di_zero data_ok inst_ok addr_ok sizes_ok
+        di_pop di_zero data_ok inst_ok addr_ok sizes_ok no_adler dlen_exact
   by (simp add: pop_byte_def Let_def add.commute add.left_commute
            split: list.splits option.splits)
 
@@ -4917,6 +4937,7 @@ lemma prefix_refine_no_source:
       and addr_ok: "varint_decode wbs6 = Some (addr_len, wbs7)"
       \<comment> \<open>Section sizes fit\<close>
       and sizes_ok: "data_len + inst_len + addr_len \<le> length wbs7"
+      and dlen_exact: "dlen = (length wbs2 - length wbs7) + data_len + inst_len + addr_len"
   shows "parse_header bs = Inl (drop 5 bs)
        \<and> parse_window (drop 5 bs) = Inl (\<lparr>
            pw_src_seg_len = 0,
@@ -4939,7 +4960,8 @@ next
            pw_addr = take addr_len (drop (data_len + inst_len) wbs7)
          \<rparr>, drop (data_len + inst_len + addr_len) wbs7)"
     by (rule parse_window_no_source[OF win_ind_parse no_target win_mask_ok no_source
-            dlen_ok tgt_ok di_pop di_zero data_ok inst_ok addr_ok sizes_ok])
+            no_adler dlen_ok tgt_ok di_pop di_zero data_ok inst_ok addr_ok sizes_ok
+            dlen_exact])
 qed
 
 (*

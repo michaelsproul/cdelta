@@ -76,7 +76,8 @@ definition parse_window ::
           if win_ind AND 0x02 \<noteq> 0 then Inr E_WIN
           else if win_ind AND 0xFA \<noteq> 0 then Inr E_WIN
           else
-            let has_src = (win_ind AND 0x01 \<noteq> 0) in
+            let has_src = (win_ind AND 0x01 \<noteq> 0);
+                adler_len = (if win_ind AND 0x04 \<noteq> 0 then 4 else 0) in
             (case (if has_src
                    then case varint_decode bs1 of
                           None \<Rightarrow> None
@@ -107,25 +108,28 @@ definition parse_window ::
                                       (case varint_decode bs8 of
                                         None \<Rightarrow> Inr E_TRUNC
                                       | Some (addr_len, bs9) \<Rightarrow>
-                                          \<comment> \<open>No Adler32 in our encoder output; the C supports
-                                              it but the spec doesn't emit it.\<close>
-                                          if data_len + inst_len + addr_len > length bs9
-                                          then Inr E_TRUNC
-                                          else
-                                            let data = take data_len bs9;
-                                                rest1 = drop data_len bs9;
-                                                inst = take inst_len rest1;
-                                                rest2 = drop inst_len rest1;
-                                                addr = take addr_len rest2;
-                                                tail = drop addr_len rest2
-                                            in Inl (\<lparr>
-                                              pw_src_seg_len = src_seg_len,
-                                              pw_src_seg_off = src_seg_off,
-                                              pw_tgt_len     = tgt_len,
-                                              pw_data        = data,
-                                              pw_inst        = inst,
-                                              pw_addr        = addr
-                                            \<rparr>, tail)))))))))"
+                                          let consumed = length bs4 - length bs9;
+                                              payload_len = adler_len + data_len + inst_len + addr_len
+                                          in
+                                            if dlen < consumed then Inr E_SIZE
+                                            else if dlen - consumed \<noteq> payload_len then Inr E_SIZE
+                                            else if payload_len > length bs9 then Inr E_TRUNC
+                                            else
+                                              let after_adler = drop adler_len bs9;
+                                                  data = take data_len after_adler;
+                                                  rest1 = drop data_len after_adler;
+                                                  inst = take inst_len rest1;
+                                                  rest2 = drop inst_len rest1;
+                                                  addr = take addr_len rest2;
+                                                  tail = drop addr_len rest2
+                                              in Inl (\<lparr>
+                                                pw_src_seg_len = src_seg_len,
+                                                pw_src_seg_off = src_seg_off,
+                                                pw_tgt_len     = tgt_len,
+                                                pw_data        = data,
+                                                pw_inst        = inst,
+                                                pw_addr        = addr
+                                              \<rparr>, tail)))))))))"
 
 (* ---------- Instruction dispatch loop ---------- *)
 
@@ -236,6 +240,8 @@ definition apply_window ::
                 Inr e \<Rightarrow> Inr e
               | Inl st \<Rightarrow>
                   if length (ds_tgt st) = pw_tgt_len win
+                     \<and> ds_data_rem st = []
+                     \<and> ds_addr_rem st = []
                   then Inl (ds_tgt st)
                   else Inr E_SIZE)"
 
