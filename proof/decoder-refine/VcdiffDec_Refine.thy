@@ -48,6 +48,12 @@ lemma heap_bytes_eq_heap_w8D:
   shows "heap_w8 t (buf +\<^sub>p int i) = heap_w8 s (buf +\<^sub>p int i)"
   using assms by (metis heap_bytes_nth)
 
+lemma heap_bytes_eq_heap_w8_uintD:
+  assumes "heap_bytes t buf n = heap_bytes s buf n"
+      and "unat i < n"
+  shows "heap_w8 t (buf +\<^sub>p uint i) = heap_w8 s (buf +\<^sub>p uint i)"
+  using heap_bytes_eq_heap_w8D[OF assms] by (simp only: uint_nat)
+
 lemma heap_bytes_slice:
   assumes "off + n \<le> len"
   shows "take n (drop off (heap_bytes s buf len)) =
@@ -4120,6 +4126,22 @@ lemma parse_window_with_source_adler_general:
                 drop_drop
          split: list.splits option.splits)
 
+lemma parse_window_drop_byte_bits:
+  assumes parsed: "parse_window (drop k bs) = Inl x"
+      and k_lt: "k < length bs"
+  shows "(bs ! k) AND 0x02 = 0"
+    and "(bs ! k) AND 0xFA = 0"
+proof -
+  have drop_eq: "drop k bs = bs ! k # drop (Suc k) bs"
+    using k_lt by (simp add: Cons_nth_drop_Suc)
+  show "(bs ! k) AND 0x02 = 0"
+    using parsed unfolding parse_window_def drop_eq pop_byte_def
+    by (auto split: if_splits option.splits)
+  show "(bs ! k) AND 0xFA = 0"
+    using parsed unfolding parse_window_def drop_eq pop_byte_def
+    by (auto split: if_splits option.splits)
+qed
+
 (* ---------- Phase 1: Output-write infrastructure ---------- *)
 
 (*
@@ -7908,6 +7930,162 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
              Deferred — see planning/refine-progress.md for the strengthened
              decode_loop_inv approach.\<close>
            apply runs_to_vcg
+           subgoal premises prems
+           proof -
+             let ?bs = "heap_bytes s patch (unat patch_len)"
+             let ?k_w = "pr_t_C.pos_C va + val_C va"
+             let ?k = "unat ?k_w"
+             have hi4: "hi AND 4 \<noteq> 0"
+               using prems hi_v ucast_and_4_equiv by simp
+             obtain app_len app_rest where
+               vd: "varint_decode body = Some (app_len, app_rest)"
+               and app_len_le: "app_len \<le> length app_rest"
+               and rest_eq: "rest = drop app_len app_rest"
+               using parse_header_app[unfolded app_bit_def] hi4 by blast
+             have vd_bs: "varint_decode (drop 5 ?bs) = Some (app_len, app_rest)"
+               using vd body_from_drop5 by simp
+             have app_len_eq: "app_len = unat (val_C va)"
+               and pos_eq: "unat (pr_t_C.pos_C va) = unat patch_len - length app_rest"
+               using prems vd_bs by auto
+             have pos_drop: "drop (unat (pr_t_C.pos_C va)) ?bs = app_rest"
+               using varint_decode_drop_rest[OF vd_bs] pos_eq by simp
+             have val_le: "val_C va \<le> patch_len - pr_t_C.pos_C va"
+               using prems by (simp add: word_le_not_less)
+             have k_unat: "?k = unat (pr_t_C.pos_C va) + unat (val_C va)"
+               using val_le prems
+               apply (simp add: word_le_nat_alt unat_sub)
+               apply (subst unat_word_ariths(1))
+               using unat_lt2p[of patch_len]
+               apply auto
+               done
+             have rest_at_k: "drop ?k ?bs = rest"
+             proof -
+               have "drop ?k ?bs =
+                     drop (unat (val_C va))
+                       (drop (unat (pr_t_C.pos_C va)) ?bs)"
+                 using k_unat by (simp add: drop_drop add.commute)
+               also have "\<dots> = drop (unat (val_C va)) app_rest"
+                 using pos_drop by simp
+               also have "\<dots> = rest"
+                 using rest_eq app_len_eq by simp
+               finally show ?thesis .
+             qed
+             have parsed_at_k: "parse_window (drop ?k ?bs) = Inl (win, tail)"
+               using pw rest_at_k by simp
+             have k_lt: "?k < length ?bs"
+               using prems by (simp add: word_less_nat_alt)
+             have bit_clear: "(?bs ! ?k) AND 0x02 = 0"
+               by (rule parse_window_drop_byte_bits(1)[OF parsed_at_k k_lt])
+             have nth_eq: "?bs ! ?k = heap_w8 s (patch +\<^sub>p uint ?k_w)"
+               using k_lt by (simp add: heap_bytes_nth)
+             have heap_eq: "heap_w8 td (patch +\<^sub>p uint ?k_w) =
+                            heap_w8 s (patch +\<^sub>p uint ?k_w)"
+               using prems k_lt by (auto dest: heap_bytes_eq_heap_w8_uintD)
+             have byte_clear:
+               "heap_w8 s (patch +\<^sub>p uint ?k_w) AND (2 :: 8 word) = 0"
+               using bit_clear nth_eq by simp
+             have bit_clear32:
+               "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p uint ?k_w)) AND
+                (2 :: 32 word) = 0"
+             proof -
+               have "UCAST(8 \<rightarrow> 32)
+                       (heap_w8 s (patch +\<^sub>p uint ?k_w) AND (2 :: 8 word))
+                     = (0 :: 32 word)"
+                 using byte_clear by simp
+               moreover have "UCAST(8 \<rightarrow> 32)
+                       (heap_w8 s (patch +\<^sub>p uint ?k_w) AND (2 :: 8 word))
+                     = UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p uint ?k_w)) AND
+                       (2 :: 32 word)"
+                 by word_bitwise
+               ultimately show ?thesis by simp
+             qed
+             show False
+               using prems bit_clear32 heap_eq by simp
+           qed
+           subgoal premises prems
+           proof -
+             let ?bs = "heap_bytes s patch (unat patch_len)"
+             let ?k_w = "pr_t_C.pos_C va + val_C va"
+             let ?k = "unat ?k_w"
+             have hi4: "hi AND 4 \<noteq> 0"
+               using prems hi_v ucast_and_4_equiv by simp
+             obtain app_len app_rest where
+               vd: "varint_decode body = Some (app_len, app_rest)"
+               and app_len_le: "app_len \<le> length app_rest"
+               and rest_eq: "rest = drop app_len app_rest"
+               using parse_header_app[unfolded app_bit_def] hi4 by blast
+             have vd_bs: "varint_decode (drop 5 ?bs) = Some (app_len, app_rest)"
+               using vd body_from_drop5 by simp
+             have app_len_eq: "app_len = unat (val_C va)"
+               and pos_eq: "unat (pr_t_C.pos_C va) = unat patch_len - length app_rest"
+               using prems vd_bs by auto
+             have pos_drop: "drop (unat (pr_t_C.pos_C va)) ?bs = app_rest"
+               using varint_decode_drop_rest[OF vd_bs] pos_eq by simp
+             have val_le: "val_C va \<le> patch_len - pr_t_C.pos_C va"
+               using prems by (simp add: word_le_not_less)
+             have k_unat: "?k = unat (pr_t_C.pos_C va) + unat (val_C va)"
+               using val_le prems
+               apply (simp add: word_le_nat_alt unat_sub)
+               apply (subst unat_word_ariths(1))
+               using unat_lt2p[of patch_len]
+               apply auto
+               done
+             have rest_at_k: "drop ?k ?bs = rest"
+             proof -
+               have "drop ?k ?bs =
+                     drop (unat (val_C va))
+                       (drop (unat (pr_t_C.pos_C va)) ?bs)"
+                 using k_unat by (simp add: drop_drop add.commute)
+               also have "\<dots> = drop (unat (val_C va)) app_rest"
+                 using pos_drop by simp
+               also have "\<dots> = rest"
+                 using rest_eq app_len_eq by simp
+               finally show ?thesis .
+             qed
+             have parsed_at_k: "parse_window (drop ?k ?bs) = Inl (win, tail)"
+               using pw rest_at_k by simp
+             have k_lt: "?k < length ?bs"
+               using prems by (simp add: word_less_nat_alt)
+             have bit_clear: "(?bs ! ?k) AND 0xFA = 0"
+               by (rule parse_window_drop_byte_bits(2)[OF parsed_at_k k_lt])
+             have nth_eq: "?bs ! ?k = heap_w8 s (patch +\<^sub>p uint ?k_w)"
+               using k_lt by (simp add: heap_bytes_nth)
+             have heap_eq: "heap_w8 td (patch +\<^sub>p uint ?k_w) =
+                            heap_w8 s (patch +\<^sub>p uint ?k_w)"
+               using prems k_lt by (auto dest: heap_bytes_eq_heap_w8_uintD)
+             have byte_clear:
+               "heap_w8 s (patch +\<^sub>p uint ?k_w) AND (0xFA :: 8 word) = 0"
+               using bit_clear nth_eq by simp
+             have bit_clear32:
+               "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p uint ?k_w)) AND
+                (0xFFFFFFFA :: 32 word) = 0"
+             proof -
+               have low_mask:
+                 "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p uint ?k_w)) AND
+                  (0xFA :: 32 word) = 0"
+               proof -
+                 have "UCAST(8 \<rightarrow> 32)
+                         (heap_w8 s (patch +\<^sub>p uint ?k_w) AND (0xFA :: 8 word))
+                       = (0 :: 32 word)"
+                   using byte_clear by simp
+                 moreover have "UCAST(8 \<rightarrow> 32)
+                         (heap_w8 s (patch +\<^sub>p uint ?k_w) AND (0xFA :: 8 word))
+                       = UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p uint ?k_w)) AND
+                         (0xFA :: 32 word)"
+                   by word_bitwise
+                 ultimately show ?thesis by simp
+               qed
+               have mask_eq:
+                 "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p uint ?k_w)) AND
+                  (0xFFFFFFFA :: 32 word) =
+                  UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p uint ?k_w)) AND
+                  (0xFA :: 32 word)"
+                 by word_bitwise
+               show ?thesis using low_mask mask_eq by simp
+             qed
+             show False
+               using prems bit_clear32 heap_eq by simp
+           qed
            sorry
          subgoal sorry \<comment> \<open>truncation branch — contradiction from Inl, deferred\<close>
          done
