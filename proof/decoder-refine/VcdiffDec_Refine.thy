@@ -1771,6 +1771,26 @@ definition code_tbl_matches :: "lifted_globals \<Rightarrow> bool" where
   "code_tbl_matches s =
      (\<forall>op < 256. entry_of_row (code_tbl_'' s .[op]) = default_entry op)"
 
+lemma code_tbl_matches_heap_w8_update[simp]:
+  "code_tbl_matches (heap_w8_update f s) = code_tbl_matches s"
+  by (simp add: code_tbl_matches_def)
+
+lemma code_tbl_matches_heap_w32_update[simp]:
+  "code_tbl_matches (heap_w32_update f s) = code_tbl_matches s"
+  by (simp add: code_tbl_matches_def)
+
+lemma code_tbl_matches_near_arr_update[simp]:
+  "code_tbl_matches (near_arr_''_update f s) = code_tbl_matches s"
+  by (simp add: code_tbl_matches_def)
+
+lemma code_tbl_matches_same_arr_update[simp]:
+  "code_tbl_matches (same_arr_''_update f s) = code_tbl_matches s"
+  by (simp add: code_tbl_matches_def)
+
+lemma code_tbl_matches_code_tbl_built_update[simp]:
+  "code_tbl_matches (code_tbl_built_''_update f s) = code_tbl_matches s"
+  by (simp add: code_tbl_matches_def)
+
 (*
   Build-code-table contract.
 
@@ -5330,17 +5350,19 @@ lemma near_init_preserves_patch_heap:
     \<lbrace> \<lambda>r t. r = Result (4 :: 32 word)
           \<and> heap_bytes t buf n = heap_bytes s0 buf n
           \<and> buf_valid t buf n = buf_valid s0 buf n
-          \<and> heap_w32 t p = heap_w32 s0 p
-          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
-          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+	          \<and> heap_w32 t p = heap_w32 s0 p
+	          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+	          \<and> code_tbl_'' t = code_tbl_'' s0
+	          \<and> heap_typing t = heap_typing s0 \<rbrace>"
   apply (rule runs_to_whileLoop_res'[
      where R = "measure (\<lambda>((idx :: 32 word), _). 4 - unat idx)"
        and I = "\<lambda>idx st. unat idx \<le> 4
               \<and> heap_bytes st buf n = heap_bytes s0 buf n
               \<and> buf_valid st buf n = buf_valid s0 buf n
-              \<and> heap_w32 st p = heap_w32 s0 p
-              \<and> code_tbl_built_'' st = code_tbl_built_'' s0
-              \<and> heap_typing st = heap_typing s0"])
+	              \<and> heap_w32 st p = heap_w32 s0 p
+	              \<and> code_tbl_built_'' st = code_tbl_built_'' s0
+	              \<and> code_tbl_'' st = code_tbl_'' s0
+	              \<and> heap_typing st = heap_typing s0"])
   subgoal by simp
   subgoal by simp
   subgoal for idx st
@@ -5365,17 +5387,19 @@ lemma same_init_preserves_patch_heap:
     \<lbrace> \<lambda>r t. r = Result (768 :: 32 word)
           \<and> heap_bytes t buf n = heap_bytes s0 buf n
           \<and> buf_valid t buf n = buf_valid s0 buf n
-          \<and> heap_w32 t p = heap_w32 s0 p
-          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
-          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+	          \<and> heap_w32 t p = heap_w32 s0 p
+	          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+	          \<and> code_tbl_'' t = code_tbl_'' s0
+	          \<and> heap_typing t = heap_typing s0 \<rbrace>"
   apply (rule runs_to_whileLoop_res'[
      where R = "measure (\<lambda>((idx :: 32 word), _). 768 - unat idx)"
        and I = "\<lambda>idx st. unat idx \<le> 768
               \<and> heap_bytes st buf n = heap_bytes s0 buf n
               \<and> buf_valid st buf n = buf_valid s0 buf n
-              \<and> heap_w32 st p = heap_w32 s0 p
-              \<and> code_tbl_built_'' st = code_tbl_built_'' s0
-              \<and> heap_typing st = heap_typing s0"])
+	              \<and> heap_w32 st p = heap_w32 s0 p
+	              \<and> code_tbl_built_'' st = code_tbl_built_'' s0
+	              \<and> code_tbl_'' st = code_tbl_'' s0
+	              \<and> heap_typing st = heap_typing s0"])
   subgoal by simp
   subgoal by simp
   subgoal for idx st
@@ -5997,6 +6021,81 @@ proof -
     \<comment> \<open>wf.\<close>
     subgoal by simp
     \<comment> \<open>Initial invariant.\<close>
+    subgoal using inv_entry by simp
+    done
+qed
+
+lemma outer_whileLoop_correct_success_abstract:
+  fixes B :: "32 word \<times> 32 word \<times> 32 word \<times> 32 word \<times> 32 word
+              \<Rightarrow> (int, 32 word \<times> 32 word \<times> 32 word \<times> 32 word \<times> 32 word,
+                  lifted_globals) exn_monad"
+  assumes inv_entry:
+    "decode_loop_inv_plus s0 patch patch_n src src_n out
+       src_seg_off src_seg_len tgt_len
+       data_end inst_end addr_end src_seg tgt
+       data_pos inst_pos addr_pos 0 0 t0"
+  assumes body_preserves:
+    "\<And>ac dc ic np tp t. ic < inst_end \<Longrightarrow>
+      decode_loop_inv_plus s0 patch patch_n src src_n out
+        src_seg_off src_seg_len tgt_len
+        data_end inst_end addr_end src_seg tgt
+        dc ic ac tp np t \<Longrightarrow>
+      B (ac, dc, ic, np, tp) \<bullet> t
+        \<lbrace> \<lambda>r t'. (\<forall>ac' dc' ic' np' tp'. r = Result (ac', dc', ic', np', tp') \<longrightarrow>
+              decode_loop_inv_plus s0 patch patch_n src src_n out
+                src_seg_off src_seg_len tgt_len
+                data_end inst_end addr_end src_seg tgt
+                dc' ic' ac' tp' np' t' \<and>
+              ic < ic') \<and>
+              (\<forall>e. r = Exn e \<longrightarrow> False) \<rbrace>"
+  shows "(whileLoop (\<lambda>(ac, dc, ic, np, tp) s. ic < inst_end) B
+                    (addr_pos, data_pos, inst_pos, 0, 0)) \<bullet> t0
+         \<lbrace> \<lambda>r t. (\<forall>ac dc ic np tp. r = Result (ac, dc, ic, np, tp) \<longrightarrow>
+               ic = inst_end \<and>
+               dc = data_end \<and>
+               ac = addr_end \<and>
+               heap_bytes t out (unat tp) = tgt \<and>
+               unat tp = tgt_len) \<and>
+               (\<forall>e. r = Exn e \<longrightarrow> False) \<rbrace>"
+proof -
+  have ie_le: "unat inst_end \<le> patch_n"
+    using inv_entry by (rule decode_loop_inv_plus_ie_le)
+  let ?I = "\<lambda>r t.
+        (\<forall>ac dc ic np tp. r = Result (ac, dc, ic, np, tp) \<longrightarrow>
+            decode_loop_inv_plus s0 patch patch_n src src_n out
+              src_seg_off src_seg_len tgt_len
+              data_end inst_end addr_end src_seg tgt
+              dc ic ac tp np t) \<and>
+        (\<forall>e. r = Exn e \<longrightarrow> False)"
+  show ?thesis
+    apply (rule runs_to_whileLoop_exn'
+      [where I = ?I
+         and R = "measure (\<lambda>((ac, dc, ic, np, tp), _). unat inst_end - unat ic)"])
+    subgoal for a t
+      apply clarsimp
+      apply (rule runs_to_weaken[OF body_preserves])
+        apply assumption
+       apply blast
+      apply (elim conjE)
+      apply (intro conjI allI impI)
+        apply blast
+       apply blast
+      apply clarsimp
+      apply (drule decode_loop_inv_plus_ic_le)
+      apply (simp add: word_less_nat_alt word_le_nat_alt)
+      done
+    subgoal for a t
+      apply (clarsimp simp: split_def)
+      apply (frule decode_loop_inv_plus_ic_le)
+      apply (subgoal_tac "ic = inst_end")
+       prefer 2 apply (simp add: word_le_not_less)
+      apply clarsimp
+      apply (frule decode_loop_inv_plus_coreD)
+      apply (drule decode_loop_inv_plus_exit[OF _ ie_le])
+      apply (auto simp: decode_loop_inv_core_def)
+      done
+    subgoal for a t by simp
+    subgoal by simp
     subgoal using inv_entry by simp
     done
 qed
@@ -7642,9 +7741,10 @@ lemma near_init_preserves_patch_heap_word:
     \<lbrace> \<lambda>r t. r = Result (4 :: 32 word)
           \<and> heap_bytes t buf n = heap_bytes s0 buf n
           \<and> buf_valid t buf n = buf_valid s0 buf n
-          \<and> heap_w32 t p = heap_w32 s0 p
-          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
-          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+	          \<and> heap_w32 t p = heap_w32 s0 p
+	          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+	          \<and> code_tbl_'' t = code_tbl_'' s0
+	          \<and> heap_typing t = heap_typing s0 \<rbrace>"
 proof -
   \<comment> \<open>The word guard `idx < 4` is equivalent to `unat idx < 4` on 32 words
       (since 4 < 2^32), and our existing lemma proves the nat-guard form.\<close>
@@ -7664,9 +7764,10 @@ lemma same_init_preserves_patch_heap_word:
     \<lbrace> \<lambda>r t. r = Result (0x300 :: 32 word)
           \<and> heap_bytes t buf n = heap_bytes s0 buf n
           \<and> buf_valid t buf n = buf_valid s0 buf n
-          \<and> heap_w32 t p = heap_w32 s0 p
-          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
-          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+	          \<and> heap_w32 t p = heap_w32 s0 p
+	          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+	          \<and> code_tbl_'' t = code_tbl_'' s0
+	          \<and> heap_typing t = heap_typing s0 \<rbrace>"
 proof -
   have guard_eq: "(\<lambda>idx (st :: lifted_globals). idx < (0x300 :: 32 word))
                 = (\<lambda>idx st. unat idx < 0x300)"
@@ -7686,9 +7787,10 @@ lemma near_init_preserves_setup_word:
           \<and> heap_bytes t src src_n = heap_bytes s0 src src_n
           \<and> buf_valid t patch patch_n = buf_valid s0 patch patch_n
           \<and> buf_valid t src src_n = buf_valid s0 src src_n
-          \<and> heap_w32 t out_len = heap_w32 s0 out_len
-          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
-          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+	          \<and> heap_w32 t out_len = heap_w32 s0 out_len
+	          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+	          \<and> code_tbl_'' t = code_tbl_'' s0
+	          \<and> heap_typing t = heap_typing s0 \<rbrace>"
   using near_init_preserves_patch_heap_word
           [where buf = patch and n = patch_n and p = out_len]
         near_init_preserves_patch_heap_word
@@ -7706,9 +7808,10 @@ lemma same_init_preserves_setup_word:
           \<and> heap_bytes t src src_n = heap_bytes s0 src src_n
           \<and> buf_valid t patch patch_n = buf_valid s0 patch patch_n
           \<and> buf_valid t src src_n = buf_valid s0 src src_n
-          \<and> heap_w32 t out_len = heap_w32 s0 out_len
-          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
-          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+	          \<and> heap_w32 t out_len = heap_w32 s0 out_len
+	          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+	          \<and> code_tbl_'' t = code_tbl_'' s0
+	          \<and> heap_typing t = heap_typing s0 \<rbrace>"
   using same_init_preserves_patch_heap_word
           [where buf = patch and n = patch_n and p = out_len]
         same_init_preserves_patch_heap_word
