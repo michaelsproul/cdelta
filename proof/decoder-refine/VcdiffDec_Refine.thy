@@ -2821,10 +2821,24 @@ lemma build_code_table'_spec:
   Stronger variant of build_code_table'_spec used downstream: also
   states that heap_typing is preserved.  (build_code_table' only
   modifies code_tbl_'' and code_tbl_built_'', neither of which
-  affects heap_typing.)  Sorried for now — the first direct VCG
-  attempt re-entered the full nested code-table proof and produced
-  unhelpfully long builds.
+  affects heap_typing.)
 *)
+lemma build_code_table'_heap_typing:
+  "build_code_table' \<bullet> s
+     \<lbrace> \<lambda>_ s'. heap_typing s' = heap_typing s \<rbrace>"
+proof -
+  have ut: "build_code_table' \<bullet> s
+      ?\<lbrace> \<lambda>_ s'. unchanged_typing_on UNIV s s' \<rbrace>"
+    by (rule unchanged_typing)
+  have partial: "build_code_table' \<bullet> s
+      ?\<lbrace> \<lambda>_ s'. heap_typing s' = heap_typing s \<rbrace>"
+    apply (rule runs_to_partial_weaken[OF ut])
+    apply (simp add: unchanged_typing_on_UNIV_iff)
+    done
+  show ?thesis
+    by (rule runs_to_of_runs_to_partial_runs_to'[OF build_code_table'_spec partial])
+qed
+
 lemma build_code_table'_preserves_typing:
   "build_code_table' \<bullet> s
      \<lbrace> \<lambda>r s'. r = Result () \<and>
@@ -2833,7 +2847,8 @@ lemma build_code_table'_preserves_typing:
              near_arr_'' s' = near_arr_'' s \<and>
              same_arr_'' s' = same_arr_'' s \<and>
              heap_typing s' = heap_typing s \<rbrace>"
-  sorry
+  using build_code_table'_spec[of s] build_code_table'_heap_typing[of s]
+  by (simp add: runs_to_conj)
 
 
 lemma vcdiff_decode'_short_patch:
