@@ -42,6 +42,12 @@ lemma heap_bytes_nth:
   "i < n \<Longrightarrow> heap_bytes s buf n ! i = heap_w8 s (buf +\<^sub>p int i)"
   by (simp add: heap_bytes_def)
 
+lemma heap_bytes_eq_heap_w8D:
+  assumes "heap_bytes t buf n = heap_bytes s buf n"
+      and "i < n"
+  shows "heap_w8 t (buf +\<^sub>p int i) = heap_w8 s (buf +\<^sub>p int i)"
+  using assms by (metis heap_bytes_nth)
+
 lemma heap_bytes_slice:
   assumes "off + n \<le> len"
   shows "take n (drop off (heap_bytes s buf len)) =
@@ -401,6 +407,17 @@ lemma heap_w32_code_tbl_built_update[simp]:
 lemmas runs_to_whileLoop3 = runs_to_whileLoop_res' [split_tuple C and B arity: 3]
 lemmas runs_to_whileLoop_exn5 =
   runs_to_whileLoop_exn' [split_tuple C and B arity: 5]
+
+lemma whileLoop_preserves_partial:
+  assumes init: "P s"
+      and body: "\<And>a st. C a st \<Longrightarrow> P st \<Longrightarrow>
+            (B a :: ('a, 's) res_monad) \<bullet> st ?\<lbrace>\<lambda>_ st'. P st'\<rbrace>"
+  shows "(whileLoop C B a :: ('a, 's) res_monad) \<bullet> s ?\<lbrace>\<lambda>_ st'. P st'\<rbrace>"
+  apply (rule runs_to_partial_whileLoop [where I = "\<lambda>_ st. P st"])
+     apply (simp add: init)
+    apply simp
+   apply simp
+  using body by simp
 
 (*
   Use runs_to_whileLoop_exn (not runs_to_whileLoop3) — the loop body
@@ -2891,6 +2908,50 @@ lemma build_code_table'_preserves_typing:
              heap_typing s' = heap_typing s \<rbrace>"
   using build_code_table'_spec[of s] build_code_table'_heap_typing[of s]
   by (simp add: runs_to_conj)
+
+lemma build_code_table'_setup_partial:
+  "build_code_table' \<bullet> s
+     ?\<lbrace> \<lambda>_ s'. heap_typing s' = heap_typing s \<and>
+             heap_bytes s' patch patch_n = heap_bytes s patch patch_n \<and>
+             heap_bytes s' src src_n = heap_bytes s src src_n \<and>
+             heap_w32 s' out_len = heap_w32 s out_len \<rbrace>"
+  unfolding build_code_table'_def
+  supply whileLoop_preserves_partial
+    [where P = "\<lambda>s'. heap_typing s' = heap_typing s \<and>
+                       heap_bytes s' patch patch_n = heap_bytes s patch patch_n \<and>
+                       heap_bytes s' src src_n = heap_bytes s src src_n \<and>
+                       heap_w32 s' out_len = heap_w32 s out_len",
+     runs_to_vcg]
+  by runs_to_vcg
+
+lemma build_code_table'_setup:
+  "build_code_table' \<bullet> s
+    \<lbrace>\<lambda>r s'. r = Result () \<and>
+            code_tbl_built_'' s' = 1 \<and>
+            code_tbl_matches s' \<and>
+            near_arr_'' s' = near_arr_'' s \<and>
+            same_arr_'' s' = same_arr_'' s \<and>
+            heap_typing s' = heap_typing s \<and>
+            heap_bytes s' patch patch_n = heap_bytes s patch patch_n \<and>
+            heap_bytes s' src src_n = heap_bytes s src src_n \<and>
+            heap_w32 s' out_len = heap_w32 s out_len\<rbrace>"
+proof -
+  have partial: "build_code_table' \<bullet> s
+     ?\<lbrace> \<lambda>_ s'. heap_typing s' = heap_typing s \<and>
+             heap_bytes s' patch patch_n = heap_bytes s patch patch_n \<and>
+             heap_bytes s' src src_n = heap_bytes s src src_n \<and>
+             heap_w32 s' out_len = heap_w32 s out_len \<rbrace>"
+    by (rule build_code_table'_setup_partial)
+  have total: "build_code_table' \<bullet> s
+     \<lbrace> \<lambda>_ s'. heap_typing s' = heap_typing s \<and>
+             heap_bytes s' patch patch_n = heap_bytes s patch patch_n \<and>
+             heap_bytes s' src src_n = heap_bytes s src src_n \<and>
+             heap_w32 s' out_len = heap_w32 s out_len \<rbrace>"
+    by (rule runs_to_of_runs_to_partial_runs_to'[OF build_code_table'_spec partial])
+  show ?thesis
+    using build_code_table'_spec[of s] total
+    by (simp add: runs_to_conj)
+qed
 
 
 lemma vcdiff_decode'_short_patch:
@@ -6077,6 +6138,84 @@ proof -
     by simp
 qed
 
+lemma decode_loop_inv_plus_entry_from_init:
+  assumes patch_bytes: "heap_bytes t patch patch_n = heap_bytes s0 patch patch_n"
+      and src_bytes: "heap_bytes t src src_n = heap_bytes s0 src src_n"
+      and patch_valid: "buf_valid t patch patch_n"
+      and src_valid: "buf_valid t src src_n"
+      and out_valid: "buf_valid t out tgt_len"
+      and cache_init_abs: "cache_abs t cache_init 0"
+      and cursor_bounds: "data_cursor \<le> data_end" "inst_cursor \<le> inst_end"
+                         "addr_cursor \<le> addr_end"
+      and end_bounds: "unat data_end \<le> patch_n" "unat inst_end \<le> patch_n"
+                      "unat addr_end \<le> patch_n"
+      and code_tbl_ok: "code_tbl_matches t"
+      and typing_eq: "heap_typing t = heap_typing s0"
+      and out_disj_patch: "\<forall>i < tgt_len. \<forall>j < patch_n. out +\<^sub>p int i \<noteq> patch +\<^sub>p int j"
+      and out_disj_src: "\<forall>i < tgt_len. \<forall>j < src_n. out +\<^sub>p int i \<noteq> src +\<^sub>p int j"
+      and out_inj: "\<forall>i < tgt_len. \<forall>j < tgt_len. i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j"
+      and tgt_len_fits: "tgt_len < 2 ^ 32"
+      and src_seg_bounds: "unat src_seg_off + unat src_seg_len \<le> src_n"
+                          "unat src_seg_off + unat src_seg_len < 2 ^ 32"
+      and src_seg_eq: "src_seg = heap_bytes s0 (src +\<^sub>p uint src_seg_off) (unat src_seg_len)"
+      and apply_ok:
+        "\<exists>dst_final.
+           decode_loop (length (drop (unat inst_cursor)
+                                (take (unat inst_end) (heap_bytes s0 patch patch_n))))
+             src_seg (unat src_seg_len) tgt_len
+             \<lparr> ds_data_rem = drop (unat data_cursor)
+                                (take (unat data_end) (heap_bytes s0 patch patch_n)),
+               ds_inst_rem = drop (unat inst_cursor)
+                                (take (unat inst_end) (heap_bytes s0 patch patch_n)),
+               ds_addr_rem = drop (unat addr_cursor)
+                                (take (unat addr_end) (heap_bytes s0 patch patch_n)),
+               ds_cache = cache_init,
+               ds_tgt = [] \<rparr> = Inl dst_final \<and>
+             length (ds_tgt dst_final) = tgt_len \<and>
+             ds_tgt dst_final = tgt \<and>
+             ds_data_rem dst_final = [] \<and>
+             ds_addr_rem dst_final = []"
+  shows "decode_loop_inv_plus s0 patch patch_n src src_n out
+           src_seg_off src_seg_len tgt_len
+           data_end inst_end addr_end src_seg tgt
+           data_cursor inst_cursor addr_cursor 0 0 t"
+proof -
+  let ?dst0 =
+    "\<lparr> ds_data_rem = drop (unat data_cursor)
+                         (take (unat data_end) (heap_bytes s0 patch patch_n)),
+       ds_inst_rem = drop (unat inst_cursor)
+                         (take (unat inst_end) (heap_bytes s0 patch patch_n)),
+       ds_addr_rem = drop (unat addr_cursor)
+                         (take (unat addr_end) (heap_bytes s0 patch patch_n)),
+       ds_cache = cache_init,
+       ds_tgt = [] \<rparr>"
+  have patch_eq:
+    "\<forall>i < patch_n. heap_w8 t (patch +\<^sub>p int i) = heap_w8 s0 (patch +\<^sub>p int i)"
+    using patch_bytes by (auto dest: heap_bytes_eq_heap_w8D)
+  have src_eq:
+    "\<forall>i < src_n. heap_w8 t (src +\<^sub>p int i) = heap_w8 s0 (src +\<^sub>p int i)"
+    using src_bytes by (auto dest: heap_bytes_eq_heap_w8D)
+  have core:
+    "decode_loop_inv_core s0 patch patch_n src src_n out
+       src_seg_off src_seg_len tgt_len
+       data_end inst_end addr_end src_seg
+       data_cursor inst_cursor addr_cursor 0 0
+       ?dst0 cache_init t"
+    by (rule decode_loop_inv_init_core[OF patch_eq src_eq patch_valid src_valid
+          out_valid cache_init_abs cursor_bounds end_bounds code_tbl_ok typing_eq
+          out_disj_patch out_disj_src out_inj tgt_len_fits src_seg_bounds src_seg_eq])
+  have apply_ok':
+    "\<exists>dst_final. decode_loop (length (ds_inst_rem ?dst0)) src_seg
+        (unat src_seg_len) tgt_len ?dst0 = Inl dst_final \<and>
+       length (ds_tgt dst_final) = tgt_len \<and>
+       ds_tgt dst_final = tgt \<and>
+       ds_data_rem dst_final = [] \<and>
+       ds_addr_rem dst_final = []"
+    using apply_ok by simp
+  show ?thesis
+    by (rule decode_loop_inv_plus_entry[OF core apply_ok'])
+qed
+
 (*
   Key lemma: reading a byte at inst_cursor in the C corresponds to pop_byte
   on ds_inst_rem in the invariant.
@@ -7386,6 +7525,46 @@ proof -
     by (subst guard_eq) (rule same_init_preserves_patch_heap)
 qed
 
+lemma near_init_preserves_setup_word:
+  "(whileLoop (\<lambda>idx st. idx < (4 :: 32 word))
+      (\<lambda>idx. do {
+          modify (near_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (4 :: 32 word)
+          \<and> heap_bytes t patch patch_n = heap_bytes s0 patch patch_n
+          \<and> heap_bytes t src src_n = heap_bytes s0 src src_n
+          \<and> buf_valid t patch patch_n = buf_valid s0 patch patch_n
+          \<and> buf_valid t src src_n = buf_valid s0 src src_n
+          \<and> heap_w32 t out_len = heap_w32 s0 out_len
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+  using near_init_preserves_patch_heap_word
+          [where buf = patch and n = patch_n and p = out_len]
+        near_init_preserves_patch_heap_word
+          [where buf = src and n = src_n and p = out_len]
+  by (simp add: runs_to_conj)
+
+lemma same_init_preserves_setup_word:
+  "(whileLoop (\<lambda>idx st. idx < (0x300 :: 32 word))
+      (\<lambda>idx. do {
+          modify (same_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s0
+    \<lbrace> \<lambda>r t. r = Result (0x300 :: 32 word)
+          \<and> heap_bytes t patch patch_n = heap_bytes s0 patch patch_n
+          \<and> heap_bytes t src src_n = heap_bytes s0 src src_n
+          \<and> buf_valid t patch patch_n = buf_valid s0 patch patch_n
+          \<and> buf_valid t src src_n = buf_valid s0 src src_n
+          \<and> heap_w32 t out_len = heap_w32 s0 out_len
+          \<and> code_tbl_built_'' t = code_tbl_built_'' s0
+          \<and> heap_typing t = heap_typing s0 \<rbrace>"
+  using same_init_preserves_patch_heap_word
+          [where buf = patch and n = patch_n and p = out_len]
+        same_init_preserves_patch_heap_word
+          [where buf = src and n = src_n and p = out_len]
+  by (simp add: runs_to_conj)
+
 
 (*
   ----------------------------------------------------------------------
@@ -7572,13 +7751,18 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
     unfolding vcdiff_decode'_def
     supply gets_the_read_byte'_spec [runs_to_vcg]
     supply read_varint'_spec [runs_to_vcg]
-    supply near_init_preserves_patch_heap_word
-        [where buf = patch and n = "unat patch_len" and p = out_len,
+    supply near_init_preserves_setup_word
+        [where patch = patch and patch_n = "unat patch_len"
+           and src = src and src_n = "unat src_len" and out_len = out_len,
          runs_to_vcg]
-    supply same_init_preserves_patch_heap_word
-        [where buf = patch and n = "unat patch_len" and p = out_len,
+    supply same_init_preserves_setup_word
+        [where patch = patch and patch_n = "unat patch_len"
+           and src = src and src_n = "unat src_len" and out_len = out_len,
          runs_to_vcg]
-    supply build_code_table'_preserves_typing [runs_to_vcg]
+    supply build_code_table'_setup
+      [where patch = patch and patch_n = "unat patch_len"
+         and src = src and src_n = "unat src_len" and out_len = out_len,
+       runs_to_vcg]
     supply decode_address'_spec [runs_to_vcg]
     supply add_loop_correct [runs_to_vcg]
     supply run_loop_correct [runs_to_vcg]
@@ -7695,13 +7879,18 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       unfolding vcdiff_decode'_def
       supply read_byte'_spec [runs_to_vcg]
       supply read_varint'_spec [runs_to_vcg]
-      supply near_init_preserves_patch_heap_word
-          [where buf = patch and n = "unat patch_len" and p = out_len,
+      supply near_init_preserves_setup_word
+          [where patch = patch and patch_n = "unat patch_len"
+             and src = src and src_n = "unat src_len" and out_len = out_len,
            runs_to_vcg]
-      supply same_init_preserves_patch_heap_word
-          [where buf = patch and n = "unat patch_len" and p = out_len,
+      supply same_init_preserves_setup_word
+          [where patch = patch and patch_n = "unat patch_len"
+             and src = src and src_n = "unat src_len" and out_len = out_len,
            runs_to_vcg]
-      supply build_code_table'_preserves_typing [runs_to_vcg]
+      supply build_code_table'_setup
+        [where patch = patch and patch_n = "unat patch_len"
+           and src = src and src_n = "unat src_len" and out_len = out_len,
+         runs_to_vcg]
       supply decode_address'_spec [runs_to_vcg]
       supply add_loop_correct [runs_to_vcg]
       supply run_loop_correct [runs_to_vcg]
