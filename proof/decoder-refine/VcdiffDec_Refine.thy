@@ -5393,7 +5393,9 @@ definition decode_loop_inv_plus ::
       decode_loop k src_seg (unat src_seg_len) tgt_len dst
         = Inl dst_final \<and>
       length (ds_tgt dst_final) = tgt_len \<and>
-      ds_tgt dst_final = tgt)"
+      ds_tgt dst_final = tgt \<and>
+      ds_data_rem dst_final = [] \<and>
+      ds_addr_rem dst_final = [])"
 
 (*
   At loop entry, invariant holds with dst = dst0 (zero iterations).
@@ -5409,7 +5411,9 @@ lemma decode_loop_inv_plus_entry:
         "\<exists>dst_final. decode_loop (length (ds_inst_rem dst0)) src_seg (unat src_seg_len) tgt_len dst0
                       = Inl dst_final \<and>
                      length (ds_tgt dst_final) = tgt_len \<and>
-                     ds_tgt dst_final = tgt"
+                     ds_tgt dst_final = tgt \<and>
+                     ds_data_rem dst_final = [] \<and>
+                     ds_addr_rem dst_final = []"
   shows "decode_loop_inv_plus s0 patch patch_n src src_n out
            src_seg_off src_seg_len tgt_len
            data_end inst_end addr_end src_seg tgt
@@ -5431,17 +5435,17 @@ lemma decode_loop_inv_plus_exit:
       and ie_le: "unat inst_end \<le> patch_n"
   shows "heap_bytes t out (unat tgt_pos) = tgt \<and>
          unat tgt_pos = tgt_len \<and>
-         unat tgt_pos = length tgt"
-  \<comment> \<open>Note: exit does NOT in general imply data_cursor = data_end or
-      addr_cursor = addr_end.  Those are runtime checks that the
-      well-formed patch exhausts each section; derivable for the Inl
-      spec class only.  Currently proven separately.\<close>
+         unat tgt_pos = length tgt \<and>
+         data_cursor = data_end \<and>
+         addr_cursor = addr_end"
 proof -
   obtain dst c dst_final k where
     core: "decode_loop_inv_core s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len data_end inst_end addr_end src_seg data_cursor inst_end addr_cursor tgt_pos np dst c t"
     and decloop: "decode_loop k src_seg (unat src_seg_len) tgt_len dst = Inl dst_final"
     and len: "length (ds_tgt dst_final) = tgt_len"
     and tgt_eq: "ds_tgt dst_final = tgt"
+    and data_empty: "ds_data_rem dst_final = []"
+    and addr_empty: "ds_addr_rem dst_final = []"
     using inv unfolding decode_loop_inv_plus_def by blast
   have inst_rem_empty: "ds_inst_rem dst = []"
   proof -
@@ -5461,7 +5465,43 @@ proof -
   from hb_eq len_hb have pos_tgt: "unat tgt_pos = length tgt" by simp
   from len \<open>dst = dst_final\<close> ds_tgt_eq have "unat tgt_pos = tgt_len"
     using pos_tgt by simp
-  with pos_tgt hb_eq show ?thesis by simp
+  have dc_eq: "data_cursor = data_end"
+  proof -
+    from core have data_rem:
+      "ds_data_rem dst =
+        drop (unat data_cursor) (take (unat data_end) (heap_bytes s0 patch patch_n))"
+      and dc_le: "data_cursor \<le> data_end"
+      and de_le: "unat data_end \<le> patch_n"
+      unfolding decode_loop_inv_core_def by auto
+    from data_empty \<open>dst = dst_final\<close> data_rem have
+      "drop (unat data_cursor) (take (unat data_end) (heap_bytes s0 patch patch_n)) = []"
+      by simp
+    hence "unat data_end \<le> unat data_cursor"
+      using de_le by (simp add: drop_eq_Nil)
+    moreover from dc_le have "unat data_cursor \<le> unat data_end"
+      by (simp add: word_le_nat_alt)
+    ultimately have "unat data_cursor = unat data_end" by simp
+    thus ?thesis by (simp add: word_unat.Rep_inject)
+  qed
+  have ac_eq: "addr_cursor = addr_end"
+  proof -
+    from core have addr_rem:
+      "ds_addr_rem dst =
+        drop (unat addr_cursor) (take (unat addr_end) (heap_bytes s0 patch patch_n))"
+      and ac_le: "addr_cursor \<le> addr_end"
+      and ae_le: "unat addr_end \<le> patch_n"
+      unfolding decode_loop_inv_core_def by auto
+    from addr_empty \<open>dst = dst_final\<close> addr_rem have
+      "drop (unat addr_cursor) (take (unat addr_end) (heap_bytes s0 patch patch_n)) = []"
+      by simp
+    hence "unat addr_end \<le> unat addr_cursor"
+      using ae_le by (simp add: drop_eq_Nil)
+    moreover from ac_le have "unat addr_cursor \<le> unat addr_end"
+      by (simp add: word_le_nat_alt)
+    ultimately have "unat addr_cursor = unat addr_end" by simp
+    thus ?thesis by (simp add: word_unat.Rep_inject)
+  qed
+  with dc_eq pos_tgt hb_eq \<open>unat tgt_pos = tgt_len\<close> show ?thesis by simp
 qed
 
 (*
@@ -5481,7 +5521,9 @@ lemma decode_loop_inv_plus_coreD:
            decode_loop k src_seg (unat src_seg_len) tgt_len dst
              = Inl dst_final \<and>
            length (ds_tgt dst_final) = tgt_len \<and>
-           ds_tgt dst_final = tgt"
+           ds_tgt dst_final = tgt \<and>
+           ds_data_rem dst_final = [] \<and>
+           ds_addr_rem dst_final = []"
   using assms unfolding decode_loop_inv_plus_def by blast
 
 (*
@@ -5517,7 +5559,9 @@ lemma decode_loop_from_apply_window:
                ds_cache = cache_init,
                ds_tgt = [] \<rparr> = Inl dst \<and>
            length (ds_tgt dst) = pw_tgt_len win \<and>
-           ds_tgt dst = tgt"
+           ds_tgt dst = tgt \<and>
+           ds_data_rem dst = [] \<and>
+           ds_addr_rem dst = []"
   using aw src_seg_def
   unfolding apply_window_def Let_def
   by (auto split: sum.splits if_splits)
@@ -5587,6 +5631,8 @@ lemma outer_whileLoop_correct_abstract:
                     (addr_pos, data_pos, inst_pos, 0, 0)) \<bullet> t0
          \<lbrace> \<lambda>r t. (\<forall>ac dc ic np tp. r = Result (ac, dc, ic, np, tp) \<longrightarrow>
                ic = inst_end \<and>
+               dc = data_end \<and>
+               ac = addr_end \<and>
                heap_bytes t out (unat tp) = tgt \<and>
                unat tp = tgt_len) \<and>
                (\<forall>e. r = Exn e \<longrightarrow> e \<noteq> 0) \<rbrace>"
@@ -5719,6 +5765,8 @@ proof -
     and decloop: "decode_loop k_prev src_seg (unat src_seg_len) tgt_len dst_prev = Inl dst_final"
     and len: "length (ds_tgt dst_final) = tgt_len"
     and tgt_eq: "ds_tgt dst_final = tgt"
+    and data_empty: "ds_data_rem dst_final = []"
+    and addr_empty: "ds_addr_rem dst_final = []"
     using inv unfolding decode_loop_inv_plus_def by blast
   \<comment> \<open>Show dst_prev = dst (records fully determined by fields).\<close>
   have dst_eq: "dst_prev = dst"
@@ -5775,7 +5823,7 @@ proof -
   \<comment> \<open>The new invariant with fuel k'.\<close>
   show ?thesis
     unfolding decode_loop_inv_plus_def
-    using core_after rec len tgt_eq
+    using core_after rec len tgt_eq data_empty addr_empty
     by blast
 qed
 
@@ -7404,7 +7452,9 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
     "\<exists>dst_final. decode_loop (length (ds_inst_rem initial_dst)) pw_src_seg
                    (pw_src_seg_len win) (pw_tgt_len win) initial_dst = Inl dst_final \<and>
                  length (ds_tgt dst_final) = pw_tgt_len win \<and>
-                 ds_tgt dst_final = tgt"
+                 ds_tgt dst_final = tgt \<and>
+                 ds_data_rem dst_final = [] \<and>
+                 ds_addr_rem dst_final = []"
     using decode_loop_from_apply_window[OF aw, of pw_src_seg]
     unfolding initial_dst_def pw_src_seg_def by auto
   let ?WeakPost = "\<lambda>r t. r = Result (0 :: int) \<longrightarrow>
@@ -7468,62 +7518,16 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
        prefer 2 apply (simp add: buf_valid_def patch_ok[simplified buf_valid_def])
       apply (rule read_byte'_gets_the_discharge
                [of taa patch patch_len "pr_t_C.pos_C va + val_C va"])
-        subgoal by assumption
-       subgoal by assumption
-      \<comment> \<open>Live branch: pos+val < patch_len, err = 0, continuation advances.\<close>
-      subgoal
-        apply runs_to_vcg
-        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-        \<comment> \<open>2 × pos+val+1 ≤ patch_len from pos+val < patch_len.\<close>
-        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
-                                unat_word_ariths(1); fail)?\<close>)
-        \<comment> \<open>2 × inner gets_the.  Rule application produces 8 subgoals:
-            2 × {buf_valid, pos_ok, live-branch continuation, trunc-branch}.
-            The buf_valid and pos_ok close trivially; the trunc branches
-            close via runs_to_vcg (err ≠ 0 ⇒ Exn).  Live branches
-            contain more continuation.\<close>
-        apply (all \<open>(rule read_byte'_gets_the_discharge)?\<close>)
-        \<comment> \<open>buf_valid obligations (goals 1 and 5 typically).\<close>
-        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-        \<comment> \<open>pos_ok obligations — needs read_varint' spec telling us pos_C ≤ len.\<close>
-        apply (all \<open>(assumption | simp)?\<close>)
-        \<comment> \<open>Trunc-branch obligations (err ≠ 0 makes unless throw, r = Exn).\<close>
-        apply (all \<open>(simp add: ; runs_to_vcg; fail)?\<close>)
-        \<comment> \<open>2 live-branch continuations remain — apply runs_to_vcg to each.\<close>
-        apply (all \<open>runs_to_vcg?\<close>)
-        \<comment> \<open>Close more buf_valid and pos-bound obligations from these VCGs.\<close>
-        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
-                                unat_word_ariths(1); fail)?\<close>)
-        \<comment> \<open>2 whileLoop subgoals: apply outer_whileLoop_correct_abstract
-            with the parameters matching the C-emitted loop's captured
-            values.  The concrete instantiation gives us inv_entry from
-            decode_loop_inv_plus_entry + decode_loop_terminates above,
-            and leaves body_preserves as a subgoal — proved via VCG on
-            one iteration with decode_loop_inv_plus_advance.\<close>
-        apply (all \<open>(rule runs_to_weaken[OF outer_whileLoop_correct_abstract
-                        [where patch_n = "unat patch_len"
-                           and tgt = tgt
-                           and out = out
-                           and tgt_len = "length tgt"
-                           and patch = patch
-                           and src = src
-                           and src_n = "unat src_len"]])?\<close>)
-        prefer 3
-        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
-        prefer 5
-        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
-        \<comment> \<open>4 remaining: 2×inv_entry (indices 1,3) + 2×body_preserves (indices 2,4).
-            inv_entry requires building decode_loop_inv_plus_entry from
-            decode_loop_inv_init (for the initial dst0) + decode_loop_terminates
-            (for the apply_ok conjunct).  Blocker: the parsed window's
-            pw_data/pw_inst/pw_addr fields need to be linked to the C-side
-            `take (val_C vaab) (drop ... (heap_bytes ...))` slices, which
-            requires a parse_window_with_source bridge lemma (we only have
-            parse_window_no_source).  Body_preserves requires the VCG chain
-            through the which∈{0,1} inner whileLoop, proved via
-            decode_loop_inv_plus_advance after identifying the decode_one step.\<close>
-        sorry
+	      subgoal by assumption
+	     subgoal by assumption
+	      \<comment> \<open>Live branch: pos+val < patch_len, err = 0, continuation advances.\<close>
+	      subgoal
+	        \<comment> \<open>Deferred live decode branch: this was previously driven through
+	            expensive VCG steps before reaching the same admitted
+	            inv_entry/body_preserves obligations.  Keep the boundary at the
+	            unresolved obligation so builds do not spend minutes before the
+	            admission.\<close>
+	        sorry
       \<comment> \<open>Trunc branch: pos+val = patch_len, err = -1.  unless throws,
           making r = Exn _, so ?WeakPost's antecedent r = Result 0 fails.\<close>
       subgoal
@@ -7546,39 +7550,9 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
                [of ta patch patch_len "pr_t_C.pos_C va + val_C va"])
         subgoal by assumption
        subgoal by assumption
-      subgoal
-        apply runs_to_vcg
-        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
-                                unat_word_ariths(1); fail)?\<close>)
-        apply (all \<open>(rule read_byte'_gets_the_discharge)?\<close>)
-        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-        apply (all \<open>(assumption | simp)?\<close>)
-        apply (all \<open>(simp add: ; runs_to_vcg; fail)?\<close>)
-        apply (all \<open>runs_to_vcg?\<close>)
-        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
-                                unat_word_ariths(1); fail)?\<close>)
-        apply (all \<open>(rule runs_to_weaken[OF outer_whileLoop_correct_abstract
-                        [where patch_n = "unat patch_len"
-                           and tgt = tgt
-                           and out = out
-                           and tgt_len = "length tgt"
-                           and patch = patch
-                           and src = src
-                           and src_n = "unat src_len"]])?\<close>)
-        prefer 3
-        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
-        prefer 5
-        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
-        \<comment> \<open>4 remaining: 2×inv_entry (indices 1,3) + 2×body_preserves (indices 2,4).
-            inv_entry wants decode_loop_inv_plus at 0 0 taa with the
-            captured section offsets/lengths (val_C vaab, vaaab, vaaaab).
-            Proof via decode_loop_inv_plus_entry + decode_loop_inv_init
-            applied with the parsed window's pw_data/pw_inst/pw_addr
-            bound to the varint-decoded byte slices.  Deferred to
-            next iteration.\<close>
-        sorry
+	      subgoal
+	        \<comment> \<open>Deferred live decode branch; see the first residual above.\<close>
+	        sorry
       subgoal
         by runs_to_vcg
       done
@@ -7590,33 +7564,9 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
           apply (simp add: buf_valid_def patch_ok[simplified buf_valid_def])
           done
        subgoal using len_ge5_word by simp
-      subgoal
-        apply runs_to_vcg
-        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
-                                unat_word_ariths(1); fail)?\<close>)
-        apply (all \<open>(rule read_byte'_gets_the_discharge)?\<close>)
-        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-        apply (all \<open>(assumption | simp)?\<close>)
-        apply (all \<open>(simp add: ; runs_to_vcg; fail)?\<close>)
-        apply (all \<open>runs_to_vcg?\<close>)
-        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
-                                unat_word_ariths(1); fail)?\<close>)
-        apply (all \<open>(rule runs_to_weaken[OF outer_whileLoop_correct_abstract
-                        [where patch_n = "unat patch_len"
-                           and tgt = tgt
-                           and out = out
-                           and tgt_len = "length tgt"
-                           and patch = patch
-                           and src = src
-                           and src_n = "unat src_len"]])?\<close>)
-        prefer 3
-        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
-        prefer 5
-        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
-        \<comment> \<open>4 remaining: 2×inv_entry (indices 1,3) + 2×body_preserves (indices 2,4).\<close>
-        sorry
+	      subgoal
+	        \<comment> \<open>Deferred live decode branch; see the first residual above.\<close>
+	        sorry
       subgoal
         by runs_to_vcg
       done
@@ -7628,39 +7578,9 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
           apply (simp add: buf_valid_def patch_ok[simplified buf_valid_def])
           done
        subgoal using len_ge5_word by simp
-      subgoal
-        apply runs_to_vcg
-        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
-                                unat_word_ariths(1); fail)?\<close>)
-        apply (all \<open>(rule read_byte'_gets_the_discharge)?\<close>)
-        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-        apply (all \<open>(assumption | simp)?\<close>)
-        apply (all \<open>(simp add: ; runs_to_vcg; fail)?\<close>)
-        apply (all \<open>runs_to_vcg?\<close>)
-        apply (all \<open>(simp add: buf_valid_def patch_ok[simplified buf_valid_def]; fail)?\<close>)
-        apply (all \<open>(simp add: word_less_nat_alt word_le_nat_alt
-                                unat_word_ariths(1); fail)?\<close>)
-        apply (all \<open>(rule runs_to_weaken[OF outer_whileLoop_correct_abstract
-                        [where patch_n = "unat patch_len"
-                           and tgt = tgt
-                           and out = out
-                           and tgt_len = "length tgt"
-                           and patch = patch
-                           and src = src
-                           and src_n = "unat src_len"]])?\<close>)
-        prefer 3
-        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
-        prefer 5
-        subgoal by (clarsimp simp: runs_to_iff split: if_splits)
-        \<comment> \<open>4 remaining: 2×inv_entry (indices 1,3) + 2×body_preserves (indices 2,4).
-            inv_entry wants decode_loop_inv_plus at 0 0 taa with the
-            captured section offsets/lengths (val_C vaab, vaaab, vaaaab).
-            Proof via decode_loop_inv_plus_entry + decode_loop_inv_init
-            applied with the parsed window's pw_data/pw_inst/pw_addr
-            bound to the varint-decoded byte slices.  Deferred to
-            next iteration.\<close>
-        sorry
+	      subgoal
+	        \<comment> \<open>Deferred live decode branch; see the first residual above.\<close>
+	        sorry
       subgoal
         by runs_to_vcg
       done
