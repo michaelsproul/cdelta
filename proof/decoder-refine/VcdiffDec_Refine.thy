@@ -7720,17 +7720,11 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
           by word_bitwise
         from prems eq hi_v hdr3 show ?thesis by auto
       qed
-      subgoal using patch_ok by simp
-      subgoal using len_ge5_word by simp
-      apply (tactic \<open>fn st =>
-        let
-          val n = Thm.nprems_of st;
-          val _ = File.write (Path.explode "/tmp/nprems.txt")
-                    ("after 14 closures: " ^ string_of_int n);
-        in all_tac st end\<close>)
-      \<comment> \<open>Remaining: 8 subgoals.  Subgoals 1-4 are the app-header branch with
-          varint-error path — contradiction from Inl (spec requires varint success).
-          Subgoals 5-8 are the main body with build_code_table'.\<close>
+	      subgoal using patch_ok by simp
+	      subgoal using len_ge5_word by simp
+	      \<comment> \<open>Remaining: 8 subgoals.  Subgoals 1-4 are the app-header branch with
+	          varint-error path — contradiction from Inl (spec requires varint success).
+	          Subgoals 5-8 are the main body with build_code_table'.\<close>
       \<comment> \<open>Subgoals 1-4: contradiction from err ≠ 0 + Inl ⟹ varint succeeds.\<close>
       subgoal for va
         using parse_header_app[unfolded app_bit_def] ucast_and_4_equiv
