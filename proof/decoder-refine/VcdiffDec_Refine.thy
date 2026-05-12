@@ -75,6 +75,15 @@ proof -
     by (simp only: ptr_eq)
 qed
 
+lemma heap_bytes_src_segment_view:
+  fixes off seg_len :: "32 word"
+  assumes "unat off + unat seg_len \<le> src_len"
+  shows "(if seg_len = 0 then []
+          else take (unat seg_len) (drop (unat off) (heap_bytes s src src_len))) =
+         heap_bytes s (src +\<^sub>p uint off) (unat seg_len)"
+  using heap_bytes_slice_word[OF assms, of s src]
+  by (cases "seg_len = 0") simp_all
+
 (* ---------- Buffer validity ---------- *)
 
 definition buf_valid :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> bool" where
