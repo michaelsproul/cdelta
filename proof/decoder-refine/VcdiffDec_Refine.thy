@@ -298,6 +298,11 @@ proof -
   qed
 qed
 
+lemma gets_the_read_byte'_preserves_state_partial:
+  "gets_the (read_byte' buf len pos) \<bullet> s ?\<lbrace> \<lambda>_ t. t = s \<rbrace>"
+  unfolding gets_the_def read_byte'_def
+  by runs_to_vcg
+
 lemma read_byte'_list_spec:
   assumes "unat pos < unat len"
       and "unat len \<le> length (heap_bytes s buf (unat len))"
@@ -425,6 +430,17 @@ lemma whileLoop_preserves_partial:
    apply simp
   using body by simp
 
+lemma whileLoop_exn_preserves_partial:
+  assumes init: "P s"
+      and body: "\<And>a st. C a st \<Longrightarrow> P st \<Longrightarrow>
+            (B a :: ('e, 'a, 's) exn_monad) \<bullet> st ?\<lbrace>\<lambda>_ st'. P st'\<rbrace>"
+  shows "(whileLoop C B a :: ('e, 'a, 's) exn_monad) \<bullet> s ?\<lbrace>\<lambda>_ st'. P st'\<rbrace>"
+  apply (rule runs_to_partial_whileLoop_exn [where I = "\<lambda>_ st. P st"])
+     apply (simp add: init)
+    apply simp
+   apply simp
+  using body by simp
+
 (*
   Use runs_to_whileLoop_exn (not runs_to_whileLoop3) — the loop body
   contains throws, needing the exn variant. Subgoals after application:
@@ -487,6 +503,18 @@ lemma read_varint'_no_modify:
       apply simp
 		           sorry
     done
+  done
+
+lemma read_varint'_preserves_state_partial:
+  "read_varint' buf len pos \<bullet> s ?\<lbrace> \<lambda>_ t. t = s \<rbrace>"
+  unfolding read_varint'_def
+  apply runs_to_vcg
+  apply (rule runs_to_partial_weaken[where Q = "\<lambda>_ t. t = s"])
+   apply (rule whileLoop_exn_preserves_partial)
+    apply simp
+   apply (clarsimp split: prod.splits)
+   apply runs_to_vcg
+   apply auto
   done
 
 (*
@@ -2985,6 +3013,15 @@ proof -
     using build_code_table'_spec[of s] total
     by (simp add: runs_to_conj)
 qed
+
+lemma parse_window_prefix'_preserves_state_partial:
+  "parse_window_prefix' patch patch_len src src_len out_cap pos \<bullet> s
+     ?\<lbrace> \<lambda>_ t. t = s \<rbrace>"
+  supply gets_the_read_byte'_preserves_state_partial [runs_to_vcg]
+  supply read_varint'_preserves_state_partial [runs_to_vcg]
+  unfolding parse_window_prefix'_def
+  apply runs_to_vcg
+  done
 
 
 lemma vcdiff_decode'_short_patch:
