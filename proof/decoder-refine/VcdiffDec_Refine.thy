@@ -610,6 +610,17 @@ lemma word_plus_one_le_of_less:
   using assms unat_x_plus_1[OF assms]
   by (simp add: word_less_nat_alt word_le_nat_alt)
 
+lemma unat_plus_one_le_of_unat_less:
+  fixes x y :: "32 word"
+  assumes "unat x < unat y"
+  shows "unat (x + 1) \<le> unat y"
+proof -
+  have "x < y"
+    using assms by (simp add: word_less_nat_alt)
+  from word_plus_one_le_of_less[OF this] show ?thesis
+    by (simp add: word_le_nat_alt)
+qed
+
 (*
   Full functional-correctness spec for read_varint'. Relates the returned
   value/cursor to varint_decode on the heap_bytes view of the buffer.
@@ -3022,6 +3033,48 @@ lemma parse_window_prefix'_preserves_state_partial:
   unfolding parse_window_prefix'_def
   apply runs_to_vcg
   done
+
+lemma parse_window_prefix'_terminates:
+  assumes patch_ok: "buf_valid s patch (unat patch_len)"
+      and pos_ok: "pos \<le> patch_len"
+  shows "parse_window_prefix' patch patch_len src src_len out_cap pos \<bullet> s
+     \<lbrace> \<lambda>_ _. True \<rbrace>"
+  supply if_split [split del]
+  supply gets_the_read_byte'_spec [runs_to_vcg]
+  supply read_varint'_bounded [runs_to_vcg]
+  unfolding parse_window_prefix'_def
+  apply runs_to_vcg
+  apply (rule read_byte'_gets_the_discharge[OF patch_ok pos_ok])
+   apply runs_to_vcg
+   using patch_ok pos_ok
+   apply (auto simp: word_le_nat_alt word_less_nat_alt
+               intro: unat_plus_one_le_of_unat_less)
+   subgoal premises prems
+     apply (rule read_byte'_gets_the_discharge)
+        using patch_ok apply simp
+      using prems apply (simp add: word_le_nat_alt)
+     apply runs_to_vcg
+      using patch_ok prems apply (auto simp: word_le_nat_alt word_less_nat_alt
+                                  intro: unat_plus_one_le_of_unat_less)
+     done
+   subgoal premises prems
+     apply (rule read_byte'_gets_the_discharge)
+        using patch_ok apply simp
+      using prems apply (simp add: word_le_nat_alt)
+     apply runs_to_vcg
+      using patch_ok prems apply (auto simp: word_le_nat_alt word_less_nat_alt
+                                  intro: unat_plus_one_le_of_unat_less)
+     done
+  done
+
+lemma parse_window_prefix'_preserves_state:
+  assumes patch_ok: "buf_valid s patch (unat patch_len)"
+      and pos_ok: "pos \<le> patch_len"
+  shows "parse_window_prefix' patch patch_len src src_len out_cap pos \<bullet> s
+     \<lbrace> \<lambda>_ t. t = s \<rbrace>"
+  by (rule runs_to_of_runs_to_partial_runs_to'
+      [OF parse_window_prefix'_terminates[OF patch_ok pos_ok]
+          parse_window_prefix'_preserves_state_partial])
 
 
 lemma vcdiff_decode'_short_patch:
