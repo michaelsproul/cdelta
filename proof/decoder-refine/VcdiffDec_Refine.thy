@@ -38,6 +38,10 @@ definition heap_bytes :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 
 lemma heap_bytes_length[simp]: "length (heap_bytes s buf n) = n"
   by (simp add: heap_bytes_def)
 
+definition adler_len_word :: "32 word \<Rightarrow> 32 word" where
+  "adler_len_word win_ind =
+     (if win_ind AND (4 :: 32 word) \<noteq> 0 then 4 else 0)"
+
 lemma heap_bytes_nth:
   "i < n \<Longrightarrow> heap_bytes s buf n ! i = heap_w8 s (buf +\<^sub>p int i)"
   by (simp add: heap_bytes_def)
@@ -8680,6 +8684,53 @@ proof -
   qed
 qed
 
+lemma decode_inner_inv_core_run_data_cursor_lt:
+  fixes which :: "32 word"
+  assumes inner:
+    "decode_inner_inv_core s0 patch patch_n src src_n out
+       src_seg_off src_seg_len tgt_len
+       data_end inst_end addr_end src_seg dst0
+       data_cursor inst_cursor addr_cursor tgt_pos np which t"
+    and pop: "pop_byte (ds_inst_rem dst0) = Some (op, irest)"
+    and whole: "decode_one src_seg (unat src_seg_len) tgt_len dst0 = Inl dst_final"
+    and which_lt: "unat which < 2"
+    and run_first: "which = 0 \<Longrightarrow> ity (fst (default_entry (unat op))) = IRUN"
+    and run_second: "which = 1 \<Longrightarrow> ity (snd (default_entry (unat op))) = IRUN"
+  shows "unat data_cursor < unat data_end"
+proof -
+  obtain dst_cur c_cur where core_cur:
+    "decode_loop_inv_core s0 patch patch_n src src_n out
+       src_seg_off src_seg_len tgt_len
+       data_end inst_end addr_end src_seg
+       data_cursor inst_cursor addr_cursor tgt_pos np dst_cur c_cur t"
+    and prefix_cur:
+    "decode_one_prefix src_seg (unat src_seg_len) tgt_len dst0
+       (unat which) dst_cur"
+    using inner unfolding decode_inner_inv_core_def by blast
+  have data_nonempty: "ds_data_rem dst_cur \<noteq> []"
+    by (rule decode_one_prefix_run_data_nonempty
+      [OF pop prefix_cur whole which_lt run_first run_second])
+  have data_rem_eq:
+    "ds_data_rem dst_cur =
+       drop (unat data_cursor)
+         (take (unat data_end) (heap_bytes s0 patch patch_n))"
+    using core_cur unfolding decode_loop_inv_core_def by simp
+  have data_end_bound: "unat data_end \<le> patch_n"
+    using core_cur unfolding decode_loop_inv_core_def by simp
+  have "\<not> unat data_end \<le> unat data_cursor"
+  proof
+    assume exhausted: "unat data_end \<le> unat data_cursor"
+    have "length (take (unat data_end) (heap_bytes s0 patch patch_n)) =
+          unat data_end"
+      using data_end_bound by simp
+    hence "drop (unat data_cursor)
+          (take (unat data_end) (heap_bytes s0 patch patch_n)) = []"
+      using exhausted by simp
+    thus False using data_rem_eq data_nonempty by simp
+  qed
+  thus ?thesis by simp
+qed
+
 lemma exec_half_copy_conditions:
   assumes "ity h = ICOPY mode"
       and "exec_half h sz src_seg src_seg_len tgt_len st = Inl st'"
@@ -12726,13 +12777,11 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 					                    qed
 					                    done
 					                  subgoal premises body_prems for ac dc ic np tp t
-					                  proof -
-					                    let ?alen_w =
-					                      "((if UCAST(8 \<rightarrow> 32)
-					                            (heap_w8 td
-					                              (patch +\<^sub>p uint (pr_t_C.pos_C va + val_C va))) AND
-					                          (4 :: 32 word) \<noteq> 0
-					                         then 4 else 0) :: 32 word)"
+						                  proof -
+						                    let ?alen_w =
+						                      "adler_len_word (UCAST(8 \<rightarrow> 32)
+						                            (heap_w8 td
+						                              (patch +\<^sub>p uint (pr_t_C.pos_C va + val_C va))))"
 					                    let ?data_end = "pr_t_C.pos_C vabaa + ?alen_w + val_C vab"
 					                    let ?inst_end = "?data_end + val_C vaba"
 					                    let ?addr_end = "?inst_end + val_C vabaa"
@@ -12740,9 +12789,9 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 					                      "decode_loop_inv_plus td patch (unat patch_len)
 					                        src (unat src_len) out (val_C vaaa)
 					                        (val_C vaa) (length tgt)
-					                        ?data_end ?inst_end ?addr_end
-					                        pw_src_seg tgt dc ic ac tp np t"
-					                      using body_prems by simp
+						                        ?data_end ?inst_end ?addr_end
+						                        pw_src_seg tgt dc ic ac tp np t"
+						                      using body_prems by (simp add: adler_len_word_def)
 					                    have patch_valid_all:
 					                      "buf_valid t patch (unat patch_len)"
 					                      using inv_plus
@@ -12756,10 +12805,10 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 					                    have patch_valid_inst:
 					                      "buf_valid t patch (unat ?inst_end)"
 					                      by (rule buf_valid_mono[OF patch_valid_all inst_end_bound])
-					                    have ic_le_inst: "ic \<le> ?inst_end"
-					                      using body_prems by simp
-					                    have ic_lt_inst: "ic < ?inst_end"
-					                      using body_prems by simp
+						                    have ic_le_inst: "ic \<le> ?inst_end"
+						                      using body_prems by (simp add: adler_len_word_def)
+						                    have ic_lt_inst: "ic < ?inst_end"
+						                      using body_prems by (simp add: adler_len_word_def)
 					                    obtain dst c dst' dst_final k where
 					                      core_before:
 					                        "decode_loop_inv_core td patch (unat patch_len)
@@ -12867,13 +12916,14 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 					                      thus ?thesis
 					                        using op_td by (simp only: uint_nat)
 					                    qed
-					                    show ?thesis
-					                      apply (rule read_byte'_gets_the_discharge)
-					                         apply (rule patch_valid_inst)
-					                        apply (rule ic_le_inst)
-					                       subgoal
-					                         apply simp
-					                         apply runs_to_vcg
+						                    show ?thesis
+						                      apply (rule read_byte'_gets_the_discharge)
+						                         apply (rule patch_valid_inst[unfolded adler_len_word_def])
+						                        apply (rule ic_le_inst[unfolded adler_len_word_def])
+					                      subgoal
+					                        apply (simp add: adler_len_word_def)
+					                        apply (fold adler_len_word_def)
+					                        apply runs_to_vcg
 					                         apply (rule runs_to_whileLoop_exn'
 					                           [where
 					                              I = "\<lambda>r st.
@@ -12980,7 +13030,8 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 					                             apply clarsimp
 					                             apply runs_to_vcg
 					                             apply (simp_all add: word_less_nat_alt word_le_nat_alt
-					                               which_lt2_slot_arith ucast8_32_unat_lt_256)
+					                               which_lt2_slot_arith ucast8_32_unat_lt_256
+					                               split: if_splits)
 					                           subgoal premises noop_prems
 					                           proof -
 					                             have which_lt: "unat x2d < 2"
@@ -13062,10 +13113,10 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 						                             show ?thesis
 						                               unfolding decode_inner_inv_core_def
 						                               apply (intro conjI)
-						                                apply (rule which_next_le)
+						                               apply (rule which_next_le)
 						                               apply (rule exI[where x = dst_cur])
 						                               apply (rule exI[where x = c_cur])
-						                               using core_cur prefix_next by simp
+						                               using noop_prems core_cur prefix_next by simp
 						                           qed
 						                           subgoal premises varint_prems
 						                           proof -
