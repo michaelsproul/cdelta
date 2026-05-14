@@ -423,6 +423,14 @@ lemmas runs_to_whileLoop3 = runs_to_whileLoop_res' [split_tuple C and B arity: 3
 lemmas runs_to_whileLoop_exn5 =
   runs_to_whileLoop_exn' [split_tuple C and B arity: 5]
 
+lemma runs_to_condition_exn:
+  assumes "c s \<Longrightarrow> (f :: ('e, 'a, 's) exn_monad) \<bullet> s \<lbrace>Q\<rbrace>"
+      and "\<not> c s \<Longrightarrow> (g :: ('e, 'a, 's) exn_monad) \<bullet> s \<lbrace>Q\<rbrace>"
+  shows "condition c f g \<bullet> s \<lbrace>Q\<rbrace>"
+  unfolding condition_def
+  apply runs_to_vcg
+  using assms by simp_all
+
 lemma whileLoop_preserves_partial:
   assumes init: "P s"
       and body: "\<And>a st. C a st \<Longrightarrow> P st \<Longrightarrow>
@@ -10487,6 +10495,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         [where patch = patch and patch_n = "unat patch_len"
            and src = src and src_n = "unat src_len" and out_len = out_len,
          runs_to_vcg]
+      supply runs_to_condition_exn [runs_to_vcg]
       supply decode_address'_spec [runs_to_vcg]
       supply add_loop_correct_core [runs_to_vcg]
       supply run_loop_correct_core [runs_to_vcg]
