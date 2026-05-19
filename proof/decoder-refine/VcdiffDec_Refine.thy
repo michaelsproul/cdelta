@@ -1343,6 +1343,23 @@ definition cache_wf :: "cache \<Rightarrow> bool" where
       (\<forall>i < s_near. near c ! i < 2 ^ 32) \<and>
       (\<forall>i < same_buckets. same c ! i < 2 ^ 32))"
 
+lemma cache_update_wf:
+  assumes wf: "cache_wf c"
+      and addr_lt: "addr < 2 ^ 32"
+  shows "cache_wf (cache_update c addr)"
+  using wf addr_lt
+  unfolding cache_wf_def cache_update_def
+  by (auto simp: nth_list_update split: if_splits)
+
+lemma decode_address_cache_wf:
+  assumes dec: "decode_address c mode here bs = Some (addr, rest, c')"
+      and wf: "cache_wf c"
+      and addr_lt: "addr < 2 ^ 32"
+  shows "cache_wf c'"
+  using dec wf addr_lt
+  by (auto simp: decode_address_def Let_def intro: cache_update_wf
+      split: if_splits option.splits prod.splits list.splits)
+
 lemma cache_abs_wf:
   assumes "cache_abs s c np"
   shows "length (near c) = s_near
@@ -1605,6 +1622,9 @@ lemma decode_address'_spec:
   shows "decode_address' patch addr_end pos here mode np_in \<bullet> s
            \<lbrace> \<lambda>r s'.
               \<exists>ar. r = Result ar \<and>
+                   heap_w8 s' = heap_w8 s \<and>
+                   heap_typing s' = heap_typing s \<and>
+                   code_tbl_'' s' = code_tbl_'' s \<and>
                    (let bytes = heap_bytes s patch (unat addr_end);
                         decoded = decode_address c (unat mode) (unat here)
                                     (drop (unat pos) bytes)
@@ -1942,6 +1962,9 @@ lemma decode_address'_spec_ex:
          \<lbrace> \<lambda>r s'.
             \<exists>c ar. cache_abs s c np_in \<and> cache_wf c \<and>
               r = Result ar \<and>
+              heap_w8 s' = heap_w8 s \<and>
+              heap_typing s' = heap_typing s \<and>
+              code_tbl_'' s' = code_tbl_'' s \<and>
               (let bytes = heap_bytes s patch (unat addr_end);
                    decoded = decode_address c (unat mode) (unat here)
                                (drop (unat pos) bytes)
@@ -4490,6 +4513,49 @@ proof -
   also have "k + length pfx = length bs - length rest"
     using pfx_len k_le rest_len by simp
   finally show ?thesis by simp
+qed
+
+lemma decode_address_rest_length:
+  assumes dec: "decode_address c mode here bs = Some (addr, rest, c')"
+  shows "length rest \<le> length bs"
+  using assms varint_decode_length
+  by (auto simp: decode_address_def Let_def split: if_splits option.splits prod.splits list.splits)
+
+lemma decode_address_drop_rest:
+  assumes dec: "decode_address c mode here (drop k bs) = Some (addr, rest, c')"
+  shows "drop (length bs - length rest) bs = rest"
+proof -
+  consider v where "varint_decode (drop k bs) = Some (v, rest)"
+    | b where "drop k bs = b # rest"
+    using dec
+    by (auto simp: decode_address_def Let_def split: if_splits option.splits prod.splits list.splits)
+  thus ?thesis
+  proof cases
+    case 1
+    thus ?thesis by (rule varint_decode_drop_rest)
+  next
+    case (2 b)
+    have k_lt: "k < length bs"
+      using 2 by (cases "k < length bs") auto
+    have len_eq: "length bs - length rest = Suc k"
+    proof -
+      have drop_len: "length (drop k bs) = length bs - k"
+        by simp
+      have rest_len: "length (drop k bs) = Suc (length rest)"
+        using 2 by simp
+      have "length bs - k = Suc (length rest)"
+        using drop_len rest_len by simp
+      hence "length bs = k + Suc (length rest)"
+        using k_lt by linarith
+      thus ?thesis by simp
+    qed
+    have "drop (Suc k) bs = tl (drop k bs)"
+      by (simp add: drop_Suc tl_drop)
+    also have "\<dots> = rest"
+      using 2 by simp
+    finally show ?thesis
+      using len_eq by simp
+  qed
 qed
 
 (*
@@ -7782,12 +7848,91 @@ qed
   After decode_address' gives us (addr, new_np, new_addr_cursor) and
   copy_loop_correct copies sz bytes.
 *)
+
+lemma heap_bytes_after_copy_loop:
+  fixes tgt_pos sz addr :: "32 word"
+  assumes tgt_pre_def: "tgt_pre = heap_bytes t out (unat tgt_pos)"
+      and no_overflow_tgt: "unat tgt_pos + unat sz < 2 ^ 32"
+      and copy_result: "\<forall>k < unat sz.
+             heap_w8 t' (out +\<^sub>p uint (tgt_pos + of_nat k)) =
+             copy_loop src_seg tgt_pre (unat addr) (unat sz)
+               ! (unat tgt_pos + k)"
+      and out_prefix_preserved:
+             "\<forall>i < unat tgt_pos. heap_w8 t' (out +\<^sub>p int i) = heap_w8 t (out +\<^sub>p int i)"
+  shows "heap_bytes t' out (unat (tgt_pos + sz)) =
+         copy_loop src_seg tgt_pre (unat addr) (unat sz)"
+proof -
+  have unat_tp_sz: "unat (tgt_pos + sz) = unat tgt_pos + unat sz"
+    using no_overflow_tgt by (simp add: unat_word_ariths(1))
+  show ?thesis
+  proof (rule nth_equalityI)
+    show "length (heap_bytes t' out (unat (tgt_pos + sz))) =
+          length (copy_loop src_seg tgt_pre (unat addr) (unat sz))"
+      using tgt_pre_def unat_tp_sz by (simp add: copy_loop_length)
+  next
+    fix i
+    assume i_bound: "i < length (heap_bytes t' out (unat (tgt_pos + sz)))"
+    hence i_lt: "i < unat tgt_pos + unat sz"
+      using unat_tp_sz by simp
+    show "heap_bytes t' out (unat (tgt_pos + sz)) ! i =
+          copy_loop src_seg tgt_pre (unat addr) (unat sz) ! i"
+    proof (cases "i < unat tgt_pos")
+      case True
+      have "heap_bytes t' out (unat (tgt_pos + sz)) ! i =
+            heap_w8 t' (out +\<^sub>p int i)"
+        using i_bound by (simp add: heap_bytes_nth)
+      also have "\<dots> = heap_w8 t (out +\<^sub>p int i)"
+        using out_prefix_preserved True by auto
+      also have "\<dots> = heap_bytes t out (unat tgt_pos) ! i"
+        using True by (simp add: heap_bytes_nth)
+      also have "\<dots> = tgt_pre ! i"
+        using tgt_pre_def by simp
+      also have "\<dots> = copy_loop src_seg tgt_pre (unat addr) (unat sz) ! i"
+      proof -
+        have "copy_loop src_seg tgt_pre (unat addr) (unat sz) ! i = tgt_pre ! i"
+          using True tgt_pre_def copy_loop_prefix[of i tgt_pre src_seg "unat addr" "unat sz"]
+          by simp
+        thus ?thesis by simp
+      qed
+      finally show ?thesis .
+    next
+      case False
+      hence i_ge: "unat tgt_pos \<le> i" by simp
+      let ?k = "i - unat tgt_pos"
+      have k_lt: "?k < unat sz"
+        using i_lt i_ge by simp
+      have "heap_bytes t' out (unat (tgt_pos + sz)) ! i =
+            heap_w8 t' (out +\<^sub>p int i)"
+        using i_bound by (simp add: heap_bytes_nth)
+      also have "\<dots> = heap_w8 t' (out +\<^sub>p uint (tgt_pos + of_nat ?k))"
+      proof -
+        have unat_eq: "unat (tgt_pos + of_nat ?k :: 32 word) = i"
+        proof -
+          have "unat tgt_pos + ?k = i"
+            using i_ge by simp
+          moreover have "i < 2 ^ 32"
+            using i_lt no_overflow_tgt by simp
+          ultimately show ?thesis
+            by (simp add: unat_word_ariths(1) unat_of_nat)
+        qed
+        show ?thesis
+          by (simp only: ptr_add_def uint_nat unat_eq of_int_of_nat_eq)
+      qed
+      also have "\<dots> =
+        copy_loop src_seg tgt_pre (unat addr) (unat sz) ! (unat tgt_pos + ?k)"
+        using copy_result[rule_format, OF k_lt] by simp
+      also have "unat tgt_pos + ?k = i"
+        using i_ge by simp
+      finally show ?thesis by simp
+    qed
+  qed
+qed
+
 lemma decode_loop_inv_after_copy:
   fixes sz :: "32 word" and addr :: "32 word" and new_np :: "32 word"
   assumes inv: "decode_loop_inv s0 patch patch_n src src_n out src_seg_off src_seg_len tgt_len
                   data_end inst_end addr_end src_seg
                   data_cursor inst_cursor addr_cursor tgt_pos np t"
-      and sz_pos: "0 < unat sz"
       and sz_fits_tgt: "unat tgt_pos + unat sz \<le> tgt_len"
       and no_overflow_tgt: "unat tgt_pos + unat sz < 2 ^ 32"
       and addr_ok: "unat addr < unat src_seg_len + unat tgt_pos"
@@ -9330,6 +9475,243 @@ proof -
     by (rule run_loop_correct_core[OF core tgt_fit])
 qed
 
+lemma copy_loop_correct_core:
+  fixes sz :: "32 word" and tgt_pos :: "32 word"
+    and addr :: "32 word" and src_seg_len :: "32 word" and src_seg_off :: "32 word"
+    and src :: "8 word ptr" and out :: "8 word ptr"
+  assumes core:
+    "decode_loop_inv_core s0 patch patch_n src src_n out
+      src_seg_off src_seg_len tgt_len
+      data_end inst_end addr_end src_seg
+      data_cursor inst_cursor addr_cursor tgt_pos np dst c s"
+    and sz_fits_tgt: "unat tgt_pos + unat sz \<le> tgt_len"
+    and addr_bound: "unat addr < unat src_seg_len + unat tgt_pos"
+  shows "(whileLoop (\<lambda>(j :: 32 word) st. unat j < unat sz)
+           (\<lambda>j. do {
+              b \<leftarrow>
+                condition (\<lambda>st. unat (addr + j) < unat src_seg_len)
+                  (liftE (do {
+                     guard (\<lambda>st. ptr_valid (heap_typing st)
+                       (src +\<^sub>p uint (src_seg_off + (addr + j))));
+                     gets (\<lambda>st. heap_w8 st
+                       (src +\<^sub>p uint (src_seg_off + (addr + j))))
+                   }))
+                  (do {
+                     when (unat (tgt_pos + j) \<le> unat (addr + j - src_seg_len))
+                       (throw (- (10 :: int)));
+                     liftE (do {
+                       guard (\<lambda>st. ptr_valid (heap_typing st)
+                         (out +\<^sub>p uint (addr + j - src_seg_len)));
+                       gets (\<lambda>st. heap_w8 st
+                         (out +\<^sub>p uint (addr + j - src_seg_len)))
+                     })
+                   });
+              liftE (do {
+                guard (\<lambda>st. ptr_valid (heap_typing st)
+                  (out +\<^sub>p uint (tgt_pos + j)));
+                modify (heap_w8_update
+                  (\<lambda>h. h(out +\<^sub>p uint (tgt_pos + j) := b)));
+                return (j + 1)
+              })
+           }) (0 :: 32 word) :: (int, 32 word, lifted_globals) exn_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result sz \<and>
+            (\<forall>j < patch_n. heap_w8 t (patch +\<^sub>p int j) = heap_w8 s (patch +\<^sub>p int j)) \<and>
+            (\<forall>j < src_n. heap_w8 t (src +\<^sub>p int j) = heap_w8 s (src +\<^sub>p int j)) \<and>
+            (\<forall>j < unat tgt_pos. heap_w8 t (out +\<^sub>p int j) = heap_w8 s (out +\<^sub>p int j)) \<and>
+            (\<forall>k < unat sz.
+               heap_w8 t (out +\<^sub>p uint (tgt_pos + of_nat k)) =
+               copy_loop src_seg (heap_bytes s out (unat tgt_pos)) (unat addr) (unat sz)
+                 ! (unat tgt_pos + k)) \<and>
+            heap_typing t = heap_typing s \<and>
+            near_arr_'' t = near_arr_'' s \<and>
+            same_arr_'' t = same_arr_'' s \<and>
+            code_tbl_'' t = code_tbl_'' s \<rbrace>"
+proof -
+  have inv:
+    "decode_loop_inv s0 patch patch_n src src_n out
+       src_seg_off src_seg_len tgt_len
+       data_end inst_end addr_end src_seg
+       data_cursor inst_cursor addr_cursor tgt_pos np s"
+    by (rule decode_loop_inv_core_imp_inv[OF core])
+  note invD = decode_loop_invD[OF inv]
+  have src_seg_in_range: "unat src_seg_off + unat src_seg_len \<le> src_n"
+    using core unfolding decode_loop_inv_core_def by simp
+  have no_overflow_src_seg: "unat src_seg_off + unat src_seg_len < 2 ^ 32"
+    using core unfolding decode_loop_inv_core_def by simp
+  have src_tgt_fit: "unat src_seg_len + tgt_len < 2 ^ 32"
+    using core unfolding decode_loop_inv_core_def by simp
+  have no_overflow_tgt: "unat tgt_pos + unat sz < 2 ^ 32"
+    by (rule inv_no_overflow_tgt[OF inv sz_fits_tgt])
+  have no_overflow_combined: "unat src_seg_len + unat tgt_pos + unat sz < 2 ^ 32"
+    using src_tgt_fit sz_fits_tgt by linarith
+  have no_overflow_addr: "unat addr + unat sz \<le> unat src_seg_len + unat tgt_pos + unat sz"
+    using addr_bound by linarith
+  have src_seg_def_s:
+    "src_seg = heap_bytes s (src +\<^sub>p uint src_seg_off) (unat src_seg_len)"
+  proof -
+    have src_bytes_eq: "heap_bytes s src src_n = heap_bytes s0 src src_n"
+    proof (rule heap_bytes_eqI)
+      fix i
+      assume "i < src_n"
+      thus "heap_w8 s (src +\<^sub>p int i) = heap_w8 s0 (src +\<^sub>p int i)"
+        using invD(2) by simp
+    qed
+    have slice_s:
+      "take (unat src_seg_len) (drop (unat src_seg_off) (heap_bytes s src src_n)) =
+       heap_bytes s (src +\<^sub>p uint src_seg_off) (unat src_seg_len)"
+      by (rule heap_bytes_slice_word[OF src_seg_in_range])
+    have slice_s0:
+      "take (unat src_seg_len) (drop (unat src_seg_off) (heap_bytes s0 src src_n)) =
+       heap_bytes s0 (src +\<^sub>p uint src_seg_off) (unat src_seg_len)"
+      by (rule heap_bytes_slice_word[OF src_seg_in_range])
+    have bytes_eq:
+      "heap_bytes s (src +\<^sub>p uint src_seg_off) (unat src_seg_len) =
+       heap_bytes s0 (src +\<^sub>p uint src_seg_off) (unat src_seg_len)"
+      using src_bytes_eq slice_s slice_s0 by simp
+    thus ?thesis
+      using core unfolding decode_loop_inv_core_def by simp
+  qed
+  have src_valid:
+    "\<forall>j < unat sz.
+       unat (addr + of_nat j :: 32 word) < unat src_seg_len \<longrightarrow>
+       ptr_valid (heap_typing s)
+         (src +\<^sub>p uint (src_seg_off + addr + of_nat j))"
+  proof (intro allI impI)
+    fix j
+    assume j_lt: "j < unat sz"
+      and addrj_lt: "unat (addr + of_nat j :: 32 word) < unat src_seg_len"
+    have idx_no_overflow:
+      "unat src_seg_off + unat (addr + of_nat j :: 32 word) < 2 ^ 32"
+      using addrj_lt no_overflow_src_seg by linarith
+    have idx_unat:
+      "unat (src_seg_off + (addr + of_nat j) :: 32 word) =
+       unat src_seg_off + unat (addr + of_nat j :: 32 word)"
+      using idx_no_overflow by (simp add: unat_word_ariths(1))
+    have idx_lt: "unat (src_seg_off + (addr + of_nat j) :: 32 word) < src_n"
+      using idx_unat addrj_lt src_seg_in_range by simp
+    hence idx_lt': "unat (src_seg_off + addr + of_nat j :: 32 word) < src_n"
+      by (simp add: add.assoc)
+    show "ptr_valid (heap_typing s)
+            (src +\<^sub>p uint (src_seg_off + addr + of_nat j))"
+      by (rule buf_valid_uintD[OF invD(4) idx_lt'])
+  qed
+  have out_read_valid:
+    "\<forall>j < unat sz.
+       \<not> (addr + of_nat j :: 32 word) < src_seg_len \<longrightarrow>
+       ptr_valid (heap_typing s)
+         (out +\<^sub>p uint (addr + of_nat j - src_seg_len))"
+  proof (intro allI impI)
+    fix j
+    assume j_lt: "j < unat sz"
+      and not_src: "\<not> (addr + of_nat j :: 32 word) < src_seg_len"
+    have addrj_no_overflow: "unat addr + j < 2 ^ 32"
+      using addr_bound j_lt no_overflow_combined by linarith
+    have addrj_unat:
+      "unat (addr + of_nat j :: 32 word) = unat addr + j"
+      using addrj_no_overflow
+      by (simp add: unat_word_ariths(1) unat_of_nat)
+    have src_le_addrj:
+      "unat src_seg_len \<le> unat (addr + of_nat j :: 32 word)"
+      using not_src by (simp add: word_less_nat_alt)
+    have sub_unat:
+      "unat (addr + of_nat j - src_seg_len :: 32 word) =
+       unat addr + j - unat src_seg_len"
+      using src_le_addrj addrj_unat
+      by (simp add: unat_sub word_le_nat_alt)
+    have idx_lt: "unat (addr + of_nat j - src_seg_len :: 32 word) < tgt_len"
+    proof -
+      have "unat addr + j - unat src_seg_len < unat tgt_pos + unat sz"
+        using addr_bound j_lt by linarith
+      also have "\<dots> \<le> tgt_len"
+        using sz_fits_tgt by simp
+      finally show ?thesis
+        using sub_unat by simp
+    qed
+    show "ptr_valid (heap_typing s)
+            (out +\<^sub>p uint (addr + of_nat j - src_seg_len))"
+      by (rule buf_valid_uintD[OF invD(5) idx_lt])
+  qed
+  have out_write_valid:
+    "\<forall>j < unat sz.
+       ptr_valid (heap_typing s) (out +\<^sub>p uint (tgt_pos + of_nat j))"
+  proof (intro allI impI)
+    fix j
+    assume j_lt: "j < unat sz"
+    have idx_unat:
+      "unat (tgt_pos + of_nat j :: 32 word) = unat tgt_pos + j"
+      by (rule unat_add_of_nat_index[OF j_lt no_overflow_tgt])
+    have idx_lt: "unat (tgt_pos + of_nat j :: 32 word) < tgt_len"
+      using j_lt sz_fits_tgt idx_unat by simp
+    show "ptr_valid (heap_typing s) (out +\<^sub>p uint (tgt_pos + of_nat j))"
+      by (rule buf_valid_uintD[OF invD(5) idx_lt])
+  qed
+  have disj_src_out:
+    "\<forall>i < unat sz. \<forall>j < src_n.
+       out +\<^sub>p uint (tgt_pos + of_nat i) \<noteq> src +\<^sub>p int j"
+  proof (intro allI impI)
+    fix i j
+    assume i_lt: "i < unat sz" and j_lt: "j < src_n"
+    have idx_unat:
+      "unat (tgt_pos + of_nat i :: 32 word) = unat tgt_pos + i"
+      by (rule unat_add_of_nat_index[OF i_lt no_overflow_tgt])
+    have idx_lt: "unat (tgt_pos + of_nat i :: 32 word) < tgt_len"
+      using i_lt sz_fits_tgt idx_unat by simp
+    have out_eq:
+      "out +\<^sub>p uint (tgt_pos + of_nat i) =
+       out +\<^sub>p int (unat (tgt_pos + of_nat i :: 32 word))"
+      by (simp only: uint_nat)
+    have neq:
+      "out +\<^sub>p int (unat (tgt_pos + of_nat i :: 32 word)) \<noteq>
+       src +\<^sub>p int j"
+      by (rule invD(16)[rule_format, OF idx_lt j_lt])
+    show "out +\<^sub>p uint (tgt_pos + of_nat i) \<noteq> src +\<^sub>p int j"
+      by (subst out_eq, rule neq)
+  qed
+  have disj_patch_out:
+    "\<forall>i < unat sz. \<forall>j < patch_n.
+       out +\<^sub>p uint (tgt_pos + of_nat i) \<noteq> patch +\<^sub>p int j"
+  proof (intro allI impI)
+    fix i j
+    assume i_lt: "i < unat sz" and j_lt: "j < patch_n"
+    have idx_unat:
+      "unat (tgt_pos + of_nat i :: 32 word) = unat tgt_pos + i"
+      by (rule unat_add_of_nat_index[OF i_lt no_overflow_tgt])
+    have idx_lt: "unat (tgt_pos + of_nat i :: 32 word) < tgt_len"
+      using i_lt sz_fits_tgt idx_unat by simp
+    have out_eq:
+      "out +\<^sub>p uint (tgt_pos + of_nat i) =
+       out +\<^sub>p int (unat (tgt_pos + of_nat i :: 32 word))"
+      by (simp only: uint_nat)
+    have neq:
+      "out +\<^sub>p int (unat (tgt_pos + of_nat i :: 32 word)) \<noteq>
+       patch +\<^sub>p int j"
+      by (rule invD(15)[rule_format, OF idx_lt j_lt])
+    show "out +\<^sub>p uint (tgt_pos + of_nat i) \<noteq> patch +\<^sub>p int j"
+      by (subst out_eq, rule neq)
+  qed
+  have out_inj:
+    "\<forall>i < unat tgt_pos + unat sz. \<forall>j < unat tgt_pos + unat sz.
+       i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j"
+  proof (intro allI impI)
+    fix i j
+    assume i_lt: "i < unat tgt_pos + unat sz"
+      and j_lt: "j < unat tgt_pos + unat sz"
+      and ij: "i \<noteq> j"
+    have i_tgt: "i < tgt_len"
+      using i_lt sz_fits_tgt by simp
+    have j_tgt: "j < tgt_len"
+      using j_lt sz_fits_tgt by simp
+    show "out +\<^sub>p int i \<noteq> out +\<^sub>p int j"
+      by (rule invD(17)[rule_format, OF i_tgt j_tgt ij])
+  qed
+  show ?thesis
+    by (rule copy_loop_correct
+      [OF src_seg_def_s refl src_valid out_read_valid out_write_valid
+          disj_src_out disj_patch_out out_inj no_overflow_tgt
+          no_overflow_combined no_overflow_addr addr_bound
+          no_overflow_src_seg src_seg_in_range])
+qed
+
 (*
   resolve_size always returns a suffix: length rest \<le> length bs.
 *)
@@ -10032,6 +10414,231 @@ lemma exec_half_copy_conditions:
            ds_inst_rem st' = ds_inst_rem st"
   using assms
   by (auto simp: exec_half_def Let_def split: if_splits option.splits prod.splits)
+
+lemma decode_loop_inv_core_after_address:
+  assumes core:
+    "decode_loop_inv_core s0 patch patch_n src src_n out
+      src_seg_off src_seg_len tgt_len
+      data_end inst_end addr_end src_seg
+      data_cursor inst_cursor addr_cursor tgt_pos np dst c t"
+    and addr_rest:
+      "addr_rest =
+       drop (unat new_addr_cursor)
+         (take (unat addr_end) (heap_bytes s0 patch patch_n))"
+    and new_addr_cursor_ok: "new_addr_cursor \<le> addr_end"
+    and cache_abs': "cache_abs t' c' new_np"
+    and cache_wf': "cache_wf c'"
+    and heap_preserved: "heap_w8 t' = heap_w8 t"
+    and typing_preserved: "heap_typing t' = heap_typing t"
+    and code_tbl_preserved: "code_tbl_'' t' = code_tbl_'' t"
+  shows
+    "decode_loop_inv_core s0 patch patch_n src src_n out
+      src_seg_off src_seg_len tgt_len
+      data_end inst_end addr_end src_seg
+      data_cursor inst_cursor new_addr_cursor tgt_pos new_np
+      (dst\<lparr>ds_addr_rem := addr_rest, ds_cache := c'\<rparr>) c' t'"
+proof -
+  have inv:
+    "decode_loop_inv s0 patch patch_n src src_n out
+      src_seg_off src_seg_len tgt_len
+      data_end inst_end addr_end src_seg
+      data_cursor inst_cursor addr_cursor tgt_pos np t"
+    by (rule decode_loop_inv_core_imp_inv[OF core])
+  note invD = decode_loop_invD[OF inv]
+  have patch_preserved:
+    "\<forall>i < patch_n. heap_w8 t' (patch +\<^sub>p int i) = heap_w8 s0 (patch +\<^sub>p int i)"
+    using core heap_preserved unfolding decode_loop_inv_core_def by simp
+  have src_preserved:
+    "\<forall>i < src_n. heap_w8 t' (src +\<^sub>p int i) = heap_w8 s0 (src +\<^sub>p int i)"
+    using core heap_preserved unfolding decode_loop_inv_core_def by simp
+  have dst_tgt:
+    "ds_tgt dst = heap_bytes t' out (unat tgt_pos)"
+  proof -
+    have "heap_bytes t' out (unat tgt_pos) = heap_bytes t out (unat tgt_pos)"
+      using heap_preserved by (simp add: heap_bytes_def)
+    thus ?thesis
+      using core unfolding decode_loop_inv_core_def by simp
+  qed
+  have code_tbl': "code_tbl_matches t'"
+    using invD(13) code_tbl_preserved by (simp add: code_tbl_matches_def)
+  have code_tbl_tags': "code_tbl_tags_valid t'"
+    using invD(22) code_tbl_preserved by (simp add: code_tbl_tags_valid_def)
+  have typing_s0: "heap_typing t' = heap_typing s0"
+    using typing_preserved invD(14) by simp
+  show ?thesis
+    unfolding decode_loop_inv_core_def
+    apply (intro conjI)
+    using core apply (simp add: decode_loop_inv_core_def)
+    using core apply (simp add: decode_loop_inv_core_def)
+    using addr_rest apply simp
+    using dst_tgt apply simp
+    apply simp
+    using cache_abs' apply simp
+    using cache_wf' apply simp
+    using patch_preserved apply simp
+    using src_preserved apply simp
+    using invD(3) typing_preserved apply (simp add: buf_valid_def)
+    using invD(4) typing_preserved apply (simp add: buf_valid_def)
+    using invD(5) typing_preserved apply (simp add: buf_valid_def)
+    using invD(6) apply simp
+    using invD(7) apply simp
+    using new_addr_cursor_ok apply simp
+    using invD(9) apply simp
+    using invD(10) apply simp
+    using invD(11) apply simp
+    using invD(12) apply simp
+    using code_tbl' apply simp
+    using typing_s0 apply simp
+    using invD(15) apply simp
+    using invD(16) apply simp
+    using invD(17) apply simp
+    using invD(18) apply simp
+    using invD(19) apply simp
+    using invD(20) apply simp
+    using core apply (simp add: decode_loop_inv_core_def)
+    using invD(21) apply simp
+    using code_tbl_tags' by simp
+qed
+
+lemma decode_loop_inv_core_after_copy_fields:
+  fixes sz addr :: "32 word"
+  assumes core:
+    "decode_loop_inv_core s0 patch patch_n src src_n out
+      src_seg_off src_seg_len tgt_len
+      data_end inst_end addr_end src_seg
+      data_cursor inst_cursor addr_cursor tgt_pos np dst c t"
+    and inst_exec: "ds_inst_rem dst' = ds_inst_rem dst"
+    and data_exec: "ds_data_rem dst' = ds_data_rem dst"
+    and addr_exec: "ds_addr_rem dst' = ds_addr_rem dst"
+    and cache_exec: "ds_cache dst' = ds_cache dst"
+    and tgt_exec:
+      "ds_tgt dst' = copy_loop src_seg (ds_tgt dst) (unat addr) (unat sz)"
+    and sz_fits_tgt: "unat tgt_pos + unat sz \<le> tgt_len"
+    and no_overflow_tgt: "unat tgt_pos + unat sz < 2 ^ 32"
+    and addr_ok: "unat addr < unat src_seg_len + unat tgt_pos"
+    and patch_preserved:
+      "\<forall>j < patch_n. heap_w8 t' (patch +\<^sub>p int j) = heap_w8 t (patch +\<^sub>p int j)"
+    and src_preserved:
+      "\<forall>j < src_n. heap_w8 t' (src +\<^sub>p int j) = heap_w8 t (src +\<^sub>p int j)"
+    and copy_result:
+      "\<forall>k < unat sz.
+         heap_w8 t' (out +\<^sub>p uint (tgt_pos + of_nat k)) =
+         copy_loop src_seg (heap_bytes t out (unat tgt_pos)) (unat addr) (unat sz)
+           ! (unat tgt_pos + k)"
+    and out_prefix_preserved:
+      "\<forall>i < unat tgt_pos. heap_w8 t' (out +\<^sub>p int i) = heap_w8 t (out +\<^sub>p int i)"
+    and typing_preserved: "heap_typing t' = heap_typing t"
+    and cache_preserved:
+      "near_arr_'' t' = near_arr_'' t"
+      "same_arr_'' t' = same_arr_'' t"
+    and code_tbl_preserved: "code_tbl_'' t' = code_tbl_'' t"
+  shows
+    "decode_loop_inv_core s0 patch patch_n src src_n out
+      src_seg_off src_seg_len tgt_len
+      data_end inst_end addr_end src_seg
+      data_cursor inst_cursor addr_cursor (tgt_pos + sz) np dst' c t'"
+proof -
+  have inv:
+    "decode_loop_inv s0 patch patch_n src src_n out
+      src_seg_off src_seg_len tgt_len
+      data_end inst_end addr_end src_seg
+      data_cursor inst_cursor addr_cursor tgt_pos np t"
+    by (rule decode_loop_inv_core_imp_inv[OF core])
+  note invD = decode_loop_invD[OF inv]
+  have cache_abs_t: "cache_abs t c np"
+    using core unfolding decode_loop_inv_core_def by simp
+  have cache_wf_c: "cache_wf c"
+    using core unfolding decode_loop_inv_core_def by simp
+  have cache_eq: "ds_cache dst = c"
+    using core unfolding decode_loop_inv_core_def by simp
+  have cache_abs': "cache_abs t' c np"
+    using cache_abs_t cache_preserved by (simp add: cache_abs_def)
+  have np_bound: "unat np < s_near"
+    using cache_abs_t unfolding cache_abs_def by simp
+  have addr_cursor_ok: "addr_cursor \<le> addr_end"
+    using core unfolding decode_loop_inv_core_def by simp
+  have patch_t_s0:
+    "\<forall>j < patch_n. heap_w8 t' (patch +\<^sub>p int j) = heap_w8 s0 (patch +\<^sub>p int j)"
+  proof (intro allI impI)
+    fix j
+    assume j_lt: "j < patch_n"
+    have "heap_w8 t' (patch +\<^sub>p int j) = heap_w8 t (patch +\<^sub>p int j)"
+      using patch_preserved j_lt by simp
+    also have "\<dots> = heap_w8 s0 (patch +\<^sub>p int j)"
+      using core j_lt unfolding decode_loop_inv_core_def by simp
+    finally show "heap_w8 t' (patch +\<^sub>p int j) = heap_w8 s0 (patch +\<^sub>p int j)" .
+  qed
+  have src_t_s0:
+    "\<forall>j < src_n. heap_w8 t' (src +\<^sub>p int j) = heap_w8 s0 (src +\<^sub>p int j)"
+  proof (intro allI impI)
+    fix j
+    assume j_lt: "j < src_n"
+    have "heap_w8 t' (src +\<^sub>p int j) = heap_w8 t (src +\<^sub>p int j)"
+      using src_preserved j_lt by simp
+    also have "\<dots> = heap_w8 s0 (src +\<^sub>p int j)"
+      using core j_lt unfolding decode_loop_inv_core_def by simp
+    finally show "heap_w8 t' (src +\<^sub>p int j) = heap_w8 s0 (src +\<^sub>p int j)" .
+  qed
+  have inv_after:
+    "decode_loop_inv s0 patch patch_n src src_n out
+      src_seg_off src_seg_len tgt_len
+      data_end inst_end addr_end src_seg
+      data_cursor inst_cursor addr_cursor (tgt_pos + sz) np t'"
+    by (rule decode_loop_inv_after_copy
+      [OF inv sz_fits_tgt no_overflow_tgt addr_ok addr_cursor_ok
+          patch_t_s0 src_t_s0 copy_result out_prefix_preserved
+          typing_preserved cache_abs' cache_wf_c np_bound code_tbl_preserved])
+  note afterD = decode_loop_invD[OF inv_after]
+  have after_src_tgt_fit: "unat src_seg_len + tgt_len < 2 ^ 32"
+    using inv_after unfolding decode_loop_inv_def by auto
+  have tgt_pre: "ds_tgt dst = heap_bytes t out (unat tgt_pos)"
+    using core unfolding decode_loop_inv_core_def by simp
+  have copy_result_dst:
+    "\<forall>k < unat sz.
+       heap_w8 t' (out +\<^sub>p uint (tgt_pos + of_nat k)) =
+       copy_loop src_seg (ds_tgt dst) (unat addr) (unat sz)
+         ! (unat tgt_pos + k)"
+    using copy_result tgt_pre by simp
+  have new_tgt:
+    "heap_bytes t' out (unat (tgt_pos + sz)) =
+     copy_loop src_seg (ds_tgt dst) (unat addr) (unat sz)"
+    by (rule heap_bytes_after_copy_loop
+      [OF tgt_pre no_overflow_tgt])
+       (use copy_result_dst out_prefix_preserved in simp_all)
+  show ?thesis
+    unfolding decode_loop_inv_core_def
+    apply (intro conjI)
+    using inst_exec core apply (simp add: decode_loop_inv_core_def)
+    using data_exec core apply (simp add: decode_loop_inv_core_def)
+    using addr_exec core apply (simp add: decode_loop_inv_core_def)
+    using tgt_exec new_tgt apply simp
+    using cache_exec cache_eq apply simp
+    using cache_abs' apply simp
+    using cache_wf_c apply simp
+    using afterD(1) apply simp
+    using afterD(2) apply simp
+    using afterD(3) apply simp
+    using afterD(4) apply simp
+    using afterD(5) apply simp
+    using afterD(6) apply simp
+    using afterD(7) apply simp
+    using afterD(8) apply simp
+    using afterD(9) apply simp
+    using afterD(10) apply simp
+    using afterD(11) apply simp
+    using afterD(12) apply simp
+    using afterD(13) apply simp
+    using afterD(14) apply simp
+    using afterD(15) apply simp
+    using afterD(16) apply simp
+    using afterD(17) apply simp
+    using afterD(18) apply simp
+    using afterD(19) apply simp
+    using afterD(20) apply simp
+    using after_src_tgt_fit apply simp
+    using afterD(21) apply simp
+    using afterD(22) by simp
+qed
 
 lemma decode_inner_inv_core_copy_varint_address:
   fixes which :: "32 word" and op :: "8 word"
