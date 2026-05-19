@@ -18347,6 +18347,100 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 												                               qed
 												                               done
 												                           qed
+												                           subgoal premises fixed_run_empty_prems
+												                           proof -
+												                             have which_lt: "unat x2d < 2"
+												                               using fixed_run_empty_prems by simp
+												                             have inner_inv_cur:
+												                               "decode_inner_inv_core td patch (unat patch_len)
+												                                 src (unat src_len) out (val_C vaaa)
+												                                 (val_C vaa) (length tgt)
+												                                 ?data_end ?inst_end ?addr_end
+												                                 pw_src_seg dst x1a x1b x1 x1d x1c x2d s_inner"
+												                               using fixed_run_empty_prems by simp
+												                             obtain dst_cur c_cur where core_cur:
+												                               "decode_loop_inv_core td patch (unat patch_len)
+												                                 src (unat src_len) out (val_C vaaa)
+												                                 (val_C vaa) (length tgt)
+												                                 ?data_end ?inst_end ?addr_end
+												                                 pw_src_seg x1a x1b x1 x1d x1c dst_cur c_cur s_inner"
+												                               using inner_inv_cur
+												                               unfolding decode_inner_inv_core_def by blast
+												                             have code_tbl_cur: "code_tbl_matches s_inner"
+												                               using core_cur unfolding decode_loop_inv_core_def by simp
+												                             have op_lt: "unat op < 256"
+												                               using unat_lt2p[of op] by simp
+												                             have tag2_op:
+												                               "UCAST(8 \<rightarrow> 32)
+												                                  (code_tbl_'' s_inner.[unat op]
+												                                    .[unat (x2d * (3 :: 32 word))])
+												                                = (2 :: 32 word)"
+												                               using fixed_run_empty_prems opcode_eq
+												                               by (simp add: unat_ucast_upcast is_up)
+												                             have run_first:
+												                               "x2d = 0 \<Longrightarrow> ity (fst (default_entry (unat op))) = IRUN"
+												                             proof -
+												                               assume x2d0: "x2d = 0"
+												                               have tag2_0:
+												                                 "UCAST(8 \<rightarrow> 32)
+												                                    (code_tbl_'' s_inner.[unat op].[0]) =
+												                                  (2 :: 32 word)"
+												                                 using tag2_op x2d0 by simp
+												                               show ?thesis
+												                                 by (rule code_tbl_first_tag_two_run
+												                                   [OF code_tbl_cur op_lt tag2_0])
+												                             qed
+												                             have run_second:
+												                               "x2d = 1 \<Longrightarrow> ity (snd (default_entry (unat op))) = IRUN"
+												                             proof -
+												                               assume x2d1: "x2d = 1"
+												                               have tag2_3:
+												                                 "UCAST(8 \<rightarrow> 32)
+												                                    (code_tbl_'' s_inner.[unat op].[3]) =
+												                                  (2 :: 32 word)"
+												                                 using tag2_op x2d1 by simp
+												                               show ?thesis
+												                                 by (rule code_tbl_second_tag_two_run
+												                                   [OF code_tbl_cur op_lt tag2_3])
+												                             qed
+												                             have data_cursor_lt:
+												                               "unat x1a < unat ?data_end"
+												                               by (rule decode_inner_inv_core_run_data_cursor_lt
+												                                 [OF inner_inv_cur pop_dst decode_one_step which_lt
+												                                     run_first run_second])
+												                             show ?thesis
+												                               using fixed_run_empty_prems data_cursor_lt by simp
+												                           qed
+												                           subgoal premises fixed_run_fill_prems
+												                           proof -
+												                             have inner_inv_cur:
+												                               "decode_inner_inv_core td patch (unat patch_len)
+												                                 src (unat src_len) out (val_C vaaa)
+												                                 (val_C vaa) (length tgt)
+												                                 ?data_end ?inst_end ?addr_end
+												                                 pw_src_seg dst x1a x1b x1 x1d x1c x2d s_inner"
+												                               using fixed_run_fill_prems by simp
+												                             obtain dst_cur c_cur where core_cur:
+												                               "decode_loop_inv_core td patch (unat patch_len)
+												                                 src (unat src_len) out (val_C vaaa)
+												                                 (val_C vaa) (length tgt)
+												                                 ?data_end ?inst_end ?addr_end
+												                                 pw_src_seg x1a x1b x1 x1d x1c dst_cur c_cur s_inner"
+												                               using inner_inv_cur
+												                               unfolding decode_inner_inv_core_def by blast
+												                             have patch_valid:
+												                               "buf_valid s_inner patch (unat patch_len)"
+												                               using core_cur unfolding decode_loop_inv_core_def by simp
+												                             have data_lt: "unat x1a < unat ?data_end"
+												                               using fixed_run_fill_prems by simp
+												                             have data_end_bound:
+												                               "unat ?data_end \<le> unat patch_len"
+												                               using core_cur unfolding decode_loop_inv_core_def by simp
+												                             have x1a_bound: "unat x1a < unat patch_len"
+												                               using data_lt data_end_bound by simp
+												                             show ?thesis
+												                               by (rule buf_valid_uintD[OF patch_valid x1a_bound])
+												                           qed
 												                             apply fail \<comment> \<open>source inner which-loop body-preservation residual\<close>
 									                             done
 					                         qed
