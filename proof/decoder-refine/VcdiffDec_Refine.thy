@@ -4916,6 +4916,18 @@ lemma unat_add_no_overflow:
   shows "unat (a + b) = unat a + unat b"
   using assms unat_add_lem[of a b] by simp
 
+lemma unat_plus_one_under_tgt_bound:
+  fixes j sz tgt_pos :: "32 word"
+  assumes "unat j < unat sz"
+      and "unat tgt_pos + unat sz < 2 ^ 32"
+  shows "unat (j + 1 :: 32 word) = Suc (unat j)"
+proof -
+  have "unat j + 1 < 2 ^ 32"
+    using assms by linarith
+  thus ?thesis
+    by (simp add: unat_word_ariths(1))
+qed
+
 lemma copy_loop_overlap_ptr_eq:
   fixes addr j src_seg_len tgt_pos :: "32 word"
   assumes addr_j: "unat (addr + j) = unat addr + unat j"
@@ -5017,12 +5029,11 @@ lemma copy_loop_correct:
     and addr :: "32 word" and src_seg_len :: "32 word" and src_seg_off :: "32 word"
     and src :: "8 word ptr" and out :: "8 word ptr"
     and src_seg :: "8 word list" and tgt_pre :: "8 word list"
-  assumes src_seg_def: "src_seg = heap_bytes s (src +\<^sub>p uint src_seg_off) (unat src_seg_len)"
-      and tgt_pre_def: "tgt_pre = heap_bytes s out (unat tgt_pos)"
-      and sz_pos: "0 < unat sz"
-      and src_valid: "\<forall>j < unat sz.
-           unat (addr + of_nat j) < unat src_seg_len \<longrightarrow>
-           ptr_valid (heap_typing s)
+	   assumes src_seg_def: "src_seg = heap_bytes s (src +\<^sub>p uint src_seg_off) (unat src_seg_len)"
+	      and tgt_pre_def: "tgt_pre = heap_bytes s out (unat tgt_pos)"
+	      and src_valid: "\<forall>j < unat sz.
+	           unat (addr + of_nat j) < unat src_seg_len \<longrightarrow>
+	           ptr_valid (heap_typing s)
              (src +\<^sub>p uint (src_seg_off + addr + of_nat j))"
       and out_read_valid: "\<forall>j < unat sz.
            \<not> (addr + of_nat j < src_seg_len) \<longrightarrow>
@@ -5042,24 +5053,34 @@ lemma copy_loop_correct:
       and addr_bound: "unat addr < unat src_seg_len + unat tgt_pos"
       and no_overflow_src_seg: "unat src_seg_off + unat src_seg_len < 2 ^ 32"
       and src_seg_in_range: "unat src_seg_off + unat src_seg_len \<le> src_n"
-  shows "(whileLoop (\<lambda>(j :: 32 word) st. j < sz)
-           (\<lambda>j. do {
-              let a = addr + j;
-              (if a < src_seg_len then do {
-                 guard (\<lambda>st. ptr_valid (heap_typing st) (src +\<^sub>p uint (src_seg_off + a)));
-                 b \<leftarrow> gets (\<lambda>st. heap_w8 st (src +\<^sub>p uint (src_seg_off + a)));
-                 guard (\<lambda>st. ptr_valid (heap_typing st) (out +\<^sub>p uint (tgt_pos + j)));
-                 modify (heap_w8_update (\<lambda>h. h(out +\<^sub>p uint (tgt_pos + j) := b)));
-                 return (j + 1)
-               } else do {
-                 let tgt_rel = a - src_seg_len;
-                 guard (\<lambda>st. ptr_valid (heap_typing st) (out +\<^sub>p uint tgt_rel));
-                 b \<leftarrow> gets (\<lambda>st. heap_w8 st (out +\<^sub>p uint tgt_rel));
-                 guard (\<lambda>st. ptr_valid (heap_typing st) (out +\<^sub>p uint (tgt_pos + j)));
-                 modify (heap_w8_update (\<lambda>h. h(out +\<^sub>p uint (tgt_pos + j) := b)));
-                 return (j + 1)
-               })
-           }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+	  shows "(whileLoop (\<lambda>(j :: 32 word) st. unat j < unat sz)
+	           (\<lambda>j. do {
+	              b \<leftarrow>
+	                condition (\<lambda>st. unat (addr + j) < unat src_seg_len)
+	                  (liftE (do {
+	                     guard (\<lambda>st. ptr_valid (heap_typing st)
+	                       (src +\<^sub>p uint (src_seg_off + (addr + j))));
+	                     gets (\<lambda>st. heap_w8 st
+	                       (src +\<^sub>p uint (src_seg_off + (addr + j))))
+	                   }))
+	                  (do {
+	                     when (unat (tgt_pos + j) \<le> unat (addr + j - src_seg_len))
+	                       (throw (- (10 :: int)));
+	                     liftE (do {
+	                       guard (\<lambda>st. ptr_valid (heap_typing st)
+	                         (out +\<^sub>p uint (addr + j - src_seg_len)));
+	                       gets (\<lambda>st. heap_w8 st
+	                         (out +\<^sub>p uint (addr + j - src_seg_len)))
+	                     })
+	                   });
+	              liftE (do {
+	                guard (\<lambda>st. ptr_valid (heap_typing st)
+	                  (out +\<^sub>p uint (tgt_pos + j)));
+	                modify (heap_w8_update
+	                  (\<lambda>h. h(out +\<^sub>p uint (tgt_pos + j) := b)));
+	                return (j + 1)
+	              })
+	           }) (0 :: 32 word) :: (int, 32 word, lifted_globals) exn_monad) \<bullet> s
 	         \<lbrace> \<lambda>r t. r = Result sz \<and>
 	            (\<forall>j < patch_n. heap_w8 t (patch +\<^sub>p int j) = heap_w8 s (patch +\<^sub>p int j)) \<and>
 	            (\<forall>j < src_n. heap_w8 t (src +\<^sub>p int j) = heap_w8 s (src +\<^sub>p int j)) \<and>
@@ -5072,28 +5093,27 @@ lemma copy_loop_correct:
 	            near_arr_'' t = near_arr_'' s \<and>
 	            same_arr_'' t = same_arr_'' s \<and>
 	            code_tbl_'' t = code_tbl_'' s \<rbrace>"
-  apply (rule runs_to_whileLoop_res'[
-    where R = "measure (\<lambda>((j :: 32 word), _). unat sz - unat j)"
-      and I = "\<lambda>j st. unat j \<le> unat sz
-             \<and> (\<forall>k < patch_n. heap_w8 st (patch +\<^sub>p int k) = heap_w8 s (patch +\<^sub>p int k))
-             \<and> (\<forall>k < src_n. heap_w8 st (src +\<^sub>p int k) = heap_w8 s (src +\<^sub>p int k))
-             \<and> (\<forall>k < unat j.
-                  heap_w8 st (out +\<^sub>p uint (tgt_pos + of_nat k)) =
-                  copy_loop src_seg tgt_pre (unat addr) (unat j)
-                    ! (unat tgt_pos + k))
-	             \<and> (\<forall>i < unat tgt_pos.
-	                  heap_w8 st (out +\<^sub>p int i) = heap_w8 s (out +\<^sub>p int i))
-	             \<and> heap_typing st = heap_typing s
-	             \<and> near_arr_'' st = near_arr_'' s
-	             \<and> same_arr_'' st = same_arr_'' s
-	             \<and> code_tbl_'' st = code_tbl_'' s"])
-     subgoal by simp
-    subgoal by (simp add: word_less_nat_alt)
-   subgoal for j st
-     by (clarsimp simp: word_less_nat_alt)
-  subgoal for j st
-    apply (clarsimp simp: Let_def)
-    apply (cases "addr + j < src_seg_len")
+	  apply (rule runs_to_whileLoop_exn'[
+	    where R = "measure (\<lambda>((j :: 32 word), _). unat sz - unat j)"
+	      and I = "\<lambda>r st.
+	        ((\<forall>j. r = Result j \<longrightarrow>
+	            unat j \<le> unat sz
+	            \<and> (\<forall>k < patch_n. heap_w8 st (patch +\<^sub>p int k) = heap_w8 s (patch +\<^sub>p int k))
+	            \<and> (\<forall>k < src_n. heap_w8 st (src +\<^sub>p int k) = heap_w8 s (src +\<^sub>p int k))
+	            \<and> (\<forall>k < unat j.
+	                 heap_w8 st (out +\<^sub>p uint (tgt_pos + of_nat k)) =
+	                 copy_loop src_seg tgt_pre (unat addr) (unat j)
+	                   ! (unat tgt_pos + k))
+	            \<and> (\<forall>i < unat tgt_pos.
+	                 heap_w8 st (out +\<^sub>p int i) = heap_w8 s (out +\<^sub>p int i))
+	            \<and> heap_typing st = heap_typing s
+	            \<and> near_arr_'' st = near_arr_'' s
+	            \<and> same_arr_'' st = same_arr_'' s
+	            \<and> code_tbl_'' st = code_tbl_'' s)
+	         \<and> (\<forall>e. r = Exn e \<longrightarrow> False))"])
+	  subgoal for j st
+	    apply (clarsimp simp: Let_def)
+	    apply (cases "unat (addr + j) < unat src_seg_len")
     subgoal \<comment> \<open>Source branch: read from src[src_seg_off + addr + j]\<close>
       apply simp
       apply runs_to_vcg
@@ -5103,8 +5123,11 @@ lemma copy_loop_correct:
       \<comment> \<open>2. out guard\<close>
             subgoal using out_write_valid[rule_format, of "unat j"]
               by (simp add: word_less_nat_alt word_unat.Rep_inverse)
-      \<comment> \<open>3. bound\<close>
-           subgoal using no_overflow_tgt by unat_arith
+		      \<comment> \<open>3. bound\<close>
+		           subgoal
+		             apply (subgoal_tac "unat j + 1 < 2 ^ 32")
+		              apply (simp add: unat_word_ariths(1))
+		             using no_overflow_tgt by linarith
       \<comment> \<open>4. patch preservation (eq ptr - impossible)\<close>
           subgoal for k
             using disj_patch_out[rule_format, of "unat j" k]
@@ -5145,7 +5168,9 @@ lemma copy_loop_correct:
             apply (rule unat_add_no_overflow)
             using no_overflow_combined no_overflow_addr apply linarith
            using tgt_pre_def apply (simp add: heap_bytes_def)
-          using no_overflow_tgt apply unat_arith
+	          apply (rule unat_plus_one_under_tgt_bound)
+	           apply assumption
+	          using no_overflow_tgt apply assumption
          \<comment> \<open>Prove: heap_w8 s ... = src_seg ! ...\<close>
          apply (rule heap_bytes_nth_ptr[OF src_seg_def])
           apply (subgoal_tac "unat (addr + j) = unat addr + unat j")
@@ -5189,12 +5214,16 @@ lemma copy_loop_correct:
            apply (rule copy_loop_nth_stable)
            apply assumption
           using tgt_pre_def apply simp
-         using no_overflow_tgt apply unat_arith
+	         apply (rule unat_plus_one_under_tgt_bound)
+	          apply assumption
+	         using no_overflow_tgt apply assumption
         apply (cases "k = unat j")
          apply (simp add: word_unat.Rep_inverse)
-        apply (subgoal_tac "unat (j + 1 :: 32 word) = unat j + 1")
-         apply linarith
-        using no_overflow_tgt by unat_arith
+		        apply (subgoal_tac "unat (j + 1 :: 32 word) = Suc (unat j)")
+	         apply linarith
+	        apply (rule unat_plus_one_under_tgt_bound)
+	         apply assumption
+	        using no_overflow_tgt by assumption
       \<comment> \<open>10. prefix preservation (eq ptr - impossible)\<close>
       subgoal for i
         apply (subgoal_tac "out +\<^sub>p int (unat tgt_pos + unat j) = out +\<^sub>p uint (tgt_pos + j)")
@@ -5208,23 +5237,47 @@ lemma copy_loop_correct:
       subgoal by simp
       \<comment> \<open>12. termination\<close>
       subgoal
-        apply (subgoal_tac "unat (j + 1 :: 32 word) = unat j + 1")
-         apply (subgoal_tac "unat j < unat sz")
-          apply linarith
-         apply (simp only: word_less_nat_alt)
-        using no_overflow_tgt by unat_arith
+		        apply (subgoal_tac "unat (j + 1 :: 32 word) = Suc (unat j)")
+	         apply (subgoal_tac "unat j < unat sz")
+	          apply linarith
+	         apply (simp only: word_less_nat_alt)
+	        apply (rule unat_plus_one_under_tgt_bound)
+	         apply assumption
+	        using no_overflow_tgt by assumption
       done
-    subgoal \<comment> \<open>Overlapping copy branch: read from out[addr + j - src_seg_len]\<close>
-      apply simp
-      apply runs_to_vcg
+	    subgoal \<comment> \<open>Overlapping copy branch: read from out[addr + j - src_seg_len]\<close>
+	      apply simp
+	      apply (subgoal_tac "\<not> unat (tgt_pos + j) \<le> unat (addr + j - src_seg_len)")
+	       prefer 2
+	       apply (subgoal_tac "unat (addr + j) = unat addr + unat j")
+	        prefer 2
+	        apply (rule unat_add_no_overflow)
+	        using no_overflow_combined no_overflow_addr apply linarith
+	       apply (subgoal_tac "unat (tgt_pos + j) = unat tgt_pos + unat j")
+	        prefer 2
+	        apply (rule unat_add_no_overflow)
+	        using no_overflow_tgt apply linarith
+	       apply (subgoal_tac "src_seg_len \<le> addr + j")
+	        prefer 2
+	        apply (simp add: word_le_nat_alt)
+	       apply (subgoal_tac "unat (addr + j - src_seg_len) =
+	                            unat addr + unat j - unat src_seg_len")
+	        prefer 2
+	        apply (simp add: unat_sub word_le_nat_alt)
+	       using addr_bound apply linarith
+	      apply simp
+	      apply runs_to_vcg
       \<comment> \<open>1. out read guard\<close>
              subgoal using out_read_valid[rule_format, of "unat j"]
                by (simp add: word_less_nat_alt word_unat.Rep_inverse unat_sub)
       \<comment> \<open>2. out write guard\<close>
             subgoal using out_write_valid[rule_format, of "unat j"]
               by (simp add: word_less_nat_alt word_unat.Rep_inverse)
-      \<comment> \<open>3. bound\<close>
-           subgoal using no_overflow_tgt by unat_arith
+	      \<comment> \<open>3. bound\<close>
+		           subgoal
+		             apply (subgoal_tac "unat j + 1 < 2 ^ 32")
+		              apply (simp add: unat_word_ariths(1))
+		             using no_overflow_tgt by linarith
       \<comment> \<open>4. patch preservation (eq ptr - impossible)\<close>
           subgoal for k
             using disj_patch_out[rule_format, of "unat j" k]
@@ -5244,11 +5297,13 @@ lemma copy_loop_correct:
          apply (rule copy_out_eq_idx, assumption)
          apply (erule less_trans, rule unsigned_less)
         apply (simp only:)
-        \<comment> \<open>RHS: copy_loop ... (unat (j+1)) ! (unat tgt_pos + unat j)\<close>
-        \<comment> \<open>Reduce via copy_loop_nth_tgt\<close>
-        apply (subgoal_tac "unat (j + 1) = Suc (unat j)")
-         prefer 2
-         using no_overflow_tgt apply unat_arith
+	        \<comment> \<open>RHS: copy_loop ... (unat (j+1)) ! (unat tgt_pos + unat j)\<close>
+	        \<comment> \<open>Reduce via copy_loop_nth_tgt\<close>
+	        apply (subgoal_tac "unat (j + 1) = Suc (unat j)")
+	         prefer 2
+	         apply (subgoal_tac "unat j + 1 < 2 ^ 32")
+	          apply (simp add: unat_word_ariths(1))
+	         using no_overflow_tgt apply linarith
         apply (subgoal_tac "unat tgt_pos = length tgt_pre")
          prefer 2
          using tgt_pre_def apply (simp add: heap_bytes_def)
@@ -5295,21 +5350,24 @@ lemma copy_loop_correct:
           prefer 2
           apply (subgoal_tac "src_seg_len \<le> addr + j")
            prefer 2
-           apply (simp add: linorder_not_less)
+	          apply (simp add: word_le_nat_alt)
           apply (subgoal_tac "unat (addr + j - src_seg_len) = unat addr + unat j - unat src_seg_len")
            apply (simp only: ptr_add_def uint_nat of_int_of_nat_eq)
           apply (simp add: unat_sub word_le_nat_alt)
          apply (simp only:)
          apply (simp only: uint_nat)
         \<comment> \<open>Case B: loop-written region — use output invariant + ptr equality\<close>
-        apply (subgoal_tac "addr + j - src_seg_len =
-               tgt_pos + word_of_nat (unat addr + unat j - unat src_seg_len - unat tgt_pos)")
-         prefer 2
-         apply (rule copy_loop_overlap_ptr_eq)
-            apply assumption
-           apply assumption
-          apply linarith
-         using no_overflow_combined no_overflow_addr apply linarith
+	        apply (subgoal_tac "addr + j - src_seg_len =
+	               tgt_pos + word_of_nat (unat addr + unat j - unat src_seg_len - unat tgt_pos)")
+	         prefer 2
+	         apply (rule copy_loop_overlap_ptr_eq)
+	            apply assumption
+		           apply (simp add: word_less_nat_alt)
+		          apply simp
+			         apply (subgoal_tac
+			           "unat addr + unat j - unat src_seg_len - unat tgt_pos < unat j")
+		          using no_overflow_tgt apply linarith
+		         using addr_bound apply linarith
         apply (subgoal_tac "unat addr + unat j - unat src_seg_len - unat tgt_pos < unat j")
          prefer 2
          using addr_bound apply linarith
@@ -5317,8 +5375,8 @@ lemma copy_loop_correct:
                unat tgt_pos + (unat addr + unat j - unat src_seg_len - unat tgt_pos)")
          prefer 2
          apply linarith
-        apply (simp only: uint_nat)
-        done
+	        apply (simp only: uint_nat)
+	        done
       \<comment> \<open>9. output correctness (neq ptr)\<close>
       subgoal for k
         apply (subgoal_tac "k < unat j")
@@ -5333,12 +5391,16 @@ lemma copy_loop_correct:
            apply (rule copy_loop_nth_stable)
            apply assumption
           using tgt_pre_def apply simp
-         using no_overflow_tgt apply unat_arith
+	         apply (rule unat_plus_one_under_tgt_bound)
+	          apply assumption
+	         using no_overflow_tgt apply assumption
         apply (cases "k = unat j")
          apply (simp add: word_unat.Rep_inverse)
-        apply (subgoal_tac "unat (j + 1 :: 32 word) = unat j + 1")
-         apply linarith
-        using no_overflow_tgt by unat_arith
+		        apply (subgoal_tac "unat (j + 1 :: 32 word) = Suc (unat j)")
+	         apply linarith
+	        apply (rule unat_plus_one_under_tgt_bound)
+	         apply assumption
+	        using no_overflow_tgt by assumption
       \<comment> \<open>10. prefix preservation (eq ptr - impossible)\<close>
       subgoal for i
         apply (subgoal_tac "out +\<^sub>p int (unat tgt_pos + unat j) = out +\<^sub>p uint (tgt_pos + j)")
@@ -5351,15 +5413,21 @@ lemma copy_loop_correct:
       \<comment> \<open>11. prefix preservation (neq ptr)\<close>
       subgoal by simp
       \<comment> \<open>12. termination\<close>
-      subgoal
-        apply (subgoal_tac "unat (j + 1 :: 32 word) = unat j + 1")
-         apply (subgoal_tac "unat j < unat sz")
-          apply linarith
-         apply (simp only: word_less_nat_alt)
-        using no_overflow_tgt by unat_arith
-      done
-    done
-  done
+	      subgoal
+		        apply (subgoal_tac "unat (j + 1 :: 32 word) = Suc (unat j)")
+	         apply (subgoal_tac "unat j < unat sz")
+	          apply linarith
+	         apply (simp only: word_less_nat_alt)
+	        apply (rule unat_plus_one_under_tgt_bound)
+	         apply assumption
+	        using no_overflow_tgt by assumption
+	      done
+	    done
+		  subgoal for j st by clarsimp
+	  subgoal for e st by simp
+	  subgoal by simp
+	  subgoal by simp
+	  done
 
 (* ---------- Phase 2: Prefix refinement (no-source, no-app-header) ---------- *)
 
