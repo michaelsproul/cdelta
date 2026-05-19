@@ -8984,6 +8984,125 @@ proof -
     by simp_all
 qed
 
+lemma code_tbl_current_half_fixed_nonnoop:
+  fixes which :: "32 word" and op :: "8 word"
+  assumes matches: "code_tbl_matches s"
+      and tags_valid: "code_tbl_tags_valid s"
+      and op_lt: "unat op < 256"
+      and which_lt: "unat which < 2"
+      and tag_nz:
+        "UCAST(8 \<rightarrow> 32)
+          (code_tbl_'' s.[unat op].[unat (which * (3 :: 32 word))])
+         \<noteq> (0 :: 32 word)"
+  defines "h \<equiv>
+     (if which = 0
+      then fst (default_entry (unat op))
+      else snd (default_entry (unat op)))"
+  shows "isz h =
+          unat
+            (UCAST(8 \<rightarrow> 32)
+              (code_tbl_'' s.[unat op].[unat (which * (3 :: 32 word) + 1)])
+             :: 32 word)"
+    and "ity h \<noteq> NOOP"
+proof -
+  have which_cases: "which = 0 \<or> which = 1"
+  proof -
+    have "unat which = 0 \<or> unat which = 1"
+      using which_lt by arith
+    thus ?thesis
+      by (metis One_nat_def unat_0 unat_1 word_unat.Rep_inject)
+  qed
+  show size:
+    "isz h =
+      unat
+        (UCAST(8 \<rightarrow> 32)
+          (code_tbl_'' s.[unat op].[unat (which * (3 :: 32 word) + 1)])
+         :: 32 word)"
+  proof (rule disjE[OF which_cases])
+    assume which0: "which = 0"
+    let ?tag = "code_tbl_'' s.[unat op].[0]"
+    let ?sz = "code_tbl_'' s.[unat op].[1]"
+    let ?mode = "code_tbl_'' s.[unat op].[2]"
+    have tag_le3: "unat ?tag \<le> 3"
+      using tags_valid op_lt unfolding code_tbl_tags_valid_def by simp
+    have tag_cases: "?tag = 0 \<or> ?tag = 1 \<or> ?tag = 2 \<or> ?tag = 3"
+      by (rule word8_unat_le3_cases[OF tag_le3])
+    have tag_nz0: "?tag \<noteq> (0 :: 8 word)"
+    proof
+      assume tag0: "?tag = (0 :: 8 word)"
+      have "UCAST(8 \<rightarrow> 32) ?tag = (0 :: 32 word)"
+        using tag0 by simp
+      thus False
+        using tag_nz which0 by simp
+    qed
+    have h_eq:
+      "byte_to_hi ?tag ?sz ?mode = fst (default_entry (unat op))"
+      by (rule code_tbl_matches_first_half[OF matches op_lt])
+    have "isz h = unat ?sz"
+      using h_def h_eq[symmetric] tag_cases tag_nz0 which0
+      by (auto simp: byte_to_hi_def add_hi_def run_hi_def copy_hi_def
+          noop_hi_def split: if_splits)
+    thus ?thesis
+      using which0 unat_lt2p[of ?sz] by (simp add: unat_ucast)
+  next
+    assume which1: "which = 1"
+    let ?tag = "code_tbl_'' s.[unat op].[3]"
+    let ?sz = "code_tbl_'' s.[unat op].[4]"
+    let ?mode = "code_tbl_'' s.[unat op].[5]"
+    have tag_le3: "unat ?tag \<le> 3"
+      using tags_valid op_lt unfolding code_tbl_tags_valid_def by simp
+    have tag_cases: "?tag = 0 \<or> ?tag = 1 \<or> ?tag = 2 \<or> ?tag = 3"
+      by (rule word8_unat_le3_cases[OF tag_le3])
+    have tag_nz3: "?tag \<noteq> (0 :: 8 word)"
+    proof
+      assume tag0: "?tag = (0 :: 8 word)"
+      have "UCAST(8 \<rightarrow> 32) ?tag = (0 :: 32 word)"
+        using tag0 by simp
+      thus False
+        using tag_nz which1 by simp
+    qed
+    have h_eq:
+      "byte_to_hi ?tag ?sz ?mode = snd (default_entry (unat op))"
+      by (rule code_tbl_matches_second_half[OF matches op_lt])
+    have "isz h = unat ?sz"
+      using h_def h_eq[symmetric] tag_cases tag_nz3 which1
+      by (auto simp: byte_to_hi_def add_hi_def run_hi_def copy_hi_def
+          noop_hi_def split: if_splits)
+    thus ?thesis
+      using which1 unat_lt2p[of ?sz] by (simp add: unat_ucast)
+  qed
+  show "ity h \<noteq> NOOP"
+  proof (rule disjE[OF which_cases])
+    assume which0: "which = 0"
+    show ?thesis
+      using h_def default_entry_first_not_noop[OF op_lt] which0 by simp
+  next
+    assume which1: "which = 1"
+    let ?tag = "code_tbl_'' s.[unat op].[3]"
+    let ?sz = "code_tbl_'' s.[unat op].[4]"
+    let ?mode = "code_tbl_'' s.[unat op].[5]"
+    have tag_le3: "unat ?tag \<le> 3"
+      using tags_valid op_lt unfolding code_tbl_tags_valid_def by simp
+    have tag_cases: "?tag = 0 \<or> ?tag = 1 \<or> ?tag = 2 \<or> ?tag = 3"
+      by (rule word8_unat_le3_cases[OF tag_le3])
+    have tag_nz3: "?tag \<noteq> (0 :: 8 word)"
+    proof
+      assume tag0: "?tag = (0 :: 8 word)"
+      have "UCAST(8 \<rightarrow> 32) ?tag = (0 :: 32 word)"
+        using tag0 by simp
+      thus False
+        using tag_nz which1 by simp
+    qed
+    have h_eq:
+      "byte_to_hi ?tag ?sz ?mode = snd (default_entry (unat op))"
+      by (rule code_tbl_matches_second_half[OF matches op_lt])
+    show ?thesis
+      using h_def h_eq[symmetric] tag_cases tag_nz3 which1
+      by (auto simp: byte_to_hi_def add_hi_def run_hi_def copy_hi_def
+          noop_hi_def split: if_splits)
+  qed
+qed
+
 (*
   Key bridge lemma: the C's check "typ == 0" corresponds to ity h = NOOP,
   "typ == 1" to IADD, "typ == 2" to IRUN, "typ >= 3" to ICOPY.
@@ -17572,12 +17691,275 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 											                                     unfolding decode_inner_inv_core_def by blast
 											                                   show ?thesis
 											                                     using Result inner_after by simp
-											                                 qed
-											                               qed
-											                               done
-											                           qed
-											                             apply fail \<comment> \<open>source inner which-loop body-preservation residual\<close>
-								                             done
+												                                 qed
+												                               qed
+												                               done
+												                           qed
+												                           subgoal premises fixed_tgt_overrun_prems
+												                           proof -
+												                             have which_lt: "unat x2d < 2"
+												                               using fixed_tgt_overrun_prems by simp
+												                             have inner_inv_cur:
+												                               "decode_inner_inv_core td patch (unat patch_len)
+												                                 src (unat src_len) out (val_C vaaa)
+												                                 (val_C vaa) (length tgt)
+												                                 ?data_end ?inst_end ?addr_end
+												                                 pw_src_seg dst x1a x1b x1 x1d x1c x2d s_inner"
+												                               using fixed_tgt_overrun_prems by simp
+												                             obtain dst_cur c_cur where core_cur:
+												                               "decode_loop_inv_core td patch (unat patch_len)
+												                                 src (unat src_len) out (val_C vaaa)
+												                                 (val_C vaa) (length tgt)
+												                                 ?data_end ?inst_end ?addr_end
+												                                 pw_src_seg x1a x1b x1 x1d x1c dst_cur c_cur s_inner"
+												                               and prefix_cur:
+												                               "decode_one_prefix pw_src_seg (unat (val_C vaa)) (length tgt)
+												                                 dst (unat x2d) dst_cur"
+												                               using inner_inv_cur
+												                               unfolding decode_inner_inv_core_def by blast
+												                             have code_tbl_cur: "code_tbl_matches s_inner"
+												                               using core_cur unfolding decode_loop_inv_core_def by simp
+												                             have code_tbl_tags_cur: "code_tbl_tags_valid s_inner"
+												                               using core_cur unfolding decode_loop_inv_core_def by simp
+												                             have op_lt: "unat op < 256"
+												                               using unat_lt2p[of op] by simp
+												                             define h :: half_inst where
+												                               "h =
+												                                (if x2d = 0
+												                                 then fst (default_entry (unat op))
+												                                 else snd (default_entry (unat op)))"
+												                             let ?sz =
+												                               "(UCAST(8 \<rightarrow> 32)
+												                                  (code_tbl_'' s_inner.[unat op]
+												                                    .[unat (x2d * (3 :: 32 word) + 1)])
+												                                :: 32 word)"
+												                             have tag_nz_op:
+												                               "UCAST(8 \<rightarrow> 32)
+												                                  (code_tbl_'' s_inner.[unat op]
+												                                    .[unat (x2d * (3 :: 32 word))])
+												                                \<noteq> (0 :: 32 word)"
+												                               using fixed_tgt_overrun_prems opcode_eq
+												                               by (simp add: unat_ucast_upcast is_up)
+												                             have size_nonzero_op: "?sz \<noteq> 0"
+												                               using fixed_tgt_overrun_prems opcode_eq
+												                               by (simp add: unat_ucast_upcast is_up)
+												                             have h_size: "isz h = unat ?sz"
+												                               using code_tbl_current_half_fixed_nonnoop(1)
+												                                 [OF code_tbl_cur code_tbl_tags_cur op_lt which_lt
+												                                     tag_nz_op]
+												                                     h_def
+												                               by simp
+												                             have h_not_noop: "ity h \<noteq> NOOP"
+												                               using code_tbl_current_half_fixed_nonnoop(2)
+												                                 [OF code_tbl_cur code_tbl_tags_cur op_lt which_lt
+												                                     tag_nz_op]
+												                                     h_def
+												                               by simp
+												                             have h_size_nonzero: "isz h \<noteq> 0"
+												                             proof
+												                               assume "isz h = 0"
+												                               hence "unat ?sz = 0"
+												                                 using h_size by simp
+												                               hence "?sz = 0"
+												                                 by (simp add: unat_eq_0)
+												                               thus False
+												                                 using size_nonzero_op by simp
+												                             qed
+												                             have resolve_cur_h:
+												                               "resolve_size h (ds_inst_rem dst_cur) =
+												                                Some (unat ?sz, ds_inst_rem dst_cur)"
+												                               using h_size h_size_nonzero
+												                               by (simp add: resolve_size_def)
+												                             have resolve_cur:
+												                               "resolve_size
+												                                  (if x2d = 0
+												                                   then fst (default_entry (unat op))
+												                                   else snd (default_entry (unat op)))
+												                                  (ds_inst_rem dst_cur) =
+												                                Some (unat ?sz, ds_inst_rem dst_cur)"
+												                               using resolve_cur_h h_def by simp
+												                             obtain st_exec where exec_cur:
+												                               "exec_half
+												                                  (if x2d = 0
+												                                   then fst (default_entry (unat op))
+												                                   else snd (default_entry (unat op)))
+												                                  (unat ?sz) pw_src_seg
+												                                  (unat (val_C vaa)) (length tgt)
+												                                  (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>) =
+												                                Inl st_exec"
+												                               using decode_one_prefix_exec_half_some
+												                                 [OF pop_dst prefix_cur decode_one_step which_lt resolve_cur]
+												                               by blast
+												                             have exec_cur_h:
+												                               "exec_half h (unat ?sz) pw_src_seg
+												                                  (unat (val_C vaa)) (length tgt)
+												                                  (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>) =
+												                                Inl st_exec"
+												                               using exec_cur h_def by simp
+												                             have tgt_fit:
+												                               "unat x1d + unat ?sz \<le> length tgt"
+												                             proof -
+												                               have "length
+												                                      (ds_tgt
+												                                        (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>))
+												                                     + unat ?sz \<le> length tgt"
+												                                 by (rule exec_half_nonnoop_tgt_fit
+												                                   [OF h_not_noop exec_cur_h])
+												                               moreover have
+												                                 "ds_tgt dst_cur = heap_bytes s_inner out (unat x1d)"
+												                                 using core_cur unfolding decode_loop_inv_core_def by simp
+												                               ultimately show ?thesis by simp
+												                             qed
+												                             have c_tgt_len: "unat (val_C vaaaaa) = length tgt"
+												                               using tgt_val tgt_len_eq by simp
+												                             have no_overflow:
+												                               "unat x1d + unat ?sz < 2 ^ 32"
+												                               using tgt_fit c_tgt_len unat_lt2p[of "val_C vaaaaa"] by simp
+												                             have sum_unat:
+												                               "unat (x1d + ?sz) =
+												                                unat x1d + unat ?sz"
+												                               using no_overflow by (simp add: unat_word_ariths(1))
+												                             show ?thesis
+												                               using fixed_tgt_overrun_prems tgt_fit c_tgt_len sum_unat
+												                                     opcode_eq
+												                               by (simp add: unat_ucast_upcast is_up)
+												                           qed
+												                           subgoal premises fixed_add_trunc_prems
+												                           proof -
+												                             have which_lt: "unat x2d < 2"
+												                               using fixed_add_trunc_prems by simp
+												                             have inner_inv_cur:
+												                               "decode_inner_inv_core td patch (unat patch_len)
+												                                 src (unat src_len) out (val_C vaaa)
+												                                 (val_C vaa) (length tgt)
+												                                 ?data_end ?inst_end ?addr_end
+												                                 pw_src_seg dst x1a x1b x1 x1d x1c x2d s_inner"
+												                               using fixed_add_trunc_prems by simp
+												                             obtain dst_cur c_cur where core_cur:
+												                               "decode_loop_inv_core td patch (unat patch_len)
+												                                 src (unat src_len) out (val_C vaaa)
+												                                 (val_C vaa) (length tgt)
+												                                 ?data_end ?inst_end ?addr_end
+												                                 pw_src_seg x1a x1b x1 x1d x1c dst_cur c_cur s_inner"
+												                               and prefix_cur:
+												                               "decode_one_prefix pw_src_seg (unat (val_C vaa)) (length tgt)
+												                                 dst (unat x2d) dst_cur"
+												                               using inner_inv_cur
+												                               unfolding decode_inner_inv_core_def by blast
+												                             have code_tbl_cur: "code_tbl_matches s_inner"
+												                               using core_cur unfolding decode_loop_inv_core_def by simp
+												                             have code_tbl_tags_cur: "code_tbl_tags_valid s_inner"
+												                               using core_cur unfolding decode_loop_inv_core_def by simp
+												                             have op_lt: "unat op < 256"
+												                               using unat_lt2p[of op] by simp
+												                             define h :: half_inst where
+												                               "h =
+												                                (if x2d = 0
+												                                 then fst (default_entry (unat op))
+												                                 else snd (default_entry (unat op)))"
+												                             let ?sz =
+												                               "(UCAST(8 \<rightarrow> 32)
+												                                  (code_tbl_'' s_inner.[unat op]
+												                                    .[unat (x2d * (3 :: 32 word) + 1)])
+												                                :: 32 word)"
+												                             have tag1_op:
+												                               "UCAST(8 \<rightarrow> 32)
+												                                  (code_tbl_'' s_inner.[unat op]
+												                                    .[unat (x2d * (3 :: 32 word))])
+												                                = (1 :: 32 word)"
+												                               using fixed_add_trunc_prems opcode_eq
+												                               by (simp add: unat_ucast_upcast is_up)
+												                             have tag_nz_op:
+												                               "UCAST(8 \<rightarrow> 32)
+												                                  (code_tbl_'' s_inner.[unat op]
+												                                    .[unat (x2d * (3 :: 32 word))])
+												                                \<noteq> (0 :: 32 word)"
+												                               using tag1_op by simp
+												                             have size_nonzero_op: "?sz \<noteq> 0"
+												                               using fixed_add_trunc_prems opcode_eq
+												                               by (simp add: unat_ucast_upcast is_up)
+												                             have h_size: "isz h = unat ?sz"
+												                               using code_tbl_current_half_fixed_nonnoop(1)
+												                                 [OF code_tbl_cur code_tbl_tags_cur op_lt which_lt
+												                                     tag_nz_op]
+												                                     h_def
+												                               by simp
+												                             have h_add: "ity h = IADD"
+												                               using code_tbl_current_half_tag_one_add
+												                                 [OF code_tbl_cur op_lt which_lt tag1_op]
+												                                     h_def
+												                               by simp
+												                             have h_size_nonzero: "isz h \<noteq> 0"
+												                             proof
+												                               assume "isz h = 0"
+												                               hence "unat ?sz = 0"
+												                                 using h_size by simp
+												                               hence "?sz = 0"
+												                                 by (simp add: unat_eq_0)
+												                               thus False
+												                                 using size_nonzero_op by simp
+												                             qed
+												                             have resolve_cur_h:
+												                               "resolve_size h (ds_inst_rem dst_cur) =
+												                                Some (unat ?sz, ds_inst_rem dst_cur)"
+												                               using h_size h_size_nonzero
+												                               by (simp add: resolve_size_def)
+												                             have resolve_cur:
+												                               "resolve_size
+												                                  (if x2d = 0
+												                                   then fst (default_entry (unat op))
+												                                   else snd (default_entry (unat op)))
+												                                  (ds_inst_rem dst_cur) =
+												                                Some (unat ?sz, ds_inst_rem dst_cur)"
+												                               using resolve_cur_h h_def by simp
+												                             obtain st_exec where exec_cur:
+												                               "exec_half
+												                                  (if x2d = 0
+												                                   then fst (default_entry (unat op))
+												                                   else snd (default_entry (unat op)))
+												                                  (unat ?sz) pw_src_seg
+												                                  (unat (val_C vaa)) (length tgt)
+												                                  (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>) =
+												                                Inl st_exec"
+												                               using decode_one_prefix_exec_half_some
+												                                 [OF pop_dst prefix_cur decode_one_step which_lt resolve_cur]
+												                               by blast
+												                             have exec_cur_h:
+												                               "exec_half h (unat ?sz) pw_src_seg
+												                                  (unat (val_C vaa)) (length tgt)
+												                                  (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>) =
+												                                Inl st_exec"
+												                               using exec_cur h_def by simp
+												                             have data_fit:
+												                               "unat ?sz \<le> length (ds_data_rem dst_cur)"
+												                             proof -
+												                               have "unat ?sz \<le>
+												                                     length
+												                                      (ds_data_rem
+												                                        (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>))"
+												                                 by (rule exec_half_add_conditions(1)
+												                                   [OF h_add exec_cur_h])
+												                               thus ?thesis by simp
+												                             qed
+												                             have data_rem_len:
+												                               "length (ds_data_rem dst_cur) =
+												                                unat ?data_end - unat x1a"
+												                               using core_cur
+												                               unfolding decode_loop_inv_core_def
+												                               by (simp add: word_le_nat_alt)
+												                             have data_diff:
+												                               "unat (?data_end - x1a) =
+												                                unat ?data_end - unat x1a"
+												                               using core_cur
+												                               unfolding decode_loop_inv_core_def
+												                               by (simp add: unat_sub word_le_nat_alt)
+												                             show ?thesis
+												                               using fixed_add_trunc_prems data_fit data_rem_len
+												                                     data_diff opcode_eq
+												                               by (simp add: unat_ucast_upcast is_up)
+												                           qed
+												                             apply fail \<comment> \<open>source inner which-loop body-preservation residual\<close>
+									                             done
 					                         qed
 					                         done
 					                      subgoal using body_prems by simp
