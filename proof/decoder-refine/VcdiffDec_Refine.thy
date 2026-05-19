@@ -17042,12 +17042,542 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 										                               "unat (addr_C ar) = addr"
 										                               using addr_word addr_lt32
 										                               by (simp add: unat_of_nat_eq)
-										                             show ?thesis
-										                               using copy_addr_invalid_prems addr_lt_here addr_unat
-										                               by simp
-										                           qed
-										                             apply fail \<comment> \<open>source inner which-loop body-preservation residual\<close>
-							                             done
+											                             show ?thesis
+											                               using copy_addr_invalid_prems addr_lt_here addr_unat
+											                               by simp
+											                           qed
+											                           subgoal premises copy_core_prems for vac ta c ar
+											                           proof -
+											                             have which_lt: "unat x2d < 2"
+											                               using copy_core_prems by simp
+											                             have inner_inv_cur:
+											                               "decode_inner_inv_core td patch (unat patch_len)
+											                                 src (unat src_len) out (val_C vaaa)
+											                                 (val_C vaa) (length tgt)
+											                                 ?data_end ?inst_end ?addr_end
+											                                 pw_src_seg dst x1a x1b x1 x1d x1c x2d s_inner"
+											                               using copy_core_prems by simp
+											                             obtain dst_cur c_cur where core_cur:
+											                               "decode_loop_inv_core td patch (unat patch_len)
+											                                 src (unat src_len) out (val_C vaaa)
+											                                 (val_C vaa) (length tgt)
+											                                 ?data_end ?inst_end ?addr_end
+											                                 pw_src_seg x1a x1b x1 x1d x1c dst_cur c_cur s_inner"
+											                               and prefix_cur:
+											                               "decode_one_prefix pw_src_seg (unat (val_C vaa)) (length tgt)
+											                                 dst (unat x2d) dst_cur"
+											                               using inner_inv_cur
+											                               unfolding decode_inner_inv_core_def by blast
+											                             have code_tbl_cur: "code_tbl_matches s_inner"
+											                               using core_cur unfolding decode_loop_inv_core_def by simp
+											                             have code_tbl_tags_cur: "code_tbl_tags_valid s_inner"
+											                               using core_cur unfolding decode_loop_inv_core_def by simp
+											                             have op_lt: "unat op < 256"
+											                               using unat_lt2p[of op] by simp
+											                             define h :: half_inst where
+											                               "h =
+											                                (if x2d = 0
+											                                 then fst (default_entry (unat op))
+											                                 else snd (default_entry (unat op)))"
+											                             have tag_nz_op:
+											                               "UCAST(8 \<rightarrow> 32)
+											                                  (code_tbl_'' s_inner.[unat op]
+											                                    .[unat (x2d * (3 :: 32 word))])
+											                                \<noteq> (0 :: 32 word)"
+											                               using copy_core_prems opcode_eq
+											                               by (simp add: unat_ucast_upcast is_up)
+											                             have tag_ne1_op:
+											                               "UCAST(8 \<rightarrow> 32)
+											                                  (code_tbl_'' s_inner.[unat op]
+											                                    .[unat (x2d * (3 :: 32 word))])
+											                                \<noteq> (1 :: 32 word)"
+											                               using copy_core_prems opcode_eq
+											                               by (simp add: unat_ucast_upcast is_up)
+											                             have tag_ne2_op:
+											                               "UCAST(8 \<rightarrow> 32)
+											                                  (code_tbl_'' s_inner.[unat op]
+											                                    .[unat (x2d * (3 :: 32 word))])
+											                                \<noteq> (2 :: 32 word)"
+											                               using copy_core_prems opcode_eq
+											                               by (simp add: unat_ucast_upcast is_up)
+											                             have size0_op:
+											                               "UCAST(8 \<rightarrow> 32)
+											                                  (code_tbl_'' s_inner.[unat op]
+											                                    .[unat (x2d * (3 :: 32 word) + 1)])
+											                                = (0 :: 32 word)"
+											                               using copy_core_prems opcode_eq
+											                               by (simp add: unat_ucast_upcast is_up)
+											                             have h_size0: "isz h = 0"
+											                               using code_tbl_current_half_varint_nonnoop(1)
+											                                 [OF code_tbl_cur code_tbl_tags_cur op_lt which_lt
+											                                     tag_nz_op size0_op]
+											                                     h_def
+											                               by simp
+											                             have h_copy:
+											                               "ity h =
+											                                ICOPY
+											                                  (unat
+											                                    (UCAST(8 \<rightarrow> 32)
+											                                      (code_tbl_'' s_inner.[unat op]
+											                                        .[unat (x2d * (3 :: 32 word) + 2)])
+											                                     :: 32 word))"
+											                               using code_tbl_current_half_tag_three_copy
+											                                 [OF code_tbl_cur code_tbl_tags_cur op_lt which_lt
+											                                     tag_nz_op tag_ne1_op tag_ne2_op]
+											                                     h_def
+											                               by simp
+											                             have inst_rem_cur:
+											                               "ds_inst_rem dst_cur =
+											                                drop (unat x1b) (heap_bytes s_inner patch (unat ?inst_end))"
+											                               by (rule decode_loop_inv_core_inst_rem_current[OF core_cur])
+											                             let ?ibs =
+											                               "drop (unat x1b) (heap_bytes s_inner patch (unat ?inst_end))"
+											                             obtain irest where vd_heap:
+											                               "varint_decode ?ibs = Some (unat (val_C vac), irest)"
+											                               and pos_vac:
+											                               "unat (pr_t_C.pos_C vac) = unat ?inst_end - length irest"
+											                               using copy_core_prems
+											                               by (cases "varint_decode ?ibs") auto
+											                             have vd_cur:
+											                               "varint_decode (ds_inst_rem dst_cur) =
+											                                Some (unat (val_C vac), irest)"
+											                               using vd_heap inst_rem_cur by simp
+											                             have resolve_cur_h:
+											                               "resolve_size h (ds_inst_rem dst_cur) =
+											                                Some (unat (val_C vac), irest)"
+											                               using h_size0 h_copy vd_cur
+											                               by (simp add: resolve_size_def)
+											                             have resolve_cur:
+											                               "resolve_size
+											                                  (if x2d = 0
+											                                   then fst (default_entry (unat op))
+											                                   else snd (default_entry (unat op)))
+											                                  (ds_inst_rem dst_cur) =
+											                                Some (unat (val_C vac), irest)"
+											                               using resolve_cur_h h_def by simp
+											                             obtain st_exec where exec_cur:
+											                               "exec_half
+											                                  (if x2d = 0
+											                                   then fst (default_entry (unat op))
+											                                   else snd (default_entry (unat op)))
+											                                  (unat (val_C vac)) pw_src_seg
+											                                  (unat (val_C vaa)) (length tgt)
+											                                  (dst_cur\<lparr>ds_inst_rem := irest\<rparr>) =
+											                                Inl st_exec"
+											                               using decode_one_prefix_exec_half_some
+											                                 [OF pop_dst prefix_cur decode_one_step which_lt resolve_cur]
+											                               by blast
+											                             have exec_cur_h:
+											                               "exec_half h (unat (val_C vac)) pw_src_seg
+											                                  (unat (val_C vaa)) (length tgt)
+											                                  (dst_cur\<lparr>ds_inst_rem := irest\<rparr>) =
+											                                Inl st_exec"
+											                               using exec_cur h_def by simp
+											                             obtain addr arest c_next where dec_abs:
+											                               "decode_address
+											                                  (ds_cache (dst_cur\<lparr>ds_inst_rem := irest\<rparr>))
+											                                  (unat
+											                                    (UCAST(8 \<rightarrow> 32)
+											                                      (code_tbl_'' s_inner.[unat op]
+											                                        .[unat (x2d * (3 :: 32 word) + 2)])
+											                                     :: 32 word))
+											                                  (unat (val_C vaa) +
+											                                    length (ds_tgt (dst_cur\<lparr>ds_inst_rem := irest\<rparr>)))
+											                                  (ds_addr_rem (dst_cur\<lparr>ds_inst_rem := irest\<rparr>)) =
+											                                Some (addr, arest, c_next)"
+											                               and addr_bound_abs:
+											                               "addr <
+											                                  unat (val_C vaa) +
+											                                  length (ds_tgt (dst_cur\<lparr>ds_inst_rem := irest\<rparr>))"
+											                               and tgt_fit_exec:
+											                               "length (ds_tgt (dst_cur\<lparr>ds_inst_rem := irest\<rparr>))
+											                                  + unat (val_C vac) \<le> length tgt"
+											                               and addr_exec:
+											                               "ds_addr_rem st_exec = arest"
+											                               and cache_exec:
+											                               "ds_cache st_exec = c_next"
+											                               and tgt_exec:
+											                               "ds_tgt st_exec =
+											                                copy_loop pw_src_seg
+											                                  (ds_tgt (dst_cur\<lparr>ds_inst_rem := irest\<rparr>))
+											                                  addr (unat (val_C vac))"
+											                               and data_exec:
+											                               "ds_data_rem st_exec =
+											                                ds_data_rem (dst_cur\<lparr>ds_inst_rem := irest\<rparr>)"
+											                               and inst_exec:
+											                               "ds_inst_rem st_exec =
+											                                ds_inst_rem (dst_cur\<lparr>ds_inst_rem := irest\<rparr>)"
+											                               using exec_half_copy_conditions[OF h_copy exec_cur_h]
+											                               by blast
+											                             have cache_abs_c: "cache_abs s_inner c x1c"
+											                               using copy_core_prems by simp
+											                             have cache_wf_c: "cache_wf c"
+											                               using copy_core_prems by simp
+											                             have cache_abs_cur: "cache_abs s_inner c_cur x1c"
+											                               using core_cur unfolding decode_loop_inv_core_def by simp
+											                             have cache_wf_cur: "cache_wf c_cur"
+											                               using core_cur unfolding decode_loop_inv_core_def by simp
+											                             have c_eq: "c = c_cur"
+											                               by (rule cache_abs_unique
+											                                 [OF cache_abs_c cache_wf_c cache_abs_cur cache_wf_cur])
+											                             have addr_rem_cur:
+											                               "ds_addr_rem dst_cur =
+											                                drop (unat x1) (heap_bytes s_inner patch (unat ?addr_end))"
+											                               by (rule decode_loop_inv_core_addr_rem_current[OF core_cur])
+											                             have tgt_cur:
+											                               "length (ds_tgt dst_cur) = unat x1d"
+											                               using core_cur unfolding decode_loop_inv_core_def by simp
+											                             have cache_cur:
+											                               "ds_cache dst_cur = c_cur"
+											                               using core_cur unfolding decode_loop_inv_core_def by simp
+											                             have src_tgt_fit:
+											                               "unat (val_C vaa) + length tgt < 2 ^ 32"
+											                               using core_cur unfolding decode_loop_inv_core_def by simp
+											                             have tgt_pos_le: "unat x1d \<le> length tgt"
+											                               using core_cur unfolding decode_loop_inv_core_def by simp
+											                             have here_no_overflow:
+											                               "unat (val_C vaa) + unat x1d < 2 ^ 32"
+											                               using src_tgt_fit tgt_pos_le by simp
+											                             have here_eq:
+											                               "unat (val_C vaa + x1d :: 32 word) =
+											                                unat (val_C vaa) + unat x1d"
+											                               using here_no_overflow
+											                               by (simp add: unat_word_ariths(1))
+											                             have dec_c:
+											                               "decode_address c
+											                                  (unat
+											                                    (UCAST(8 \<rightarrow> 32)
+											                                      (code_tbl_'' s_inner.[unat
+											                                        (UCAST(8 \<rightarrow> 32)
+											                                          (heap_w8 t (patch +\<^sub>p uint ic)))]
+											                                        .[unat (x2d * (3 :: 32 word) + 2)])
+											                                     :: 32 word))
+											                                  (unat (val_C vaa + x1d))
+											                                  (drop (unat x1)
+											                                    (heap_bytes s_inner patch (unat ?addr_end))) =
+											                                Some (addr, arest, c_next)"
+											                               using dec_abs c_eq cache_cur addr_rem_cur tgt_cur here_eq opcode_eq
+											                               by (simp add: unat_ucast_upcast is_up)
+											                             have addr_lt32: "addr < 2 ^ 32"
+											                               using addr_bound_abs tgt_cur here_no_overflow by simp
+											                             have addr_word:
+											                               "addr_C ar = word_of_nat addr"
+											                               using copy_core_prems dec_c addr_lt32
+											                               by (simp split: option.splits prod.splits if_splits)
+											                             have addr_unat:
+											                               "unat (addr_C ar) = addr"
+											                               using addr_word addr_lt32
+											                               by (simp add: unat_of_nat_eq)
+											                             have ar_pos:
+											                               "ar_t_C.pos_C ar = ?addr_end - word_of_nat (length arest)"
+											                               using copy_core_prems dec_c addr_lt32
+											                               by (simp split: option.splits prod.splits if_splits)
+											                             have np_bound:
+											                               "unat (near_ptr_C ar) < s_near"
+											                               using copy_core_prems dec_c addr_lt32
+											                               by (simp split: option.splits prod.splits if_splits)
+											                             have cache_abs_ta:
+											                               "cache_abs ta c_next (near_ptr_C ar)"
+											                               using copy_core_prems dec_c addr_lt32
+											                               by (simp split: option.splits prod.splits if_splits)
+											                             have cache_wf_next: "cache_wf c_next"
+											                               by (rule decode_address_cache_wf[OF dec_c cache_wf_c addr_lt32])
+											                             have inst_end_bound:
+											                               "unat ?inst_end \<le> unat patch_len"
+											                               using core_cur unfolding decode_loop_inv_core_def by simp
+											                             have heap_inst_eq:
+											                               "heap_bytes s_inner patch (unat ?inst_end) =
+											                                heap_bytes td patch (unat ?inst_end)"
+											                             proof (rule heap_bytes_eqI)
+											                               fix i
+											                               assume i_lt: "i < unat ?inst_end"
+											                               hence "i < unat patch_len"
+											                                 using inst_end_bound by simp
+											                               thus "heap_w8 s_inner (patch +\<^sub>p int i) =
+											                                     heap_w8 td (patch +\<^sub>p int i)"
+											                                 using core_cur
+											                                 unfolding decode_loop_inv_core_def by simp
+											                             qed
+											                             have take_inst_td:
+											                               "take (unat ?inst_end)
+											                                  (heap_bytes td patch (unat patch_len)) =
+											                                heap_bytes td patch (unat ?inst_end)"
+											                               by (rule heap_bytes_prefix[OF inst_end_bound])
+											                             have irest_sinner:
+											                               "drop (unat (pr_t_C.pos_C vac))
+											                                  (heap_bytes s_inner patch (unat ?inst_end)) =
+											                                irest"
+											                               using varint_decode_drop_rest[OF vd_heap] pos_vac by simp
+											                             have irest_align:
+											                               "irest =
+											                                drop (unat (pr_t_C.pos_C vac))
+											                                  (take (unat ?inst_end)
+											                                    (heap_bytes td patch (unat patch_len)))"
+											                               using irest_sinner heap_inst_eq take_inst_td by simp
+											                             have core_after_varint:
+											                               "decode_loop_inv_core td patch (unat patch_len)
+											                                 src (unat src_len) out (val_C vaaa)
+											                                 (val_C vaa) (length tgt)
+											                                 ?data_end ?inst_end ?addr_end
+											                                 pw_src_seg x1a (pr_t_C.pos_C vac) x1 x1d x1c
+											                                 (dst_cur\<lparr>ds_inst_rem := irest\<rparr>) c_cur s_inner"
+											                               using core_cur irest_align copy_core_prems
+											                               unfolding decode_loop_inv_core_def
+											                               by (simp add: word_le_nat_alt)
+											                             have addr_rest_len:
+											                               "length arest \<le>
+											                                length (drop (unat x1)
+											                                  (heap_bytes s_inner patch (unat ?addr_end)))"
+											                               by (rule decode_address_rest_length[OF dec_c])
+											                             have arest_len_bound: "length arest \<le> unat ?addr_end"
+											                               using addr_rest_len by simp
+											                             have arest_len_lt32: "length arest < 2 ^ 32"
+											                               using arest_len_bound unat_lt2p[of ?addr_end]
+											                               by simp
+											                             have arest_len_unat:
+											                               "unat (word_of_nat (length arest) :: 32 word) = length arest"
+											                               using arest_len_lt32 by (simp add: unat_of_nat_eq)
+											                             have arest_word_le:
+											                               "(word_of_nat (length arest) :: 32 word) \<le> ?addr_end"
+											                               using arest_len_bound arest_len_unat
+											                               by (simp add: word_le_nat_alt)
+											                             have ar_pos_unat:
+											                               "unat (ar_t_C.pos_C ar) = unat ?addr_end - length arest"
+											                               using ar_pos arest_word_le arest_len_unat
+											                               by (simp add: unat_sub)
+											                             have arest_sinner:
+											                               "drop (unat (ar_t_C.pos_C ar))
+											                                  (heap_bytes s_inner patch (unat ?addr_end)) =
+											                                arest"
+											                               using decode_address_drop_rest[OF dec_c] ar_pos_unat by simp
+											                             have addr_end_bound:
+											                               "unat ?addr_end \<le> unat patch_len"
+											                               using core_after_varint
+											                               unfolding decode_loop_inv_core_def by simp
+											                             have heap_addr_eq:
+											                               "heap_bytes s_inner patch (unat ?addr_end) =
+											                                heap_bytes td patch (unat ?addr_end)"
+											                             proof (rule heap_bytes_eqI)
+											                               fix i
+											                               assume i_lt: "i < unat ?addr_end"
+											                               hence "i < unat patch_len"
+											                                 using addr_end_bound by simp
+											                               thus "heap_w8 s_inner (patch +\<^sub>p int i) =
+											                                     heap_w8 td (patch +\<^sub>p int i)"
+											                                 using core_after_varint
+											                                 unfolding decode_loop_inv_core_def by simp
+											                             qed
+											                             have take_addr_td:
+											                               "take (unat ?addr_end)
+											                                  (heap_bytes td patch (unat patch_len)) =
+											                                heap_bytes td patch (unat ?addr_end)"
+											                               by (rule heap_bytes_prefix[OF addr_end_bound])
+											                             have arest_align:
+											                               "arest =
+											                                drop (unat (ar_t_C.pos_C ar))
+											                                  (take (unat ?addr_end)
+											                                    (heap_bytes td patch (unat patch_len)))"
+											                               using arest_sinner heap_addr_eq take_addr_td by simp
+											                             have ar_pos_le: "ar_t_C.pos_C ar \<le> ?addr_end"
+											                               using ar_pos arest_word_le by (metis word_sub_le)
+											                             let ?dst_addr =
+											                               "(dst_cur\<lparr>ds_inst_rem := irest\<rparr>)
+											                                  \<lparr>ds_addr_rem := arest, ds_cache := c_next\<rparr>"
+											                             have heap_ta: "heap_w8 ta = heap_w8 s_inner"
+											                               using copy_core_prems by simp
+											                             have typing_ta: "heap_typing ta = heap_typing s_inner"
+											                               using copy_core_prems by simp
+											                             have code_ta: "code_tbl_'' ta = code_tbl_'' s_inner"
+											                               using copy_core_prems by simp
+											                             have core_after_addr:
+											                               "decode_loop_inv_core td patch (unat patch_len)
+											                                 src (unat src_len) out (val_C vaaa)
+											                                 (val_C vaa) (length tgt)
+											                                 ?data_end ?inst_end ?addr_end
+											                                 pw_src_seg x1a (pr_t_C.pos_C vac)
+											                                 (ar_t_C.pos_C ar) x1d (near_ptr_C ar)
+											                                 ?dst_addr c_next ta"
+											                               by (rule decode_loop_inv_core_after_address
+											                                 [OF core_after_varint arest_align ar_pos_le
+											                                     cache_abs_ta cache_wf_next heap_ta typing_ta code_ta])
+											                             have tgt_fit:
+											                               "unat x1d + unat (val_C vac) \<le> length tgt"
+											                               using tgt_fit_exec tgt_cur by simp
+											                             have inv_after_addr:
+											                               "decode_loop_inv td patch (unat patch_len)
+											                                 src (unat src_len) out (val_C vaaa)
+											                                 (val_C vaa) (length tgt)
+											                                 ?data_end ?inst_end ?addr_end
+											                                 pw_src_seg x1a (pr_t_C.pos_C vac)
+											                                 (ar_t_C.pos_C ar) x1d (near_ptr_C ar) ta"
+											                               by (rule decode_loop_inv_core_imp_inv[OF core_after_addr])
+											                             have no_overflow_tgt:
+											                               "unat x1d + unat (val_C vac) < 2 ^ 32"
+											                               by (rule inv_no_overflow_tgt
+											                                 [OF inv_after_addr tgt_fit])
+											                             have addr_bound_word:
+											                               "unat (addr_C ar) < unat (val_C vaa) + unat x1d"
+											                               using addr_bound_abs tgt_cur addr_unat by simp
+											                             have copy_run:
+											                               "(whileLoop (\<lambda>(j :: 32 word) st.
+											                                  unat j < unat (val_C vac))
+											                                  (\<lambda>j. do {
+											                                    byte \<leftarrow>
+											                                      condition (\<lambda>st.
+											                                        unat (addr_C ar + j) < unat (val_C vaa))
+											                                        (liftE (do {
+											                                          guard (\<lambda>st.
+											                                            ptr_valid (heap_typing st)
+											                                              (src +\<^sub>p uint (val_C vaaa + (addr_C ar + j))));
+											                                          gets (\<lambda>st.
+											                                            heap_w8 st
+											                                              (src +\<^sub>p uint (val_C vaaa + (addr_C ar + j))))
+											                                        }))
+											                                        (do {
+											                                          when
+											                                            (unat (x1d + j) \<le>
+											                                             unat (addr_C ar + j - val_C vaa))
+											                                            (throw (- (10 :: int)));
+											                                          liftE (do {
+											                                            guard (\<lambda>st.
+											                                              ptr_valid (heap_typing st)
+											                                                (out +\<^sub>p uint (addr_C ar + j - val_C vaa)));
+											                                            gets (\<lambda>st.
+											                                              heap_w8 st
+											                                                (out +\<^sub>p uint (addr_C ar + j - val_C vaa)))
+											                                          })
+											                                        });
+											                                    liftE (do {
+											                                      guard (\<lambda>st.
+											                                        ptr_valid (heap_typing st)
+											                                          (out +\<^sub>p uint (x1d + j)));
+											                                      modify (heap_w8_update
+											                                        (\<lambda>h. h(out +\<^sub>p uint (x1d + j) := byte)));
+											                                      return (j + 1)
+											                                    })
+											                                  }) (0 :: 32 word) ::
+											                                  (int, 32 word, lifted_globals) exn_monad) \<bullet> ta
+											                                \<lbrace> \<lambda>r t'.
+											                                  r = Result (val_C vac) \<and>
+											                                  (\<forall>j < unat patch_len.
+											                                    heap_w8 t' (patch +\<^sub>p int j) =
+											                                    heap_w8 ta (patch +\<^sub>p int j)) \<and>
+											                                  (\<forall>j < unat src_len.
+											                                    heap_w8 t' (src +\<^sub>p int j) =
+											                                    heap_w8 ta (src +\<^sub>p int j)) \<and>
+											                                  (\<forall>j < unat x1d.
+											                                    heap_w8 t' (out +\<^sub>p int j) =
+											                                    heap_w8 ta (out +\<^sub>p int j)) \<and>
+											                                  (\<forall>k < unat (val_C vac).
+											                                    heap_w8 t'
+											                                      (out +\<^sub>p uint (x1d + of_nat k)) =
+											                                    copy_loop pw_src_seg
+											                                      (heap_bytes ta out (unat x1d))
+											                                      (unat (addr_C ar)) (unat (val_C vac)) !
+											                                      (unat x1d + k)) \<and>
+											                                  heap_typing t' = heap_typing ta \<and>
+											                                  near_arr_'' t' = near_arr_'' ta \<and>
+											                                  same_arr_'' t' = same_arr_'' ta \<and>
+											                                  code_tbl_'' t' = code_tbl_'' ta \<rbrace>"
+											                               by (rule copy_loop_correct_core
+											                                 [OF core_after_addr tgt_fit addr_bound_word])
+											                             have prefix_next:
+											                               "decode_one_prefix pw_src_seg (unat (val_C vaa)) (length tgt)
+											                                 dst (unat (x2d + 1)) st_exec"
+											                               by (rule decode_one_prefix_exec_half_advance
+											                                 [OF pop_dst prefix_cur which_lt resolve_cur exec_cur])
+											                             have which_next_le: "x2d + 1 \<le> (2 :: 32 word)"
+											                             proof -
+											                               have "x2d = 0 \<or> x2d = 1"
+											                               proof -
+											                                 have "unat x2d = 0 \<or> unat x2d = 1"
+											                                   using which_lt by arith
+											                                 thus ?thesis
+											                                   by (metis One_nat_def unat_0 unat_1 word_unat.Rep_inject)
+											                               qed
+											                               thus ?thesis by auto
+											                             qed
+											                             show ?thesis
+											                               apply (rule runs_to_weaken[OF copy_run])
+											                               subgoal premises loop_post for r t'
+											                               proof -
+											                                 have core_after_copy:
+											                                   "decode_loop_inv_core td patch (unat patch_len)
+											                                     src (unat src_len) out (val_C vaaa)
+											                                     (val_C vaa) (length tgt)
+											                                     ?data_end ?inst_end ?addr_end
+											                                     pw_src_seg x1a (pr_t_C.pos_C vac)
+											                                     (ar_t_C.pos_C ar) (x1d + val_C vac)
+											                                     (near_ptr_C ar) st_exec c_next t'"
+											                                 proof (rule decode_loop_inv_core_after_copy_fields
+											                                     [OF core_after_addr _ _ _ _ _ tgt_fit no_overflow_tgt
+											                                         addr_bound_word])
+											                                   show "ds_inst_rem st_exec = ds_inst_rem ?dst_addr"
+											                                     using inst_exec by simp
+											                                   show "ds_data_rem st_exec = ds_data_rem ?dst_addr"
+											                                     using data_exec by simp
+											                                   show "ds_addr_rem st_exec = ds_addr_rem ?dst_addr"
+											                                     using addr_exec by simp
+											                                   show "ds_cache st_exec = ds_cache ?dst_addr"
+											                                     using cache_exec by simp
+											                                   show "ds_tgt st_exec =
+											                                     copy_loop pw_src_seg (ds_tgt ?dst_addr)
+											                                       (unat (addr_C ar)) (unat (val_C vac))"
+											                                     using tgt_exec addr_unat by simp
+											                                   show "\<forall>j<unat patch_len.
+											                                     heap_w8 t' (patch +\<^sub>p int j) =
+											                                     heap_w8 ta (patch +\<^sub>p int j)"
+											                                     using loop_post by simp
+											                                   show "\<forall>j<unat src_len.
+											                                     heap_w8 t' (src +\<^sub>p int j) =
+											                                     heap_w8 ta (src +\<^sub>p int j)"
+											                                     using loop_post by simp
+											                                   show "\<forall>k<unat (val_C vac).
+											                                     heap_w8 t'
+											                                       (out +\<^sub>p uint (x1d + of_nat k)) =
+											                                     copy_loop pw_src_seg
+											                                       (heap_bytes ta out (unat x1d))
+											                                       (unat (addr_C ar)) (unat (val_C vac)) !
+											                                       (unat x1d + k)"
+											                                     using loop_post by simp
+											                                   show "\<forall>i<unat x1d.
+											                                     heap_w8 t' (out +\<^sub>p int i) =
+											                                     heap_w8 ta (out +\<^sub>p int i)"
+											                                     using loop_post by simp
+											                                   show "heap_typing t' = heap_typing ta"
+											                                     using loop_post by simp
+											                                   show "near_arr_'' t' = near_arr_'' ta"
+											                                     using loop_post by simp
+											                                   show "same_arr_'' t' = same_arr_'' ta"
+											                                     using loop_post by simp
+											                                   show "code_tbl_'' t' = code_tbl_'' ta"
+											                                     using loop_post by simp
+											                                 qed
+											                                 show ?thesis
+											                                 proof (cases r)
+											                                   case (Exception e)
+											                                   thus ?thesis
+											                                     using loop_post by simp
+											                                 next
+											                                   case (Result v)
+											                                   have inner_after:
+											                                     "decode_inner_inv_core td patch (unat patch_len)
+											                                       src (unat src_len) out (val_C vaaa)
+											                                       (val_C vaa) (length tgt)
+											                                       ?data_end ?inst_end ?addr_end
+											                                       pw_src_seg dst x1a (pr_t_C.pos_C vac)
+											                                       (ar_t_C.pos_C ar) (x1d + val_C vac)
+											                                       (near_ptr_C ar) (x2d + 1) t'"
+											                                     using which_next_le core_after_copy prefix_next
+											                                     unfolding decode_inner_inv_core_def by blast
+											                                   show ?thesis
+											                                     using Result inner_after by simp
+											                                 qed
+											                               qed
+											                               done
+											                           qed
+											                             apply fail \<comment> \<open>source inner which-loop body-preservation residual\<close>
+								                             done
 					                         qed
 					                         done
 					                      subgoal using body_prems by simp
