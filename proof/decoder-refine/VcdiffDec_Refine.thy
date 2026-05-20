@@ -32880,11 +32880,472 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 			        qed
 			        done
 			    qed
-		    subgoal premises adler_prems for x
-		      apply runs_to_vcg
-		      apply fail \<comment> \<open>app-header/code-table-built no-adler parse success residual\<close>
-		      done
-		    done
+			    subgoal premises adler_prems for x
+			    proof -
+			      let ?win_pos = "pr_t_C.pos_C va + val_C va"
+			      let ?bs_s = "heap_bytes s patch (unat patch_len)"
+			      let ?bs_ta = "heap_bytes ta patch (unat patch_len)"
+			      have win_pos_lt_w: "?win_pos < patch_len"
+			        using adler_prems by simp
+			      have win_pos_lt: "unat ?win_pos < length ?bs_ta"
+			        using win_pos_lt_w by (simp add: word_less_nat_alt)
+			      have heap_eq_ta: "?bs_ta = ?bs_s"
+			        using prems by simp
+			      have parsed_at_win_ta:
+			        "parse_window (drop (unat ?win_pos) ?bs_ta) = Inl (win, tail)"
+			      proof -
+			        have hi4: "hi AND 4 \<noteq> 0"
+			          using prems hi_v ucast_and_4_equiv by simp
+			        obtain app_len app_rest where
+			          vd: "varint_decode body = Some (app_len, app_rest)"
+			          and rest_eq: "rest = drop app_len app_rest"
+			          using parse_header_app[unfolded app_bit_def] hi4 by blast
+			        have vd_bs: "varint_decode (drop 5 ?bs_s) = Some (app_len, app_rest)"
+			          using vd body_from_drop5 by simp
+			        have app_len_eq: "app_len = unat (val_C va)"
+			          and pos_eq:
+			            "unat (pr_t_C.pos_C va) = unat patch_len - length app_rest"
+			          using prems vd_bs by auto
+			        have pos_drop: "drop (unat (pr_t_C.pos_C va)) ?bs_s = app_rest"
+			          using varint_decode_drop_rest[OF vd_bs] pos_eq by simp
+			        have val_le: "val_C va \<le> patch_len - pr_t_C.pos_C va"
+			          using prems by (simp add: word_le_not_less)
+			        have win_pos_unat:
+			          "unat ?win_pos = unat (pr_t_C.pos_C va) + unat (val_C va)"
+			          using val_le prems
+			          apply (simp add: word_le_nat_alt unat_sub)
+			          apply (subst unat_word_ariths(1))
+			          using unat_lt2p[of patch_len]
+			          apply auto
+			          done
+			        have "drop (unat ?win_pos) ?bs_s = rest"
+			        proof -
+			          have "drop (unat ?win_pos) ?bs_s =
+			                drop (unat (val_C va))
+			                  (drop (unat (pr_t_C.pos_C va)) ?bs_s)"
+			            using win_pos_unat by (simp add: drop_drop add.commute)
+			          also have "\<dots> = drop (unat (val_C va)) app_rest"
+			            using pos_drop by simp
+			          also have "\<dots> = rest"
+			            using rest_eq app_len_eq by simp
+			          finally show ?thesis .
+			        qed
+			        thus ?thesis using heap_eq_ta pw by simp
+			      qed
+			      have win_byte_eq:
+			        "?bs_ta ! unat ?win_pos =
+			         heap_w8 ta (patch +\<^sub>p uint ?win_pos)"
+			        using win_pos_lt by (simp add: heap_bytes_nth)
+			      have target_clear8:
+			        "(?bs_ta ! unat ?win_pos) AND (0x02 :: 8 word) = 0"
+			        by (rule parse_window_drop_byte_bits(1)[OF parsed_at_win_ta win_pos_lt])
+			      have target_clear8_heap:
+			        "heap_w8 ta (patch +\<^sub>p uint ?win_pos) AND (0x02 :: 8 word) = 0"
+			        using target_clear8 win_byte_eq by simp
+			      have target_clear32:
+			        "UCAST(8 \<rightarrow> 32)
+			          (heap_w8 ta (patch +\<^sub>p uint ?win_pos)) AND (2 :: 32 word) = 0"
+			        using target_clear8_heap by word_bitwise
+			      have mask_clear8:
+			        "(?bs_ta ! unat ?win_pos) AND (0xFA :: 8 word) = 0"
+			        by (rule parse_window_drop_byte_bits(2)[OF parsed_at_win_ta win_pos_lt])
+			      have mask_clear8_heap:
+			        "heap_w8 ta (patch +\<^sub>p uint ?win_pos) AND (0xFA :: 8 word) = 0"
+			        using mask_clear8 win_byte_eq by simp
+			      have mask_clear32:
+			        "UCAST(8 \<rightarrow> 32)
+			          (heap_w8 ta (patch +\<^sub>p uint ?win_pos)) AND
+			         (0xFFFFFFFA :: 32 word) = 0"
+			      proof -
+			        have low_mask:
+			          "UCAST(8 \<rightarrow> 32)
+			            (heap_w8 ta (patch +\<^sub>p uint ?win_pos)) AND (0xFA :: 32 word) = 0"
+			          using mask_clear8_heap by word_bitwise
+			        have mask_eq:
+			          "UCAST(8 \<rightarrow> 32)
+			            (heap_w8 ta (patch +\<^sub>p uint ?win_pos)) AND
+			           (0xFFFFFFFA :: 32 word) =
+			           UCAST(8 \<rightarrow> 32)
+			            (heap_w8 ta (patch +\<^sub>p uint ?win_pos)) AND (0xFA :: 32 word)"
+			          by word_bitwise
+			        show ?thesis using low_mask mask_eq by simp
+			      qed
+			      show ?thesis
+			        apply runs_to_vcg
+			        subgoal using target_clear32 by simp
+			        subgoal using mask_clear32 by simp
+			        subgoal using src_nonnull by simp
+			        subgoal premises q using adler_prems by simp
+			        subgoal premises q using adler_prems(1) by (rule word_plus_one_le_of_less)
+			        subgoal premises q for vaa
+			        proof -
+			          have some:
+			            "\<exists>nv rest.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C va + val_C va + 1))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+			            apply (rule app_source_len_decode_some[where td=ta and va=va])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain nv rest' where dec:
+			            "varint_decode
+			               (drop (unat (pr_t_C.pos_C va + val_C va + 1))
+			                 (heap_bytes ta patch (unat patch_len))) = Some (nv, rest')"
+			            by blast
+			          show ?thesis using q dec by simp
+			        qed
+			        subgoal premises q for vaa
+			        proof -
+			          have some:
+			            "\<exists>nv rest.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C va + val_C va + 1))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+			            apply (rule app_source_len_decode_some[where td=ta and va=va])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain nv rest' where dec:
+			            "varint_decode
+			               (drop (unat (pr_t_C.pos_C va + val_C va + 1))
+			                 (heap_bytes ta patch (unat patch_len))) = Some (nv, rest')"
+			            by blast
+			          show ?thesis using q dec by simp
+			        qed
+			        subgoal premises q for vaa
+			        proof -
+			          have some:
+			            "\<exists>nv rest.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C va + val_C va + 1))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+			            apply (rule app_source_len_decode_some[where td=ta and va=va])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain nv rest' where dec:
+			            "varint_decode
+			               (drop (unat (pr_t_C.pos_C va + val_C va + 1))
+			                 (heap_bytes ta patch (unat patch_len))) = Some (nv, rest')"
+			            by blast
+			          show ?thesis using q dec by simp
+			        qed
+			        subgoal by simp
+			        subgoal premises q using adler_prems by simp
+			        subgoal premises q for vaa vab
+			        proof -
+			          have some:
+			            "\<exists>nv rest.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C vaa))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+			            apply (rule app_source_off_decode_some[where td=ta and va=va and vaa=vaa])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain nv rest' where dec:
+			            "varint_decode
+			               (drop (unat (pr_t_C.pos_C vaa))
+			                 (heap_bytes ta patch (unat patch_len))) = Some (nv, rest')"
+			            by blast
+			          show ?thesis using q dec by simp
+			        qed
+			        subgoal premises q for vaa vab
+			        proof -
+			          have some:
+			            "\<exists>nv rest.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C vaa))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+			            apply (rule app_source_off_decode_some[where td=ta and va=va and vaa=vaa])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain nv rest' where dec:
+			            "varint_decode
+			               (drop (unat (pr_t_C.pos_C vaa))
+			                 (heap_bytes ta patch (unat patch_len))) = Some (nv, rest')"
+			            by blast
+			          show ?thesis using q dec by simp
+			        qed
+			        subgoal premises q for vaa vab
+			        proof -
+			          have some:
+			            "\<exists>nv rest.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C vaa))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+			            apply (rule app_source_off_decode_some[where td=ta and va=va and vaa=vaa])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain nv rest' where dec:
+			            "varint_decode
+			               (drop (unat (pr_t_C.pos_C vaa))
+			                 (heap_bytes ta patch (unat patch_len))) = Some (nv, rest')"
+			            by blast
+			          show ?thesis using q dec by simp
+			        qed
+			        subgoal by simp
+			        subgoal premises q for vaa vab
+			        proof -
+			          have vals:
+			            "unat (val_C vaa) = pw_src_seg_len win \<and>
+			             unat (val_C vab) = pw_src_seg_off win"
+			            apply (rule app_source_values
+			              [where td=ta and va=va and vaa=vaa and vaaa=vab])
+			            using prems adler_prems q apply simp_all
+			            done
+			          have "unat (val_C vab) \<le> unat src_len"
+			            using vals win_src_bounds by simp
+			          with q show ?thesis by (simp add: word_less_nat_alt)
+			        qed
+			        subgoal premises q for vaa vab
+			        proof -
+			          have vals:
+			            "unat (val_C vaa) = pw_src_seg_len win \<and>
+			             unat (val_C vab) = pw_src_seg_off win"
+			            apply (rule app_source_values
+			              [where td=ta and va=va and vaa=vaa and vaaa=vab])
+			            using prems adler_prems q apply simp_all
+			            done
+			          have off_le_word: "val_C vab \<le> src_len"
+			            using vals win_src_bounds by (simp add: word_le_nat_alt)
+			          have len_le:
+			            "unat (val_C vaa) \<le> unat src_len - unat (val_C vab)"
+			            using vals win_src_bounds by simp
+			          have "val_C vaa \<le> src_len - val_C vab"
+			            using len_le off_le_word by (simp add: word_le_nat_alt unat_sub)
+			          with q show ?thesis by (simp add: word_le_not_less)
+			        qed
+			        subgoal premises q using adler_prems by simp
+			        subgoal premises q for vaa vab vaaa
+			        proof -
+			          have some:
+			            "\<exists>nv rest.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C vab))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+			            apply (rule app_source_dlen_decode_some
+			              [where td=ta and va=va and vaa=vaa and vaaa=vab])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain nv rest' where dec:
+			            "varint_decode
+			               (drop (unat (pr_t_C.pos_C vab))
+			                 (heap_bytes ta patch (unat patch_len))) = Some (nv, rest')"
+			            by blast
+			          show ?thesis using q dec by simp
+			        qed
+			        subgoal premises q for vaa vab vaaa
+			        proof -
+			          have some:
+			            "\<exists>nv rest.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C vab))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+			            apply (rule app_source_dlen_decode_some
+			              [where td=ta and va=va and vaa=vaa and vaaa=vab])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain nv rest' where dec:
+			            "varint_decode
+			               (drop (unat (pr_t_C.pos_C vab))
+			                 (heap_bytes ta patch (unat patch_len))) = Some (nv, rest')"
+			            by blast
+			          show ?thesis using q dec by simp
+			        qed
+			        subgoal premises q for vaa vab vaaa
+			        proof -
+			          have some:
+			            "\<exists>nv rest.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C vab))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+			            apply (rule app_source_dlen_decode_some
+			              [where td=ta and va=va and vaa=vaa and vaaa=vab])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain nv rest' where dec:
+			            "varint_decode
+			               (drop (unat (pr_t_C.pos_C vab))
+			                 (heap_bytes ta patch (unat patch_len))) = Some (nv, rest')"
+			            by blast
+			          show ?thesis using q dec by simp
+			        qed
+			        subgoal by simp
+			        subgoal premises q for vaa vab vaaa
+			        proof -
+			          have stage:
+			            "\<exists>rest3 rest4 rest5 rest6 rest7 rest8 dlen data_len inst_len addr_len alen.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C vab))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (dlen, rest3) \<and>
+			               varint_decode rest3 = Some (pw_tgt_len win, rest4) \<and>
+			               pop_byte rest4 = Some (0, rest5) \<and>
+			               varint_decode rest5 = Some (data_len, rest6) \<and>
+			               varint_decode rest6 = Some (inst_len, rest7) \<and>
+			               varint_decode rest7 = Some (addr_len, rest8) \<and>
+			               alen + data_len + inst_len + addr_len \<le> length rest8 \<and>
+			               dlen = (length rest3 - length rest8) + alen + data_len + inst_len + addr_len \<and>
+			               alen =
+			                 (if UCAST(8 \<rightarrow> 32)
+			                       (heap_w8 ta
+			                         (patch +\<^sub>p uint (pr_t_C.pos_C va + val_C va))) AND
+			                     (4 :: 32 word) \<noteq> 0
+			                  then 4 else 0)"
+			            apply (rule app_source_dlen_stage
+			              [where td=ta and va=va and vaa=vaa and vaaa=vab])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain rest3 rest4 rest5 rest6 rest7 rest8 dlen data_len inst_len addr_len alen where
+			            dec3:
+			              "varint_decode
+			                (drop (unat (pr_t_C.pos_C vab))
+			                  (heap_bytes ta patch (unat patch_len))) = Some (dlen, rest3)"
+			            and dec4: "varint_decode rest3 = Some (pw_tgt_len win, rest4)"
+			            and di0: "pop_byte rest4 = Some (0, rest5)"
+			            and dec5: "varint_decode rest5 = Some (data_len, rest6)"
+			            and dec6: "varint_decode rest6 = Some (inst_len, rest7)"
+			            and dec7: "varint_decode rest7 = Some (addr_len, rest8)"
+			            and sizes_ok: "alen + data_len + inst_len + addr_len \<le> length rest8"
+			            and dlen_exact:
+			              "dlen = (length rest3 - length rest8) + alen + data_len + inst_len + addr_len"
+			            and alen_eq:
+			              "alen =
+			                (if UCAST(8 \<rightarrow> 32)
+			                      (heap_w8 ta
+			                        (patch +\<^sub>p uint (pr_t_C.pos_C va + val_C va))) AND
+			                    (4 :: 32 word) \<noteq> 0
+			                 then 4 else 0)"
+			            by blast
+			          have rest8_le_rest3: "length rest8 \<le> length rest3"
+			          proof -
+			            have "length rest4 \<le> length rest3"
+			              by (rule varint_decode_length[OF dec4])
+			            moreover have "length rest5 < length rest4"
+			            proof -
+			              have "rest4 \<noteq> []"
+			                using di0 by (cases rest4) (simp_all add: pop_byte_def)
+			              then obtain a rs where rest4_eq: "rest4 = a # rs"
+			                by (cases rest4) auto
+			              moreover have "rest5 = rs"
+			                using di0 rest4_eq by (simp add: pop_byte_def)
+			              ultimately show ?thesis by simp
+			            qed
+			            moreover have "length rest6 \<le> length rest5"
+			              by (rule varint_decode_length[OF dec5])
+			            moreover have "length rest7 \<le> length rest6"
+			              by (rule varint_decode_length[OF dec6])
+			            moreover have "length rest8 \<le> length rest7"
+			              by (rule varint_decode_length[OF dec7])
+			            ultimately show ?thesis by arith
+			          qed
+			          have dlen_le: "dlen \<le> length rest3"
+			            using sizes_ok dlen_exact rest8_le_rest3 by arith
+			          have val_eq: "unat (val_C vaaa) = dlen"
+			            using q dec3 by simp
+			          have pos_eq:
+			            "unat (pr_t_C.pos_C vaaa) = unat patch_len - length rest3"
+			            using q dec3 by simp
+			          have rem_eq:
+			            "unat (patch_len - pr_t_C.pos_C vaaa) = length rest3"
+			          proof -
+			            have "unat (patch_len - pr_t_C.pos_C vaaa) =
+			                  unat patch_len - unat (pr_t_C.pos_C vaaa)"
+			              using q by (simp add: unat_sub word_le_nat_alt)
+			            also have "\<dots> = length rest3"
+			            proof -
+			              have "length rest3 \<le> unat patch_len"
+			              proof -
+			                have "length rest3 \<le>
+			                      length (drop (unat (pr_t_C.pos_C vab))
+			                        (heap_bytes ta patch (unat patch_len)))"
+			                  by (rule varint_decode_length[OF dec3])
+			                also have "\<dots> \<le> unat patch_len"
+			                  by simp
+			                finally show ?thesis .
+			              qed
+			              with pos_eq show ?thesis by arith
+			            qed
+			            finally show ?thesis .
+			          qed
+			          have "val_C vaaa \<le> patch_len - pr_t_C.pos_C vaaa"
+			            using dlen_le val_eq rem_eq by (simp add: word_le_nat_alt)
+			          with q show ?thesis by (simp add: word_le_not_less)
+			        qed
+			        subgoal premises q using adler_prems by simp
+			        subgoal premises q for vaa vab vaaa vaaaa
+			        proof -
+			          have some:
+			            "\<exists>nv rest.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C vaaa))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+			            apply (rule app_source_tgt_decode_some
+			              [where td=ta and va=va and vaa=vaa and vaaa=vab and vaaaa=vaaa])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain nv rest' where dec:
+			            "varint_decode
+			               (drop (unat (pr_t_C.pos_C vaaa))
+			                 (heap_bytes ta patch (unat patch_len))) = Some (nv, rest')"
+			            by blast
+			          show ?thesis using q dec by simp
+			        qed
+			        subgoal premises q for vaa vab vaaa vaaaa
+			        proof -
+			          have some:
+			            "\<exists>nv rest.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C vaaa))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+			            apply (rule app_source_tgt_decode_some
+			              [where td=ta and va=va and vaa=vaa and vaaa=vab and vaaaa=vaaa])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain nv rest' where dec:
+			            "varint_decode
+			               (drop (unat (pr_t_C.pos_C vaaa))
+			                 (heap_bytes ta patch (unat patch_len))) = Some (nv, rest')"
+			            by blast
+			          show ?thesis using q dec by simp
+			        qed
+			        subgoal premises q for vaa vab vaaa vaaaa
+			        proof -
+			          have some:
+			            "\<exists>nv rest.
+			               varint_decode
+			                 (drop (unat (pr_t_C.pos_C vaaa))
+			                   (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+			            apply (rule app_source_tgt_decode_some
+			              [where td=ta and va=va and vaa=vaa and vaaa=vab and vaaaa=vaaa])
+			            using prems adler_prems q apply simp_all
+			            done
+			          then obtain nv rest' where dec:
+			            "varint_decode
+			               (drop (unat (pr_t_C.pos_C vaaa))
+			                 (heap_bytes ta patch (unat patch_len))) = Some (nv, rest')"
+			            by blast
+			          show ?thesis using q dec by simp
+			        qed
+			        subgoal by simp
+			        subgoal premises q for vaa vab vaaa vaaaa
+			        proof -
+			          have tgt_val: "unat (val_C vaaaa) = pw_tgt_len win"
+			            apply (rule app_source_tgt_value
+			              [where td=ta and va=va and vaa=vaa and vaaa=vab
+			                and vaaaa=vaaa and vaaaaa=vaaaa])
+			            using prems adler_prems q apply simp_all
+			            done
+			          have "length tgt \<le> unat out_cap"
+			            using out_cap_enough Inl by simp
+			          hence "unat (val_C vaaaa) \<le> unat out_cap"
+			            using tgt_val tgt_len_eq by simp
+			          hence "val_C vaaaa \<le> out_cap"
+			            by (simp add: word_le_nat_alt)
+			          with q show ?thesis
+			            by (simp add: word_le_not_less)
+			        qed
+			        apply fail \<comment> \<open>app-header/code-table-built no-adler no-source residual\<close>
+			        done
+			    qed
+			    done
 		  thus ?thesis by (simp add: Inl)
 next
   case (Inr e)
