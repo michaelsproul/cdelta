@@ -26009,6 +26009,410 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 				                          qed
 				                          subgoal
 				                            using unat_lt2p[of "x1d :: 32 word"] by simp
+				                          subgoal premises fixed_copy_addr_err_prems for t_addr c ar
+				                          proof -
+				                            have which_lt: "unat x2d < 2"
+				                              using fixed_copy_addr_err_prems by simp
+				                            have inner_inv_cur:
+				                              "decode_inner_inv_core ta patch (unat patch_len)
+				                                src (unat src_len) out (0 :: 32 word)
+				                                (0 :: 32 word) (length tgt)
+				                                ?data_end ?inst_end ?addr_end
+				                                [] dst x1a x1b x1 x1d x1c x2d s_inner"
+				                              using fixed_copy_addr_err_prems by simp
+				                            obtain dst_cur c_cur where core_cur:
+				                              "decode_loop_inv_core ta patch (unat patch_len)
+				                                src (unat src_len) out (0 :: 32 word)
+				                                (0 :: 32 word) (length tgt)
+				                                ?data_end ?inst_end ?addr_end
+				                                [] x1a x1b x1 x1d x1c dst_cur c_cur s_inner"
+				                              and prefix_cur:
+				                              "decode_one_prefix [] (unat (0 :: 32 word)) (length tgt)
+				                                dst (unat x2d) dst_cur"
+				                              using inner_inv_cur
+				                              unfolding decode_inner_inv_core_def by blast
+				                            have code_tbl_cur: "code_tbl_matches s_inner"
+				                              using core_cur unfolding decode_loop_inv_core_def by simp
+				                            have code_tbl_tags_cur: "code_tbl_tags_valid s_inner"
+				                              using core_cur unfolding decode_loop_inv_core_def by simp
+				                            have op_lt: "unat op < 256"
+				                              using unat_lt2p[of op] by simp
+				                            define h :: half_inst where
+				                              "h =
+				                               (if x2d = 0
+				                                then fst (default_entry (unat op))
+				                                else snd (default_entry (unat op)))"
+				                            let ?sz_op =
+				                              "(UCAST(8 \<rightarrow> 32)
+				                                 (code_tbl_'' s_inner.[unat op]
+				                                   .[unat (x2d * (3 :: 32 word) + 1)])
+				                               :: 32 word)"
+				                            let ?sz =
+				                              "(UCAST(8 \<rightarrow> 32)
+				                                 (code_tbl_'' s_inner.[unat
+				                                   (UCAST(8 \<rightarrow> 32)
+				                                     (heap_w8 t (patch +\<^sub>p uint ic)))]
+				                                   .[unat (x2d * (3 :: 32 word) + 1)])
+				                               :: 32 word)"
+				                            have sz_eq: "?sz = ?sz_op"
+				                              using opcode_eq
+				                              by (simp add: unat_ucast_upcast is_up)
+				                            have tag_nz_op:
+				                              "UCAST(8 \<rightarrow> 32)
+				                                 (code_tbl_'' s_inner.[unat op]
+				                                   .[unat (x2d * (3 :: 32 word))])
+				                               \<noteq> (0 :: 32 word)"
+				                              using fixed_copy_addr_err_prems opcode_eq
+				                              by (simp add: unat_ucast_upcast is_up)
+				                            have tag_ne1_op:
+				                              "UCAST(8 \<rightarrow> 32)
+				                                 (code_tbl_'' s_inner.[unat op]
+				                                   .[unat (x2d * (3 :: 32 word))])
+				                               \<noteq> (1 :: 32 word)"
+				                              using fixed_copy_addr_err_prems opcode_eq
+				                              by (simp add: unat_ucast_upcast is_up)
+				                            have tag_ne2_op:
+				                              "UCAST(8 \<rightarrow> 32)
+				                                 (code_tbl_'' s_inner.[unat op]
+				                                   .[unat (x2d * (3 :: 32 word))])
+				                               \<noteq> (2 :: 32 word)"
+				                              using fixed_copy_addr_err_prems opcode_eq
+				                              by (simp add: unat_ucast_upcast is_up)
+				                            have size_nonzero: "?sz \<noteq> 0"
+				                              using fixed_copy_addr_err_prems by simp
+				                            have h_size: "isz h = unat ?sz"
+				                              using code_tbl_current_half_fixed_nonnoop(1)
+				                                [OF code_tbl_cur code_tbl_tags_cur op_lt which_lt
+				                                    tag_nz_op]
+				                                    h_def sz_eq
+				                              by simp
+				                            have h_copy:
+				                              "ity h =
+				                               ICOPY
+				                                 (unat
+				                                   (UCAST(8 \<rightarrow> 32)
+				                                     (code_tbl_'' s_inner.[unat op]
+				                                       .[unat (x2d * (3 :: 32 word) + 2)])
+				                                    :: 32 word))"
+				                              using code_tbl_current_half_tag_three_copy
+				                                [OF code_tbl_cur code_tbl_tags_cur op_lt which_lt
+				                                    tag_nz_op tag_ne1_op tag_ne2_op]
+				                                    h_def
+				                              by simp
+				                            have h_size_nonzero: "isz h \<noteq> 0"
+				                            proof
+				                              assume "isz h = 0"
+				                              hence "unat ?sz = 0"
+				                                using h_size by simp
+				                              hence "?sz = 0"
+				                                by (simp add: unat_eq_0)
+				                              thus False
+				                                using size_nonzero by simp
+				                            qed
+				                            have resolve_cur_h:
+				                              "resolve_size h (ds_inst_rem dst_cur) =
+				                               Some (unat ?sz, ds_inst_rem dst_cur)"
+				                              using h_size h_size_nonzero
+				                              by (simp add: resolve_size_def)
+				                            have resolve_cur:
+				                              "resolve_size
+				                                 (if x2d = 0
+				                                  then fst (default_entry (unat op))
+				                                  else snd (default_entry (unat op)))
+				                                 (ds_inst_rem dst_cur) =
+				                               Some (unat ?sz, ds_inst_rem dst_cur)"
+				                              using resolve_cur_h h_def by simp
+				                            obtain st_exec where exec_cur:
+				                              "exec_half
+				                                 (if x2d = 0
+				                                  then fst (default_entry (unat op))
+				                                  else snd (default_entry (unat op)))
+				                                 (unat ?sz) []
+				                                 (unat (0 :: 32 word)) (length tgt)
+				                                 (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>) =
+				                               Inl st_exec"
+				                              using decode_one_prefix_exec_half_some
+				                                [OF pop_dst prefix_cur decode_one_step which_lt resolve_cur]
+				                              by blast
+				                            have exec_cur_h:
+				                              "exec_half h (unat ?sz) []
+				                                 (unat (0 :: 32 word)) (length tgt)
+				                                 (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>) =
+				                               Inl st_exec"
+				                              using exec_cur h_def by simp
+				                            obtain addr arest c_next where dec_abs:
+				                              "decode_address
+				                                 (ds_cache (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>))
+				                                 (unat
+				                                   (UCAST(8 \<rightarrow> 32)
+				                                     (code_tbl_'' s_inner.[unat op]
+				                                       .[unat (x2d * (3 :: 32 word) + 2)])
+				                                    :: 32 word))
+				                                 (unat (0 :: 32 word) +
+				                                   length
+				                                     (ds_tgt
+				                                       (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>)))
+				                                 (ds_addr_rem
+				                                   (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>)) =
+				                               Some (addr, arest, c_next)"
+				                              and addr_bound:
+				                              "addr <
+				                                 unat (0 :: 32 word) +
+				                                 length
+				                                   (ds_tgt
+				                                     (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>))"
+				                              using exec_half_copy_conditions[OF h_copy exec_cur_h]
+				                              by blast
+				                            have cache_abs_c: "cache_abs s_inner c x1c"
+				                              using fixed_copy_addr_err_prems by simp
+				                            have cache_wf_c: "cache_wf c"
+				                              using fixed_copy_addr_err_prems by simp
+				                            have cache_abs_cur: "cache_abs s_inner c_cur x1c"
+				                              using core_cur unfolding decode_loop_inv_core_def by simp
+				                            have cache_wf_cur: "cache_wf c_cur"
+				                              using core_cur unfolding decode_loop_inv_core_def by simp
+				                            have c_eq: "c = c_cur"
+				                              by (rule cache_abs_unique
+				                                [OF cache_abs_c cache_wf_c cache_abs_cur cache_wf_cur])
+				                            have addr_rem_cur:
+				                              "ds_addr_rem dst_cur =
+				                               drop (unat x1) (heap_bytes s_inner patch (unat ?addr_end))"
+				                              by (rule decode_loop_inv_core_addr_rem_current[OF core_cur])
+				                            have tgt_cur:
+				                              "length (ds_tgt dst_cur) = unat x1d"
+				                              using core_cur unfolding decode_loop_inv_core_def by simp
+				                            have cache_cur:
+				                              "ds_cache dst_cur = c_cur"
+				                              using core_cur unfolding decode_loop_inv_core_def by simp
+				                            have dec_c:
+				                              "decode_address c
+				                                 (unat
+				                                   (UCAST(8 \<rightarrow> 32)
+				                                     (code_tbl_'' s_inner.[unat
+				                                       (UCAST(8 \<rightarrow> 32)
+				                                         (heap_w8 t (patch +\<^sub>p uint ic)))]
+				                                       .[unat (x2d * (3 :: 32 word) + 2)])
+				                                    :: 32 word))
+				                                 (unat x1d)
+				                                 (drop (unat x1)
+				                                   (heap_bytes s_inner patch (unat ?addr_end))) =
+				                               Some (addr, arest, c_next)"
+				                              using dec_abs c_eq cache_cur addr_rem_cur tgt_cur opcode_eq
+				                              by (simp add: unat_ucast_upcast is_up)
+				                            have addr_lt32: "addr < 2 ^ 32"
+				                              using addr_bound tgt_cur unat_lt2p[of x1d] by simp
+				                            have ar_ok: "ar_t_C.err_C ar = 0"
+				                              using fixed_copy_addr_err_prems dec_c addr_lt32
+				                              by (simp split: option.splits prod.splits if_splits)
+				                            show ?thesis
+				                              using fixed_copy_addr_err_prems ar_ok by simp
+				                          qed
+				                          subgoal premises fixed_copy_addr_invalid_prems for t_addr c ar
+				                          proof -
+				                            have which_lt: "unat x2d < 2"
+				                              using fixed_copy_addr_invalid_prems by simp
+				                            have inner_inv_cur:
+				                              "decode_inner_inv_core ta patch (unat patch_len)
+				                                src (unat src_len) out (0 :: 32 word)
+				                                (0 :: 32 word) (length tgt)
+				                                ?data_end ?inst_end ?addr_end
+				                                [] dst x1a x1b x1 x1d x1c x2d s_inner"
+				                              using fixed_copy_addr_invalid_prems by simp
+				                            obtain dst_cur c_cur where core_cur:
+				                              "decode_loop_inv_core ta patch (unat patch_len)
+				                                src (unat src_len) out (0 :: 32 word)
+				                                (0 :: 32 word) (length tgt)
+				                                ?data_end ?inst_end ?addr_end
+				                                [] x1a x1b x1 x1d x1c dst_cur c_cur s_inner"
+				                              and prefix_cur:
+				                              "decode_one_prefix [] (unat (0 :: 32 word)) (length tgt)
+				                                dst (unat x2d) dst_cur"
+				                              using inner_inv_cur
+				                              unfolding decode_inner_inv_core_def by blast
+				                            have code_tbl_cur: "code_tbl_matches s_inner"
+				                              using core_cur unfolding decode_loop_inv_core_def by simp
+				                            have code_tbl_tags_cur: "code_tbl_tags_valid s_inner"
+				                              using core_cur unfolding decode_loop_inv_core_def by simp
+				                            have op_lt: "unat op < 256"
+				                              using unat_lt2p[of op] by simp
+				                            define h :: half_inst where
+				                              "h =
+				                               (if x2d = 0
+				                                then fst (default_entry (unat op))
+				                                else snd (default_entry (unat op)))"
+				                            let ?sz_op =
+				                              "(UCAST(8 \<rightarrow> 32)
+				                                 (code_tbl_'' s_inner.[unat op]
+				                                   .[unat (x2d * (3 :: 32 word) + 1)])
+				                               :: 32 word)"
+				                            let ?sz =
+				                              "(UCAST(8 \<rightarrow> 32)
+				                                 (code_tbl_'' s_inner.[unat
+				                                   (UCAST(8 \<rightarrow> 32)
+				                                     (heap_w8 t (patch +\<^sub>p uint ic)))]
+				                                   .[unat (x2d * (3 :: 32 word) + 1)])
+				                               :: 32 word)"
+				                            have sz_eq: "?sz = ?sz_op"
+				                              using opcode_eq
+				                              by (simp add: unat_ucast_upcast is_up)
+				                            have tag_nz_op:
+				                              "UCAST(8 \<rightarrow> 32)
+				                                 (code_tbl_'' s_inner.[unat op]
+				                                   .[unat (x2d * (3 :: 32 word))])
+				                               \<noteq> (0 :: 32 word)"
+				                              using fixed_copy_addr_invalid_prems opcode_eq
+				                              by (simp add: unat_ucast_upcast is_up)
+				                            have tag_ne1_op:
+				                              "UCAST(8 \<rightarrow> 32)
+				                                 (code_tbl_'' s_inner.[unat op]
+				                                   .[unat (x2d * (3 :: 32 word))])
+				                               \<noteq> (1 :: 32 word)"
+				                              using fixed_copy_addr_invalid_prems opcode_eq
+				                              by (simp add: unat_ucast_upcast is_up)
+				                            have tag_ne2_op:
+				                              "UCAST(8 \<rightarrow> 32)
+				                                 (code_tbl_'' s_inner.[unat op]
+				                                   .[unat (x2d * (3 :: 32 word))])
+				                               \<noteq> (2 :: 32 word)"
+				                              using fixed_copy_addr_invalid_prems opcode_eq
+				                              by (simp add: unat_ucast_upcast is_up)
+				                            have size_nonzero: "?sz \<noteq> 0"
+				                              using fixed_copy_addr_invalid_prems by simp
+				                            have h_size: "isz h = unat ?sz"
+				                              using code_tbl_current_half_fixed_nonnoop(1)
+				                                [OF code_tbl_cur code_tbl_tags_cur op_lt which_lt
+				                                    tag_nz_op]
+				                                    h_def sz_eq
+				                              by simp
+				                            have h_copy:
+				                              "ity h =
+				                               ICOPY
+				                                 (unat
+				                                   (UCAST(8 \<rightarrow> 32)
+				                                     (code_tbl_'' s_inner.[unat op]
+				                                       .[unat (x2d * (3 :: 32 word) + 2)])
+				                                    :: 32 word))"
+				                              using code_tbl_current_half_tag_three_copy
+				                                [OF code_tbl_cur code_tbl_tags_cur op_lt which_lt
+				                                    tag_nz_op tag_ne1_op tag_ne2_op]
+				                                    h_def
+				                              by simp
+				                            have h_size_nonzero: "isz h \<noteq> 0"
+				                            proof
+				                              assume "isz h = 0"
+				                              hence "unat ?sz = 0"
+				                                using h_size by simp
+				                              hence "?sz = 0"
+				                                by (simp add: unat_eq_0)
+				                              thus False
+				                                using size_nonzero by simp
+				                            qed
+				                            have resolve_cur_h:
+				                              "resolve_size h (ds_inst_rem dst_cur) =
+				                               Some (unat ?sz, ds_inst_rem dst_cur)"
+				                              using h_size h_size_nonzero
+				                              by (simp add: resolve_size_def)
+				                            have resolve_cur:
+				                              "resolve_size
+				                                 (if x2d = 0
+				                                  then fst (default_entry (unat op))
+				                                  else snd (default_entry (unat op)))
+				                                 (ds_inst_rem dst_cur) =
+				                               Some (unat ?sz, ds_inst_rem dst_cur)"
+				                              using resolve_cur_h h_def by simp
+				                            obtain st_exec where exec_cur:
+				                              "exec_half
+				                                 (if x2d = 0
+				                                  then fst (default_entry (unat op))
+				                                  else snd (default_entry (unat op)))
+				                                 (unat ?sz) []
+				                                 (unat (0 :: 32 word)) (length tgt)
+				                                 (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>) =
+				                               Inl st_exec"
+				                              using decode_one_prefix_exec_half_some
+				                                [OF pop_dst prefix_cur decode_one_step which_lt resolve_cur]
+				                              by blast
+				                            have exec_cur_h:
+				                              "exec_half h (unat ?sz) []
+				                                 (unat (0 :: 32 word)) (length tgt)
+				                                 (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>) =
+				                               Inl st_exec"
+				                              using exec_cur h_def by simp
+				                            obtain addr arest c_next where dec_abs:
+				                              "decode_address
+				                                 (ds_cache (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>))
+				                                 (unat
+				                                   (UCAST(8 \<rightarrow> 32)
+				                                     (code_tbl_'' s_inner.[unat op]
+				                                       .[unat (x2d * (3 :: 32 word) + 2)])
+				                                    :: 32 word))
+				                                 (unat (0 :: 32 word) +
+				                                   length
+				                                     (ds_tgt
+				                                       (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>)))
+				                                 (ds_addr_rem
+				                                   (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>)) =
+				                               Some (addr, arest, c_next)"
+				                              and addr_bound:
+				                              "addr <
+				                                 unat (0 :: 32 word) +
+				                                 length
+				                                   (ds_tgt
+				                                     (dst_cur\<lparr>ds_inst_rem := ds_inst_rem dst_cur\<rparr>))"
+				                              using exec_half_copy_conditions[OF h_copy exec_cur_h]
+				                              by blast
+				                            have cache_abs_c: "cache_abs s_inner c x1c"
+				                              using fixed_copy_addr_invalid_prems by simp
+				                            have cache_wf_c: "cache_wf c"
+				                              using fixed_copy_addr_invalid_prems by simp
+				                            have cache_abs_cur: "cache_abs s_inner c_cur x1c"
+				                              using core_cur unfolding decode_loop_inv_core_def by simp
+				                            have cache_wf_cur: "cache_wf c_cur"
+				                              using core_cur unfolding decode_loop_inv_core_def by simp
+				                            have c_eq: "c = c_cur"
+				                              by (rule cache_abs_unique
+				                                [OF cache_abs_c cache_wf_c cache_abs_cur cache_wf_cur])
+				                            have addr_rem_cur:
+				                              "ds_addr_rem dst_cur =
+				                               drop (unat x1) (heap_bytes s_inner patch (unat ?addr_end))"
+				                              by (rule decode_loop_inv_core_addr_rem_current[OF core_cur])
+				                            have tgt_cur:
+				                              "length (ds_tgt dst_cur) = unat x1d"
+				                              using core_cur unfolding decode_loop_inv_core_def by simp
+				                            have cache_cur:
+				                              "ds_cache dst_cur = c_cur"
+				                              using core_cur unfolding decode_loop_inv_core_def by simp
+				                            have dec_c:
+				                              "decode_address c
+				                                 (unat
+				                                   (UCAST(8 \<rightarrow> 32)
+				                                     (code_tbl_'' s_inner.[unat
+				                                       (UCAST(8 \<rightarrow> 32)
+				                                         (heap_w8 t (patch +\<^sub>p uint ic)))]
+				                                       .[unat (x2d * (3 :: 32 word) + 2)])
+				                                    :: 32 word))
+				                                 (unat x1d)
+				                                 (drop (unat x1)
+				                                   (heap_bytes s_inner patch (unat ?addr_end))) =
+				                               Some (addr, arest, c_next)"
+				                              using dec_abs c_eq cache_cur addr_rem_cur tgt_cur opcode_eq
+				                              by (simp add: unat_ucast_upcast is_up)
+				                            have addr_lt_here: "addr < unat x1d"
+				                              using addr_bound tgt_cur by simp
+				                            have addr_lt32: "addr < 2 ^ 32"
+				                              using addr_bound tgt_cur unat_lt2p[of x1d] by simp
+				                            have addr_word:
+				                              "addr_C ar = word_of_nat addr"
+				                              using fixed_copy_addr_invalid_prems dec_c addr_lt32
+				                              by (simp split: option.splits prod.splits if_splits)
+				                            have addr_unat:
+				                              "unat (addr_C ar) = addr"
+				                              using addr_word addr_lt32
+				                              by (simp add: unat_of_nat_eq)
+				                            show ?thesis
+				                              using fixed_copy_addr_invalid_prems addr_lt_here addr_unat
+				                              by simp
+				                          qed
 				                          apply fail \<comment> \<open>app-header/code-table-built no-source inner-half cases residual\<close>
 				                          done
 				                      qed
