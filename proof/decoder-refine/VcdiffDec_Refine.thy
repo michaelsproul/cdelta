@@ -26829,9 +26829,15 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 					            done
 					        qed
 					        done
-					        apply fail \<comment> \<open>app-header/code-table-built source post-body adler residual\<close>
-			        subgoal using win_pos_lt_w by (rule word_plus_one_le_of_less)
-			        subgoal premises q for vaa
+					        subgoal using body_prems by simp
+					        done
+					    qed
+					   done
+	         done
+	  qed
+				        subgoal using patch_ok prems by (simp add: buf_valid_def)
+				        subgoal premises q using adler_prems(1) by (rule word_plus_one_le_of_less)
+				        subgoal premises q for vaa
 			        proof -
 			          have pref:
 			            "\<exists>rest3 rest4 rest5 rest6 rest7 rest8 dlen data_len inst_len addr_len alen.
@@ -26862,7 +26868,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 			            using pref by blast
 			          show ?thesis using q dec3 by simp
 			        qed
-			        subgoal premises q for vaa
+				        subgoal premises q for vaa
 			        proof -
 			          have pref:
 			            "\<exists>rest3 rest4 rest5 rest6 rest7 rest8 dlen data_len inst_len addr_len alen.
@@ -26893,7 +26899,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 			            using pref by blast
 			          show ?thesis using q dec3 by simp
 			        qed
-			        subgoal premises q for vaa
+				        subgoal premises q for vaa
 			        proof -
 			          have pref:
 			            "\<exists>rest3 rest4 rest5 rest6 rest7 rest8 dlen data_len inst_len addr_len alen.
@@ -32872,7 +32878,6 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 				              done
 				            done
 			        qed
-			        apply fail \<comment> \<open>app-header/code-table-built source payload loop residual\<close>
 			        done
 			    qed
 		    subgoal premises adler_prems for x
