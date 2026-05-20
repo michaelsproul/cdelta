@@ -14298,7 +14298,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 						                      unat (val_C vaaa) = pw_src_seg_off win"
 						                     apply (rule app_source_values
 						                       [where td = td and va = va and vaa = vaa and vaaa = vaaa])
-						                     using prems q apply simp_all
+							                     using prems loop_prems q apply simp_all
 						                     done
 						                   have src_seg_bound:
 						                     "unat (val_C vaaa) + unat (val_C vaa) \<le> unat src_len"
@@ -14992,7 +14992,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 					                          [where td=td and va=va and vaa=vaa
 					                             and vaaa=vaaa and vaaaa=vaaaa
 					                             and vaaaaa=vaaaaa])
-					                        using prems loop_prems apply simp_all
+						                        using prems loop_prems apply simp_all
 					                        done
 					                      have tgt_val_exit:
 					                        "unat (val_C vaaaaa) = length tgt"
@@ -21287,7 +21287,725 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 				              qed
 				              show ?thesis using r size_eq by simp
 				            qed
-				            apply fail \<comment> \<open>app-header/code-table-built source payload loop residual\<close>
+				            subgoal premises loop_prems for data_p inst_p addr_p
+					                 apply (rule runs_to_weaken)
+					                 apply (rule_tac base=ta and patch=patch and patch_n="unat patch_len"
+								                      and src=src and src_n="unat src_len" and out=out
+								                      and tgt_len="length tgt"
+							                      and tgt=tgt
+							                      and src_seg=pw_src_seg
+							                      and src_seg_off="val_C vab" and src_seg_len="val_C vaa"
+								                      and data_end="pr_t_C.pos_C addr_p + (4 :: 32 word) + val_C data_p"
+						                      and addr_end="pr_t_C.pos_C addr_p + (4 :: 32 word) +
+						                        val_C data_p + val_C inst_p + val_C addr_p"
+						                   in outer_whileLoop_correct_success_abstract)
+						                 subgoal premises inv_prems
+						                 proof -
+						                   let ?win_pos = "pr_t_C.pos_C va + val_C va"
+								                   let ?alen_w = "(4 :: 32 word)"
+							                   let ?data_pos = "pr_t_C.pos_C addr_p + ?alen_w"
+						                   let ?data_end = "?data_pos + val_C data_p"
+						                   let ?inst_end = "?data_end + val_C inst_p"
+						                   let ?addr_end = "?inst_end + val_C addr_p"
+						                   have vals:
+						                     "unat (val_C vaa) = pw_src_seg_len win \<and>
+						                      unat (val_C vab) = pw_src_seg_off win"
+						                     apply (rule app_source_values
+							                       [where td = ta and va = va and vaa = vaa and vaaa = vab])
+							                     using prems q inv_prems win_pos_lt_w apply simp_all
+						                     done
+						                   have src_seg_bound:
+						                     "unat (val_C vab) + unat (val_C vaa) \<le> unat src_len"
+						                     using vals win_src_bounds by arith
+							                   have src_seg_bound32:
+							                     "unat (val_C vab) + unat (val_C vaa) < 2 ^ 32"
+							                   proof -
+							                     have "unat (val_C vab) + unat (val_C vaa) \<le> unat src_len"
+							                       using src_seg_bound .
+							                     also have "\<dots> < 2 ^ 32"
+							                       using unat_lt2p[of src_len] by simp
+							                     finally show ?thesis .
+							                   qed
+							                   have src_tgt_len_fits:
+							                     "unat (val_C vaa) + length tgt < 2 ^ 32"
+							                     using vals win_src_tgt_fit tgt_len_eq by simp
+						                   have pos_vab:
+						                     "unat (pr_t_C.pos_C data_p) = unat patch_len - length rest6"
+						                     using loop_prems q inv_prems dec5_ta by simp
+						                   have drop_rest6:
+						                     "drop (unat (pr_t_C.pos_C data_p)) ?bs_ta = rest6"
+						                     using varint_decode_drop_rest[OF dec5_ta] pos_vab by simp
+						                   have dec6_ta:
+						                     "varint_decode (drop (unat (pr_t_C.pos_C data_p)) ?bs_ta) =
+						                      Some (inst_len, rest7)"
+						                     using dec6 drop_rest6 by simp
+						                   have pos_vaba:
+						                     "unat (pr_t_C.pos_C inst_p) = unat patch_len - length rest7"
+						                     using loop_prems q inv_prems dec6_ta by simp
+						                   have drop_rest7:
+						                     "drop (unat (pr_t_C.pos_C inst_p)) ?bs_ta = rest7"
+						                     using varint_decode_drop_rest[OF dec6_ta] pos_vaba by simp
+						                   have dec7_ta:
+						                     "varint_decode (drop (unat (pr_t_C.pos_C inst_p)) ?bs_ta) =
+						                      Some (addr_len, rest8)"
+						                     using dec7 drop_rest7 by simp
+						                   have pos_vabaa:
+						                     "unat (pr_t_C.pos_C addr_p) = unat patch_len - length rest8"
+						                     using loop_prems q inv_prems dec7_ta by simp
+						                   have drop_rest8:
+						                     "drop (unat (pr_t_C.pos_C addr_p)) ?bs_ta = rest8"
+						                     using varint_decode_drop_rest[OF dec7_ta] pos_vabaa by simp
+							                   have rest3_le_patch: "length rest3 \<le> unat patch_len"
+							                   proof -
+							                     have "length rest3 = length (drop (unat (pr_t_C.pos_C vaaa)) ?bs_ta)"
+							                       using drop_rest3 by simp
+							                     also have "\<dots> \<le> length ?bs_ta"
+							                       by simp
+							                     finally show ?thesis by simp
+							                   qed
+							                   have rest8_le_rest3: "length rest8 \<le> length rest3"
+							                   proof -
+							                     have "length rest4 \<le> length rest3"
+							                       by (rule varint_decode_length[OF dec4])
+							                     moreover have "length rest5 < length rest4"
+							                       using rest4_cons by simp
+							                     moreover have "length rest6 \<le> length rest5"
+							                       by (rule varint_decode_length[OF dec5])
+							                     moreover have "length rest7 \<le> length rest6"
+							                       by (rule varint_decode_length[OF dec6])
+							                     moreover have "length rest8 \<le> length rest7"
+							                       by (rule varint_decode_length[OF dec7])
+							                     ultimately show ?thesis by arith
+							                   qed
+							                   have rest8_le_patch: "length rest8 \<le> unat patch_len"
+							                     using rest8_le_rest3 rest3_le_patch by arith
+						                   have data_val: "unat (val_C data_p) = data_len"
+						                     using loop_prems q inv_prems dec5_ta by simp
+						                   have inst_val: "unat (val_C inst_p) = inst_len"
+						                     using loop_prems q inv_prems dec6_ta by simp
+							                   have addr_val: "unat (val_C addr_p) = addr_len"
+							                     using loop_prems q inv_prems dec7_ta by simp
+								                   have alen_is4: "alen = 4"
+								                     using alen_eq adler_prems by simp
+								                   have alen_unat: "unat ?alen_w = alen"
+								                     using alen_is4 by simp
+						                   have patch_lt: "unat patch_len < 2 ^ 32"
+						                     using unat_lt2p[of patch_len] by simp
+						                   have data_pos_unat:
+						                     "unat ?data_pos = unat patch_len - length rest8 + alen"
+						                   proof -
+						                     have add_lt:
+						                       "unat (pr_t_C.pos_C addr_p) + unat ?alen_w < 2 ^ 32"
+						                     proof -
+						                       have "unat (pr_t_C.pos_C addr_p) + unat ?alen_w \<le> unat patch_len"
+						                         using pos_vabaa alen_unat sizes_ok rest8_le_patch by arith
+						                       thus ?thesis using patch_lt by arith
+						                     qed
+						                     have "unat ?data_pos =
+						                           unat (pr_t_C.pos_C addr_p) + unat ?alen_w"
+						                       using add_lt by (simp add: unat_add_lem[THEN iffD1])
+						                     also have "\<dots> = unat patch_len - length rest8 + alen"
+						                       using pos_vabaa alen_unat rest8_le_patch by arith
+						                     finally show ?thesis .
+						                   qed
+						                   have data_end_unat:
+						                     "unat ?data_end =
+						                      unat patch_len - length rest8 + alen + data_len"
+						                   proof -
+						                     have add_lt: "unat ?data_pos + unat (val_C data_p) < 2 ^ 32"
+						                     proof -
+						                       have "unat ?data_pos + unat (val_C data_p) \<le> unat patch_len"
+						                         using data_pos_unat data_val sizes_ok rest8_le_patch by arith
+						                       thus ?thesis using patch_lt by arith
+						                     qed
+						                     have "unat ?data_end = unat ?data_pos + unat (val_C data_p)"
+						                       using add_lt by (simp add: unat_add_lem[THEN iffD1])
+						                     also have "\<dots> = unat patch_len - length rest8 + alen + data_len"
+						                       using data_pos_unat data_val by arith
+						                     finally show ?thesis .
+						                   qed
+						                   have inst_end_unat:
+						                     "unat ?inst_end =
+						                      unat patch_len - length rest8 + alen + data_len + inst_len"
+						                   proof -
+						                     have add_lt: "unat ?data_end + unat (val_C inst_p) < 2 ^ 32"
+						                     proof -
+						                       have "unat ?data_end + unat (val_C inst_p) \<le> unat patch_len"
+						                         using data_end_unat inst_val sizes_ok rest8_le_patch by arith
+						                       thus ?thesis using patch_lt by arith
+						                     qed
+						                     have "unat ?inst_end = unat ?data_end + unat (val_C inst_p)"
+						                       using add_lt by (simp add: unat_add_lem[THEN iffD1])
+						                     also have "\<dots> =
+						                       unat patch_len - length rest8 + alen + data_len + inst_len"
+						                       using data_end_unat inst_val by arith
+						                     finally show ?thesis .
+						                   qed
+						                   have addr_end_unat:
+						                     "unat ?addr_end =
+						                      unat patch_len - length rest8 + alen + data_len + inst_len + addr_len"
+						                   proof -
+						                     have add_lt: "unat ?inst_end + unat (val_C addr_p) < 2 ^ 32"
+						                     proof -
+						                       have "unat ?inst_end + unat (val_C addr_p) \<le> unat patch_len"
+						                         using inst_end_unat addr_val sizes_ok rest8_le_patch by arith
+						                       thus ?thesis using patch_lt by arith
+						                     qed
+						                     have "unat ?addr_end = unat ?inst_end + unat (val_C addr_p)"
+						                       using add_lt by (simp add: unat_add_lem[THEN iffD1])
+						                     also have "\<dots> =
+						                       unat patch_len - length rest8 + alen + data_len + inst_len + addr_len"
+						                       using inst_end_unat addr_val by arith
+						                     finally show ?thesis .
+						                   qed
+						                   have data_le: "?data_pos \<le> ?data_end"
+						                     using data_pos_unat data_end_unat by (simp add: word_le_nat_alt)
+						                   have inst_le: "?data_end \<le> ?inst_end"
+						                     using data_end_unat inst_end_unat by (simp add: word_le_nat_alt)
+						                   have addr_le: "?inst_end \<le> ?addr_end"
+						                     using inst_end_unat addr_end_unat by (simp add: word_le_nat_alt)
+						                   have data_bound: "unat ?data_end \<le> unat patch_len"
+						                     using data_end_unat sizes_ok rest8_le_patch by arith
+						                   have inst_bound: "unat ?inst_end \<le> unat patch_len"
+						                     using inst_end_unat sizes_ok rest8_le_patch by arith
+						                   have addr_bound: "unat ?addr_end \<le> unat patch_len"
+						                     using addr_end_unat sizes_ok rest8_le_patch by arith
+						                   have tgt_len_le_out: "length tgt \<le> unat out_cap"
+						                     using out_cap_enough Inl by simp
+						                   have out_valid_tgt: "buf_valid ta out (length tgt)"
+						                     using out_ok tgt_len_le_out prems q
+						                     by (auto simp: buf_valid_def)
+						                   have out_disj_patch_tgt:
+						                     "\<forall>i < length tgt. \<forall>j < unat patch_len.
+						                        out +\<^sub>p int i \<noteq> patch +\<^sub>p int j"
+						                     using out_patch_disj tgt_len_le_out by fastforce
+						                   have out_disj_src_tgt:
+						                     "\<forall>i < length tgt. \<forall>j < unat src_len.
+						                        out +\<^sub>p int i \<noteq> src +\<^sub>p int j"
+						                     using out_src_disj tgt_len_le_out by fastforce
+						                   have out_inj_tgt:
+						                     "\<forall>i < length tgt. \<forall>j < length tgt.
+						                        i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j"
+						                     using out_inj tgt_len_le_out by fastforce
+						                   have tgt_len_fits: "length tgt < 2 ^ 32"
+						                     using tgt_val tgt_len_eq unat_lt2p[of "val_C vaaaa"] by simp
+						                   have src_seg_eq:
+						                     "pw_src_seg =
+						                      heap_bytes ta (src +\<^sub>p uint (val_C vab)) (unat (val_C vaa))"
+						                   proof -
+						                     have view:
+						                       "(if val_C vaa = 0 then []
+						                         else take (unat (val_C vaa))
+						                           (drop (unat (val_C vab))
+						                             (heap_bytes ta src (unat src_len)))) =
+						                        heap_bytes ta (src +\<^sub>p uint (val_C vab)) (unat (val_C vaa))"
+						                       using heap_bytes_src_segment_view
+						                         [OF src_seg_bound, of ta src] .
+						                     show ?thesis
+						                     proof -
+						                       have len_eq: "unat (val_C vaa) = pw_src_seg_len win"
+						                         using vals by simp
+						                       have off_eq: "unat (val_C vab) = pw_src_seg_off win"
+						                         using vals by simp
+						                       have zero_eq: "(val_C vaa = 0) = (pw_src_seg_len win = 0)"
+						                       proof
+						                         assume "val_C vaa = 0"
+						                         thus "pw_src_seg_len win = 0"
+						                           using len_eq by simp
+						                       next
+						                         assume "pw_src_seg_len win = 0"
+						                         hence "unat (val_C vaa) = 0"
+						                           using len_eq by simp
+						                         thus "val_C vaa = 0"
+						                           using word_unat_eq_iff[of "val_C vaa" 0] by simp
+						                       qed
+						                       have src_heap_eq:
+						                         "heap_bytes ta src (unat src_len) =
+						                          heap_bytes s src (unat src_len)"
+						                         using prems q inv_prems by simp
+						                       have view':
+						                         "(if pw_src_seg_len win = 0 then []
+						                           else take (pw_src_seg_len win)
+						                             (drop (pw_src_seg_off win)
+						                               (heap_bytes ta src (unat src_len)))) =
+						                          heap_bytes ta (src +\<^sub>p uint (val_C vab))
+						                            (pw_src_seg_len win)"
+						                       proof (cases "pw_src_seg_len win = 0")
+						                         case True
+						                         hence "val_C vaa = 0"
+						                           using zero_eq by simp
+						                         with True show ?thesis
+						                           using view len_eq by simp
+						                       next
+						                         case False
+						                         hence "val_C vaa \<noteq> 0"
+						                           using zero_eq by simp
+						                         with False show ?thesis
+						                           using view len_eq off_eq by simp
+						                       qed
+						                       have src_left_eq:
+						                         "(if pw_src_seg_len win = 0 then []
+						                           else take (pw_src_seg_len win)
+						                             (drop (pw_src_seg_off win)
+						                               (heap_bytes s src (unat src_len)))) =
+						                          (if pw_src_seg_len win = 0 then []
+						                           else take (pw_src_seg_len win)
+						                             (drop (pw_src_seg_off win)
+						                               (heap_bytes ta src (unat src_len))))"
+						                       proof (cases "pw_src_seg_len win = 0")
+						                         case True
+						                         thus ?thesis by simp
+						                       next
+						                         case False
+						                         have src_heap_eq_sym:
+						                           "heap_bytes s src (unat src_len) =
+						                            heap_bytes ta src (unat src_len)"
+						                           using src_heap_eq by (rule sym)
+						                         show ?thesis
+						                           using False by (simp add: src_heap_eq_sym)
+						                       qed
+						                       show ?thesis
+						                         using src_left_eq view' len_eq
+						                       unfolding pw_src_seg_def
+						                       by simp
+						                     qed
+						                   qed
+							                   have win_pos_lt: "?win_pos < patch_len"
+							                     using win_pos_lt_w .
+						                   have win_pos_suc:
+						                     "unat (?win_pos + 1) = Suc (unat ?win_pos)"
+						                     using unat_x_plus_1[OF win_pos_lt] by simp
+						                   have hi4: "hi AND (4 :: 8 word) \<noteq> 0"
+						                     using prems hi_v ucast_and_4_equiv by simp
+						                   obtain app_len app_rest where app_dec:
+						                     "varint_decode body = Some (app_len, app_rest)"
+						                     and rest_eq: "rest = drop app_len app_rest"
+						                     using parse_header_app[unfolded app_bit_def] hi4 by blast
+						                   have app_dec_bs:
+						                     "varint_decode (drop 5 (heap_bytes s patch (unat patch_len))) =
+						                      Some (app_len, app_rest)"
+						                     using app_dec body_from_drop5 by simp
+						                   have app_len_eq: "app_len = unat (val_C va)"
+						                     and app_pos_eq:
+						                       "unat (pr_t_C.pos_C va) = unat patch_len - length app_rest"
+						                     using prems app_dec_bs by auto
+						                   have app_pos_drop:
+						                     "drop (unat (pr_t_C.pos_C va))
+						                       (heap_bytes s patch (unat patch_len)) = app_rest"
+						                     using varint_decode_drop_rest[OF app_dec_bs] app_pos_eq by simp
+						                   have app_val_le: "val_C va \<le> patch_len - pr_t_C.pos_C va"
+						                     using prems by (simp add: word_le_not_less)
+						                   have win_pos_unat:
+						                     "unat ?win_pos =
+						                      unat (pr_t_C.pos_C va) + unat (val_C va)"
+						                   proof -
+						                     have pos_le: "pr_t_C.pos_C va \<le> patch_len"
+						                       using prems q inv_prems by simp
+						                     have sum_le:
+						                       "unat (pr_t_C.pos_C va) + unat (val_C va) \<le> unat patch_len"
+						                     proof -
+						                       have "unat (patch_len - pr_t_C.pos_C va) =
+						                             unat patch_len - unat (pr_t_C.pos_C va)"
+						                         using pos_le by (simp add: unat_sub word_le_nat_alt)
+						                       hence "unat (val_C va) \<le>
+						                              unat patch_len - unat (pr_t_C.pos_C va)"
+						                         using app_val_le by (simp add: word_le_nat_alt)
+						                       thus ?thesis
+						                         using pos_le by (simp add: word_le_nat_alt)
+						                     qed
+						                     have sum_lt:
+						                       "unat (pr_t_C.pos_C va) + unat (val_C va) < 2 ^ 32"
+						                       using sum_le unat_lt2p[of patch_len] by simp
+						                     show ?thesis
+						                       using sum_lt by (simp add: unat_add_lem[THEN iffD1])
+						                   qed
+						                   have rest_at_win_pos_s:
+						                     "drop (unat ?win_pos)
+						                       (heap_bytes s patch (unat patch_len)) = rest"
+						                   proof -
+						                     have "drop (unat ?win_pos)
+						                         (heap_bytes s patch (unat patch_len)) =
+						                       drop (unat (val_C va))
+						                         (drop (unat (pr_t_C.pos_C va))
+						                           (heap_bytes s patch (unat patch_len)))"
+						                       using win_pos_unat by (simp add: drop_drop add.commute)
+						                     also have "\<dots> = drop (unat (val_C va)) app_rest"
+						                       using app_pos_drop by simp
+						                     also have "\<dots> = rest"
+						                       using rest_eq app_len_eq by simp
+						                     finally show ?thesis .
+						                   qed
+						                   have rest_at_win_pos_ta:
+						                     "drop (unat ?win_pos) ?bs_ta = rest"
+						                   proof -
+						                     have patch_heap_eq:
+						                       "?bs_ta = heap_bytes s patch (unat patch_len)"
+						                       using prems q inv_prems by simp
+						                     show ?thesis
+						                       using rest_at_win_pos_s by (simp add: patch_heap_eq)
+						                   qed
+							                   have pref_full:
+							                     "\<exists>rest1 rest2 rest3 rest4 rest5 rest6 rest7 rest8
+							                         dlen data_len inst_len addr_len alen.
+							                        varint_decode
+							                          (drop (unat (?win_pos + 1)) ?bs_ta) =
+							                          Some (pw_src_seg_len win, rest1) \<and>
+							                        varint_decode rest1 = Some (pw_src_seg_off win, rest2) \<and>
+							                        varint_decode rest2 = Some (dlen, rest3) \<and>
+							                        varint_decode rest3 = Some (pw_tgt_len win, rest4) \<and>
+							                        pop_byte rest4 = Some (0, rest5) \<and>
+							                        varint_decode rest5 = Some (data_len, rest6) \<and>
+							                        varint_decode rest6 = Some (inst_len, rest7) \<and>
+							                        varint_decode rest7 = Some (addr_len, rest8) \<and>
+							                        alen + data_len + inst_len + addr_len \<le> length rest8 \<and>
+							                        dlen =
+							                          (length rest3 - length rest8) + alen +
+							                          data_len + inst_len + addr_len \<and>
+							                        alen =
+							                          (if UCAST(8 \<rightarrow> 32)
+							                                (heap_w8 ta (patch +\<^sub>p uint ?win_pos)) AND
+							                              (4 :: 32 word) \<noteq> 0
+							                           then 4 else 0)"
+							                     apply (rule app_source_prefix_decodes[where td=ta and va=va])
+							                     using prems adler_prems q inv_prems loop_prems win_pos_lt_w
+							                     apply simp_all
+							                     done
+							                   obtain rest1 rest2 dlen0 rest30 where dec1:
+							                     "varint_decode
+							                       (drop (unat (?win_pos + 1)) ?bs_ta) =
+							                      Some (pw_src_seg_len win, rest1)"
+						                     and dec2:
+						                       "varint_decode rest1 = Some (pw_src_seg_off win, rest2)"
+							                     and dec3_prefix:
+							                       "varint_decode rest2 = Some (dlen0, rest30)"
+							                     using pref_full by blast
+						                   have pos_vaa:
+						                     "unat (pr_t_C.pos_C vaa) = unat patch_len - length rest1"
+						                     using prems loop_prems q inv_prems dec1 by (auto split: option.splits)
+						                   have drop_rest1:
+						                     "drop (unat (pr_t_C.pos_C vaa)) ?bs_ta = rest1"
+						                     using varint_decode_drop_rest[OF dec1] pos_vaa by simp
+						                   have dec2_ta:
+						                     "varint_decode
+						                       (drop (unat (pr_t_C.pos_C vaa)) ?bs_ta) =
+						                      Some (pw_src_seg_off win, rest2)"
+						                     using dec2 drop_rest1 by simp
+						                   have pos_vaaa:
+						                     "unat (pr_t_C.pos_C vab) = unat patch_len - length rest2"
+						                     using prems loop_prems q inv_prems dec2_ta by (auto split: option.splits)
+						                   have drop_rest2:
+						                     "drop (unat (pr_t_C.pos_C vab)) ?bs_ta = rest2"
+						                     using varint_decode_drop_rest[OF dec2_ta] pos_vaaa by simp
+						                   have dec3_rest2:
+						                     "varint_decode rest2 = Some (dlen, rest3)"
+						                     using dec3 drop_rest2 by simp
+						                   have win_ind_nth:
+						                     "?bs_ta ! unat ?win_pos =
+						                      heap_w8 ta (patch +\<^sub>p uint ?win_pos)"
+						                     using win_pos_lt by (simp add: heap_bytes_nth word_less_nat_alt)
+						                   have pop_win:
+						                     "pop_byte (drop (unat ?win_pos) ?bs_ta) =
+						                      Some (heap_w8 ta (patch +\<^sub>p uint ?win_pos),
+						                        drop (unat (?win_pos + 1)) ?bs_ta)"
+						                   proof -
+						                     have "drop (unat ?win_pos) ?bs_ta =
+						                       heap_w8 ta (patch +\<^sub>p uint ?win_pos) #
+						                       drop (Suc (unat ?win_pos)) ?bs_ta"
+						                     proof -
+						                       have idx_lt: "unat ?win_pos < length ?bs_ta"
+						                         using win_pos_lt by (simp add: word_less_nat_alt)
+						                       have drop_cons:
+						                         "?bs_ta ! unat ?win_pos #
+						                          drop (Suc (unat ?win_pos)) ?bs_ta =
+						                          drop (unat ?win_pos) ?bs_ta"
+						                         by (rule Cons_nth_drop_Suc[OF idx_lt])
+						                       show ?thesis
+						                         using drop_cons win_ind_nth by simp
+						                     qed
+						                     thus ?thesis
+						                       using win_pos_suc by (simp add: pop_byte_def)
+						                   qed
+						                   have no_target8:
+						                     "heap_w8 ta (patch +\<^sub>p uint ?win_pos) AND
+						                      (0x02 :: 8 word) = 0"
+						                   proof -
+						                     have no_target32:
+						                       "UCAST(8 \<rightarrow> 32)
+						                         (heap_w8 ta (patch +\<^sub>p uint ?win_pos)) AND
+						                        (2 :: 32 word) = 0"
+						                       using prems loop_prems q inv_prems by simp
+						                     show ?thesis using no_target32 by word_bitwise
+						                   qed
+						                   have mask_ok8:
+						                     "heap_w8 ta (patch +\<^sub>p uint ?win_pos) AND
+						                      (0xFA :: 8 word) = 0"
+						                   proof -
+						                     have mask32:
+						                       "UCAST(8 \<rightarrow> 32)
+						                         (heap_w8 ta (patch +\<^sub>p uint ?win_pos)) AND
+						                        (0xFFFFFFFA :: 32 word) = 0"
+						                       using prems loop_prems q inv_prems by simp
+						                     show ?thesis using mask32 by word_bitwise
+						                   qed
+						                   have has_source8:
+						                     "heap_w8 ta (patch +\<^sub>p uint ?win_pos) AND
+						                      (0x01 :: 8 word) \<noteq> 0"
+						                   proof -
+						                     have source32:
+						                       "UCAST(8 \<rightarrow> 32)
+						                         (heap_w8 ta (patch +\<^sub>p uint ?win_pos)) AND
+						                        (1 :: 32 word) = 1"
+						                       using prems loop_prems q inv_prems by simp
+						                     show ?thesis using source32 by word_bitwise
+						                   qed
+						                   have alen_eq8:
+						                     "alen =
+						                       (if heap_w8 ta (patch +\<^sub>p uint ?win_pos) AND
+						                         (0x04 :: 8 word) \<noteq> 0
+						                        then 4 else 0)"
+						                     using alen_eq by word_bitwise
+						                   have parsed_payload:
+						                     "parse_window (drop (unat ?win_pos) ?bs_ta) =
+						                      Inl
+						                       (\<lparr>pw_src_seg_len = pw_src_seg_len win,
+						                         pw_src_seg_off = pw_src_seg_off win,
+						                         pw_tgt_len = pw_tgt_len win,
+						                         pw_data = take data_len (drop alen rest8),
+						                         pw_inst =
+						                           take inst_len (drop (alen + data_len) rest8),
+						                         pw_addr =
+						                           take addr_len
+						                             (drop (alen + data_len + inst_len) rest8)\<rparr>,
+						                        drop (alen + data_len + inst_len + addr_len) rest8)"
+						                     by (rule parse_window_with_source_adler_general
+						                       [OF pop_win no_target8 mask_ok8 has_source8 alen_eq8
+						                           dec1 dec2 dec3_rest2 dec4 di0 refl dec5 dec6 dec7
+						                           sizes_ok dlen_exact])
+						                   have parsed_at_win:
+						                     "parse_window (drop (unat ?win_pos) ?bs_ta) = Inl (win, tail)"
+						                     using rest_at_win_pos_ta pw by simp
+						                   have win_payload_eq:
+						                     "win =
+						                       \<lparr>pw_src_seg_len = pw_src_seg_len win,
+						                         pw_src_seg_off = pw_src_seg_off win,
+						                         pw_tgt_len = pw_tgt_len win,
+						                         pw_data = take data_len (drop alen rest8),
+						                         pw_inst = take inst_len (drop (alen + data_len) rest8),
+						                         pw_addr =
+						                           take addr_len
+						                             (drop (alen + data_len + inst_len) rest8)\<rparr>"
+						                     using parsed_payload parsed_at_win by auto
+						                   have pw_data_eq:
+						                     "pw_data win = take data_len (drop alen rest8)"
+						                   proof -
+						                     have "pw_data win =
+						                       pw_data
+						                       \<lparr>pw_src_seg_len = pw_src_seg_len win,
+						                         pw_src_seg_off = pw_src_seg_off win,
+						                         pw_tgt_len = pw_tgt_len win,
+						                         pw_data = take data_len (drop alen rest8),
+						                         pw_inst = take inst_len (drop (alen + data_len) rest8),
+						                         pw_addr =
+						                           take addr_len
+						                             (drop (alen + data_len + inst_len) rest8)\<rparr>"
+						                       using win_payload_eq by (rule arg_cong)
+						                     thus ?thesis by simp
+						                   qed
+						                   have pw_inst_eq:
+						                     "pw_inst win = take inst_len (drop (alen + data_len) rest8)"
+						                   proof -
+						                     have "pw_inst win =
+						                       pw_inst
+						                       \<lparr>pw_src_seg_len = pw_src_seg_len win,
+						                         pw_src_seg_off = pw_src_seg_off win,
+						                         pw_tgt_len = pw_tgt_len win,
+						                         pw_data = take data_len (drop alen rest8),
+						                         pw_inst = take inst_len (drop (alen + data_len) rest8),
+						                         pw_addr =
+						                           take addr_len
+						                             (drop (alen + data_len + inst_len) rest8)\<rparr>"
+						                       using win_payload_eq by (rule arg_cong)
+						                     thus ?thesis by simp
+						                   qed
+						                   have pw_addr_eq:
+						                     "pw_addr win =
+						                      take addr_len (drop (alen + data_len + inst_len) rest8)"
+						                   proof -
+						                     have "pw_addr win =
+						                       pw_addr
+						                       \<lparr>pw_src_seg_len = pw_src_seg_len win,
+						                         pw_src_seg_off = pw_src_seg_off win,
+						                         pw_tgt_len = pw_tgt_len win,
+						                         pw_data = take data_len (drop alen rest8),
+						                         pw_inst = take inst_len (drop (alen + data_len) rest8),
+						                         pw_addr =
+						                           take addr_len
+						                             (drop (alen + data_len + inst_len) rest8)\<rparr>"
+						                       using win_payload_eq by (rule arg_cong)
+						                     thus ?thesis by simp
+						                   qed
+						                   let ?base = "unat patch_len - length rest8"
+						                   have drop_base_rest8: "drop ?base ?bs_ta = rest8"
+						                     using pos_vabaa drop_rest8 by simp
+						                   have slice_from_rest8:
+						                     "\<And>off len. drop (?base + off)
+						                         (take (?base + off + len) ?bs_ta) =
+						                       take len (drop off rest8)"
+						                   proof -
+						                     fix off len
+						                     have "drop (?base + off)
+						                         (take (?base + off + len) ?bs_ta) =
+						                       take len (drop (?base + off) ?bs_ta)"
+						                       by (simp add: drop_take)
+						                     also have "drop (?base + off) ?bs_ta =
+						                       drop off rest8"
+						                     proof -
+						                       have "drop (?base + off) ?bs_ta =
+						                         drop off (drop ?base ?bs_ta)"
+						                         by (simp add: drop_drop add.commute)
+						                       also have "\<dots> = drop off rest8"
+						                         using drop_base_rest8 by simp
+						                       finally show ?thesis .
+						                     qed
+						                     finally show "drop (?base + off)
+						                         (take (?base + off + len) ?bs_ta) =
+						                       take len (drop off rest8)" .
+						                   qed
+						                   have data_slice:
+						                     "drop (unat ?data_pos) (take (unat ?data_end) ?bs_ta) =
+						                      pw_data win"
+						                   proof -
+						                     have "drop (unat ?data_pos)
+						                         (take (unat ?data_end) ?bs_ta) =
+						                       drop (?base + alen)
+						                         (take (?base + alen + data_len) ?bs_ta)"
+						                       using data_pos_unat data_end_unat by (simp add: add.assoc)
+						                     also have "\<dots> = take data_len (drop alen rest8)"
+						                       by (rule slice_from_rest8)
+						                     also have "\<dots> = pw_data win"
+						                       using pw_data_eq by simp
+						                     finally show ?thesis .
+						                   qed
+						                   have inst_slice:
+						                     "drop (unat ?data_end) (take (unat ?inst_end) ?bs_ta) =
+						                      pw_inst win"
+						                   proof -
+						                     have "drop (unat ?data_end)
+						                         (take (unat ?inst_end) ?bs_ta) =
+						                       drop (?base + alen + data_len)
+						                         (take (?base + alen + data_len + inst_len) ?bs_ta)"
+						                       using data_end_unat inst_end_unat by (simp add: add.assoc)
+						                     also have "\<dots> = take inst_len (drop (alen + data_len) rest8)"
+						                       using slice_from_rest8[of "alen + data_len" inst_len]
+						                       by (simp add: add.assoc)
+						                     also have "\<dots> = pw_inst win"
+						                       using pw_inst_eq by simp
+						                     finally show ?thesis .
+						                   qed
+						                   have addr_slice:
+						                     "drop (unat ?inst_end) (take (unat ?addr_end) ?bs_ta) =
+						                      pw_addr win"
+						                   proof -
+						                     have "drop (unat ?inst_end)
+						                         (take (unat ?addr_end) ?bs_ta) =
+						                       drop (?base + alen + data_len + inst_len)
+						                         (take (?base + alen + data_len + inst_len + addr_len) ?bs_ta)"
+						                       using inst_end_unat addr_end_unat by (simp add: add.assoc)
+						                     also have "\<dots> =
+						                       take addr_len (drop (alen + data_len + inst_len) rest8)"
+						                       using slice_from_rest8[of "alen + data_len + inst_len" addr_len]
+						                       by (simp add: add.assoc)
+						                     also have "\<dots> = pw_addr win"
+						                       using pw_addr_eq by simp
+						                     finally show ?thesis .
+						                   qed
+						                   let ?dst0 =
+						                     "\<lparr>ds_data_rem =
+						                         drop (unat ?data_pos) (take (unat ?data_end) ?bs_ta),
+						                       ds_inst_rem =
+						                         drop (unat ?data_end) (take (unat ?inst_end) ?bs_ta),
+						                       ds_addr_rem =
+						                         drop (unat ?inst_end) (take (unat ?addr_end) ?bs_ta),
+						                       ds_cache = cache_init,
+						                       ds_tgt = []\<rparr>"
+							                   have dst0_eq: "?dst0 = initial_dst"
+							                     using data_slice inst_slice addr_slice
+							                     unfolding initial_dst_def by simp
+							                   have apply_ok:
+						                     "\<exists>dst_final.
+						                        decode_loop
+						                          (length (drop (unat ?data_end)
+						                            (take (unat ?inst_end) ?bs_ta)))
+						                          pw_src_seg (unat (val_C vaa)) (length tgt) ?dst0 =
+						                          Inl dst_final \<and>
+						                        length (ds_tgt dst_final) = length tgt \<and>
+						                        ds_tgt dst_final = tgt \<and>
+						                        ds_data_rem dst_final = [] \<and>
+						                        ds_addr_rem dst_final = []"
+						                     using decode_loop_terminates vals tgt_len_eq dst0_eq
+						                     unfolding initial_dst_def by simp
+						                   have cache_ok: "cache_abs ta cache_init 0"
+						                   proof -
+						                     have near_zero_ta:
+						                       "\<forall>i < (4::nat). near_arr_'' ta .[i] = (0 :: 32 word)"
+						                       using prems q inv_prems by simp
+						                     have same_zero_ta:
+						                       "\<forall>i < (768::nat). same_arr_'' ta .[i] = (0 :: 32 word)"
+						                       using prems q inv_prems by simp
+						                     show ?thesis
+						                       by (rule cache_abs_init_zero[OF near_zero_ta same_zero_ta])
+						                   qed
+								                   have code_tbl_ta: "code_tbl_matches ta"
+								                     using code_tbl_matches_ready prems q inv_prems
+								                     by (simp add: code_tbl_matches_def)
+								                   have code_tbl_tags_ta: "code_tbl_tags_valid ta"
+								                     using code_tbl_ready code_tbl_tags_ready prems q inv_prems
+							                     by (simp add: code_tbl_tags_valid_def)
+							                   have patch_valid_ta: "buf_valid ta patch (unat patch_len)"
+						                     using patch_ok prems q by (simp add: buf_valid_def)
+						                   have src_valid_ta: "buf_valid ta src (unat src_len)"
+						                     using src_ok prems q by (simp add: buf_valid_def)
+						                   show ?thesis
+						                     apply simp
+						                     apply (rule decode_loop_inv_plus_entry_from_init
+							                       [OF refl refl patch_valid_ta src_valid_ta out_valid_tgt cache_ok
+							                           data_le inst_le addr_le data_bound inst_bound addr_bound
+							                           code_tbl_ta code_tbl_tags_ta refl
+							                           out_disj_patch_tgt out_disj_src_tgt out_inj_tgt
+							                           tgt_len_fits src_seg_bound src_seg_bound32
+							                           src_tgt_len_fits src_seg_eq
+							                           apply_ok])
+						                     done
+						                 qed
+					                 apply (clarsimp split: prod.splits)
+					                 apply runs_to_vcg
+					                  defer
+					                  subgoal
+					                    apply (clarsimp split: prod.splits)
+					                    apply runs_to_vcg
+					                    subgoal premises exit_prems for ac b
+					                    proof -
+					                      have b_len: "length tgt = unat b"
+					                        using exit_prems by simp
+					                      have tgt_val_win:
+					                        "unat (val_C vaaaa) = pw_tgt_len win"
+					                        apply (rule app_source_tgt_value
+						                          [where td=ta and va=va and vaa=vaa
+						                             and vaaa=vab and vaaaa=vaaa
+						                             and vaaaaa=vaaaa])
+						                        using prems adler_prems q loop_prems apply simp_all
+					                        done
+					                      have tgt_val_exit:
+					                        "unat (val_C vaaaa) = length tgt"
+					                        using tgt_val_win tgt_len_eq by simp
+					                      have "b = val_C vaaaa"
+					                        using b_len tgt_val_exit
+					                        by (simp add: word_unat.Rep_inject)
+					                      with exit_prems show ?thesis by simp
+					                    qed
+					                    done
+						                    apply fail \<comment> \<open>app-header/code-table-built source ADD loop body residual\<close>
+
 				            done
 				        qed
 				        subgoal using adler_prems by simp
