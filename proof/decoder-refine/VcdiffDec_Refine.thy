@@ -23738,7 +23738,136 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 									                               qed
 									                               done
 									                           qed
-										                           apply fail \<comment> \<open>app-header/code-table-built source post-RUN body residual\<close>
+									                           subgoal premises copy_addr_buf_prems for vac
+									                           proof -
+									                             have inner_inv_cur:
+									                               "decode_inner_inv_core ta patch (unat patch_len)
+									                                 src (unat src_len) out (val_C vab)
+									                                 (val_C vaa) (length tgt)
+									                                 ?data_end ?inst_end ?addr_end
+									                                 pw_src_seg dst x1a x1b x1 x1d x1c x2d s_inner"
+									                               using copy_addr_buf_prems by simp
+									                             obtain dst_cur c_cur where core_cur:
+									                               "decode_loop_inv_core ta patch (unat patch_len)
+									                                 src (unat src_len) out (val_C vab)
+									                                 (val_C vaa) (length tgt)
+									                                 ?data_end ?inst_end ?addr_end
+									                                 pw_src_seg x1a x1b x1 x1d x1c dst_cur c_cur s_inner"
+									                               using inner_inv_cur
+									                               unfolding decode_inner_inv_core_def by blast
+									                             have patch_valid:
+									                               "buf_valid s_inner patch (unat patch_len)"
+									                               using core_cur unfolding decode_loop_inv_core_def by simp
+									                             have addr_end_bound:
+									                               "unat ?addr_end \<le> unat patch_len"
+									                               using core_cur unfolding decode_loop_inv_core_def by simp
+									                             show ?thesis
+									                               by (rule buf_valid_mono[OF patch_valid addr_end_bound])
+									                           qed
+									                           subgoal premises copy_addr_pos_prems for vac
+									                           proof -
+									                             have inner_inv_cur:
+									                               "decode_inner_inv_core ta patch (unat patch_len)
+									                                 src (unat src_len) out (val_C vab)
+									                                 (val_C vaa) (length tgt)
+									                                 ?data_end ?inst_end ?addr_end
+									                                 pw_src_seg dst x1a x1b x1 x1d x1c x2d s_inner"
+									                               using copy_addr_pos_prems by simp
+									                             obtain dst_cur c_cur where core_cur:
+									                               "decode_loop_inv_core ta patch (unat patch_len)
+									                                 src (unat src_len) out (val_C vab)
+									                                 (val_C vaa) (length tgt)
+									                                 ?data_end ?inst_end ?addr_end
+									                                 pw_src_seg x1a x1b x1 x1d x1c dst_cur c_cur s_inner"
+									                               using inner_inv_cur
+									                               unfolding decode_inner_inv_core_def by blast
+									                             show ?thesis
+									                               using core_cur unfolding decode_loop_inv_core_def
+									                               by (simp add: word_le_nat_alt)
+									                           qed
+									                           subgoal premises copy_cache_prems for vac
+									                           proof -
+									                             have inner_inv_cur:
+									                               "decode_inner_inv_core ta patch (unat patch_len)
+									                                 src (unat src_len) out (val_C vab)
+									                                 (val_C vaa) (length tgt)
+									                                 ?data_end ?inst_end ?addr_end
+									                                 pw_src_seg dst x1a x1b x1 x1d x1c x2d s_inner"
+									                               using copy_cache_prems by simp
+									                             obtain dst_cur c_cur where core_cur:
+									                               "decode_loop_inv_core ta patch (unat patch_len)
+									                                 src (unat src_len) out (val_C vab)
+									                                 (val_C vaa) (length tgt)
+									                                 ?data_end ?inst_end ?addr_end
+									                                 pw_src_seg x1a x1b x1 x1d x1c dst_cur c_cur s_inner"
+									                               using inner_inv_cur
+									                               unfolding decode_inner_inv_core_def by blast
+										                             show ?thesis
+										                               using copy_cache_prems core_cur
+										                               unfolding decode_loop_inv_core_def by blast
+										                           qed
+										                           subgoal premises copy_mode_prems for vac
+										                           proof -
+										                             have which_lt: "unat x2d < 2"
+										                               using copy_mode_prems by simp
+										                             have inner_inv_cur:
+										                               "decode_inner_inv_core ta patch (unat patch_len)
+										                                 src (unat src_len) out (val_C vab)
+										                                 (val_C vaa) (length tgt)
+										                                 ?data_end ?inst_end ?addr_end
+										                                 pw_src_seg dst x1a x1b x1 x1d x1c x2d s_inner"
+										                               using copy_mode_prems by simp
+										                             obtain dst_cur c_cur where core_cur:
+										                               "decode_loop_inv_core ta patch (unat patch_len)
+										                                 src (unat src_len) out (val_C vab)
+										                                 (val_C vaa) (length tgt)
+										                                 ?data_end ?inst_end ?addr_end
+										                                 pw_src_seg x1a x1b x1 x1d x1c dst_cur c_cur s_inner"
+										                               using inner_inv_cur
+										                               unfolding decode_inner_inv_core_def by blast
+										                             have code_tbl_cur: "code_tbl_matches s_inner"
+										                               using core_cur unfolding decode_loop_inv_core_def by simp
+										                             have code_tbl_tags_cur: "code_tbl_tags_valid s_inner"
+										                               using core_cur unfolding decode_loop_inv_core_def by simp
+										                             have op_lt: "unat op < 256"
+										                               using unat_lt2p[of op] by simp
+										                             have tag_nz_op:
+										                               "UCAST(8 \<rightarrow> 32)
+										                                  (code_tbl_'' s_inner.[unat op]
+										                                    .[unat (x2d * (3 :: 32 word))])
+										                                \<noteq> (0 :: 32 word)"
+										                               using copy_mode_prems opcode_eq
+										                               by (simp add: unat_ucast_upcast is_up)
+										                             have tag_ne1_op:
+										                               "UCAST(8 \<rightarrow> 32)
+										                                  (code_tbl_'' s_inner.[unat op]
+										                                    .[unat (x2d * (3 :: 32 word))])
+										                                \<noteq> (1 :: 32 word)"
+										                               using copy_mode_prems opcode_eq
+										                               by (simp add: unat_ucast_upcast is_up)
+										                             have tag_ne2_op:
+										                               "UCAST(8 \<rightarrow> 32)
+										                                  (code_tbl_'' s_inner.[unat op]
+										                                    .[unat (x2d * (3 :: 32 word))])
+										                                \<noteq> (2 :: 32 word)"
+										                               using copy_mode_prems opcode_eq
+										                               by (simp add: unat_ucast_upcast is_up)
+										                             have mode_lt:
+										                               "unat
+										                                  (UCAST(8 \<rightarrow> 32)
+										                                    (code_tbl_'' s_inner.[unat op]
+										                                      .[unat (x2d * (3 :: 32 word) + 2)])
+										                                   :: 32 word) < 9"
+										                               by (rule code_tbl_current_half_copy_mode_lt9
+										                                 [OF code_tbl_cur code_tbl_tags_cur op_lt which_lt
+										                                     tag_nz_op tag_ne1_op tag_ne2_op])
+										                             show ?thesis
+										                               using mode_lt opcode_eq
+										                               by (simp add: unat_ucast_upcast is_up)
+										                           qed
+										                           subgoal
+										                             using unat_lt2p[of "val_C vaa + x1d :: 32 word"] by simp
+										                           apply fail \<comment> \<open>app-header/code-table-built source post-COPY-setup body residual\<close>
 
 
 
