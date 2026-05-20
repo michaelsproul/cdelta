@@ -33342,7 +33342,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 			          with q show ?thesis
 			            by (simp add: word_le_not_less)
 			        qed
-			        apply fail \<comment> \<open>app-header/code-table-built no-adler no-source residual\<close>
+			        apply fail \<comment> \<open>app-header/code-table-built no-adler source payload residual\<close>
 			        done
 			    qed
 			    done
