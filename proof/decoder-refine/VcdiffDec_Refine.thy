@@ -40548,7 +40548,246 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 				                   with exit_prems show ?thesis by simp
 				                 qed
 				                 done
-				               apply fail \<comment> \<open>app-header/code-table-built no-adler no-source loop body residual\<close>
+				               subgoal premises body_prems for ac dc ic np tp t
+				               proof -
+				                 let ?data_end = "pr_t_C.pos_C addr_p + val_C data_p"
+				                 let ?inst_end = "?data_end + val_C inst_p"
+				                 let ?addr_end = "?inst_end + val_C addr_p"
+				                 have inv_plus:
+				                   "decode_loop_inv_plus ta patch (unat patch_len)
+				                     src (unat src_len) out (0 :: 32 word)
+				                     (0 :: 32 word) (length tgt)
+				                     ?data_end ?inst_end ?addr_end
+				                     [] tgt dc ic ac tp np t"
+				                   using body_prems by simp
+				                 have patch_valid_all:
+				                   "buf_valid t patch (unat patch_len)"
+				                   using inv_plus
+				                   unfolding decode_loop_inv_plus_def decode_loop_inv_core_def
+				                   by blast
+				                 have inst_end_bound:
+				                   "unat ?inst_end \<le> unat patch_len"
+				                   using inv_plus
+				                   unfolding decode_loop_inv_plus_def decode_loop_inv_core_def
+				                   by blast
+				                 have patch_valid_inst:
+				                   "buf_valid t patch (unat ?inst_end)"
+				                   by (rule buf_valid_mono[OF patch_valid_all inst_end_bound])
+				                 have ic_le_inst: "ic \<le> ?inst_end"
+				                   using body_prems by simp
+				                 have ic_lt_inst: "ic < ?inst_end"
+				                   using body_prems by simp
+				                 obtain dst c dst' dst_final k where
+				                   core_before:
+				                     "decode_loop_inv_core ta patch (unat patch_len)
+				                       src (unat src_len) out (0 :: 32 word)
+				                       (0 :: 32 word) (length tgt)
+				                       ?data_end ?inst_end ?addr_end
+				                       [] dc ic ac tp np dst c t"
+				                   and decode_one_step:
+				                     "decode_one [] (unat (0 :: 32 word)) (length tgt) dst = Inl dst'"
+				                   and decode_loop_rest:
+				                     "decode_loop k [] (unat (0 :: 32 word)) (length tgt) dst'
+				                       = Inl dst_final"
+				                   and dst_final_len: "length (ds_tgt dst_final) = length tgt"
+				                   and dst_final_tgt: "ds_tgt dst_final = tgt"
+				                   and dst_final_data_empty: "ds_data_rem dst_final = []"
+				                   and dst_final_addr_empty: "ds_addr_rem dst_final = []"
+				                   by (rule decode_loop_inv_plus_decode_oneD[OF inv_plus ic_lt_inst])
+				                 have inv_plain:
+				                   "decode_loop_inv ta patch (unat patch_len)
+				                     src (unat src_len) out (0 :: 32 word)
+				                     (0 :: 32 word) (length tgt)
+				                     ?data_end ?inst_end ?addr_end
+				                     [] dc ic ac tp np t"
+				                   by (rule decode_loop_inv_core_imp_inv[OF core_before])
+				                 have ic_unat_lt: "unat ic < unat ?inst_end"
+				                   using ic_lt_inst by (simp add: word_less_nat_alt)
+				                 have ic_no_overflow: "unat ic + 1 < 2 ^ 32"
+				                 proof -
+				                   have "unat (ic + 1 :: 32 word) = unat ic + 1"
+				                     by (rule unat_x_plus_1[OF ic_lt_inst])
+				                   moreover have "unat (ic + 1 :: 32 word) < 2 ^ 32"
+				                     using unat_lt2p[of "ic + 1 :: 32 word"] by simp
+				                   ultimately show ?thesis by simp
+				                 qed
+				                 have ic_lt_ic1: "ic < ic + 1"
+				                   using ic_no_overflow
+				                   by (simp add: word_less_nat_alt unat_word_ariths(1))
+				                 have core_after_opcode:
+				                   "decode_loop_inv_core ta patch (unat patch_len)
+				                     src (unat src_len) out (0 :: 32 word)
+				                     (0 :: 32 word) (length tgt)
+				                     ?data_end ?inst_end ?addr_end
+				                     [] dc (ic + 1) ac tp np
+				                     (dst\<lparr>ds_inst_rem := tl (ds_inst_rem dst)\<rparr>) c t"
+				                   by (rule decode_loop_inv_core_advance_inst
+				                     [OF core_before ic_unat_lt ic_no_overflow])
+				                 have inst_nonempty: "ds_inst_rem dst \<noteq> []"
+				                 proof -
+				                   from core_before have
+				                     "ds_inst_rem dst =
+				                       drop (unat ic)
+				                         (take (unat ?inst_end)
+				                           (heap_bytes ta patch (unat patch_len)))"
+				                     unfolding decode_loop_inv_core_def by simp
+				                   moreover have "unat ?inst_end \<le> unat patch_len"
+				                     using core_before unfolding decode_loop_inv_core_def by simp
+				                   ultimately show ?thesis
+				                     using ic_unat_lt by simp
+				                 qed
+				                 obtain op irest where pop_dst:
+				                   "pop_byte (ds_inst_rem dst) = Some (op, irest)"
+				                   using inst_nonempty
+				                   by (cases "ds_inst_rem dst") (auto simp: pop_byte_def)
+				                 have irest_eq: "irest = tl (ds_inst_rem dst)"
+				                   using pop_dst
+				                   by (cases "ds_inst_rem dst") (auto simp: pop_byte_def)
+				                 have prefix_zero:
+				                   "decode_one_prefix [] (unat (0 :: 32 word)) (length tgt)
+				                     dst 0 (dst\<lparr>ds_inst_rem := tl (ds_inst_rem dst)\<rparr>)"
+				                   apply (rule decode_one_prefix_0I[OF pop_dst])
+				                   using irest_eq by simp
+				                 have opcode_eq:
+				                   "op = heap_w8 t (patch +\<^sub>p uint ic)"
+				                 proof -
+				                   have ds_inst:
+				                     "ds_inst_rem dst =
+				                       drop (unat ic)
+				                         (take (unat ?inst_end)
+				                           (heap_bytes ta patch (unat patch_len)))"
+				                     using core_before
+				                     unfolding decode_loop_inv_core_def by simp
+				                   have pop_heap:
+				                     "pop_byte
+				                       (drop (unat ic)
+				                         (take (unat ?inst_end)
+				                           (heap_bytes ta patch (unat patch_len)))) =
+				                      Some (heap_w8 ta (patch +\<^sub>p int (unat ic)),
+				                        drop (Suc (unat ic))
+				                         (take (unat ?inst_end)
+				                           (heap_bytes ta patch (unat patch_len))))"
+				                     by (rule inv_inst_pop_byte[OF ic_unat_lt inst_end_bound])
+				                   have op_ta: "op = heap_w8 ta (patch +\<^sub>p int (unat ic))"
+				                     using pop_dst ds_inst pop_heap by simp
+				                   have patch_preserved:
+				                     "\<forall>i < unat patch_len.
+				                       heap_w8 t (patch +\<^sub>p int i) =
+				                       heap_w8 ta (patch +\<^sub>p int i)"
+				                     using core_before
+				                     unfolding decode_loop_inv_core_def by simp
+				                   have ic_patch: "unat ic < unat patch_len"
+				                     using ic_unat_lt inst_end_bound by simp
+				                   have "heap_w8 t (patch +\<^sub>p int (unat ic)) =
+				                         heap_w8 ta (patch +\<^sub>p int (unat ic))"
+				                     using patch_preserved[rule_format, OF ic_patch] by simp
+				                   thus ?thesis
+				                     using op_ta by (simp only: uint_nat)
+				                 qed
+				                 show ?thesis
+				                   apply (rule read_byte'_gets_the_discharge)
+				                      apply (rule patch_valid_inst)
+				                     apply (rule ic_le_inst)
+				                   subgoal
+				                     apply runs_to_vcg
+				                      apply (rule runs_to_whileLoop_exn'
+				                        [where
+				                           I = "\<lambda>r st.
+				                             (case r of
+				                               Result (ac_i, dc_i, ic_i, np_i, tp_i, which_i) \<Rightarrow>
+				                                 ic < ic_i \<and>
+				                                 decode_inner_inv_core ta patch (unat patch_len)
+				                                   src (unat src_len) out (0 :: 32 word)
+				                                   (0 :: 32 word) (length tgt)
+				                                   ?data_end ?inst_end ?addr_end
+				                                   [] dst
+				                                   dc_i ic_i ac_i tp_i np_i which_i st
+				                             | Exn e \<Rightarrow> False)"
+				                         and R = "measure
+				                           (\<lambda>((ac_i, dc_i, ic_i, np_i, tp_i, which_i), _).
+				                             unat ((2 :: 32 word) - which_i))"])
+				                      defer
+				                      subgoal premises exit_prems for inner_tuple st
+				                      proof -
+				                        obtain ac_i dc_i ic_i np_i tp_i which_i where
+				                          tuple_eq:
+				                            "inner_tuple = (ac_i, dc_i, ic_i, np_i, tp_i, which_i)"
+				                          by (cases inner_tuple) auto
+				                        have inner_inv:
+				                          "decode_inner_inv_core ta patch (unat patch_len)
+				                            src (unat src_len) out (0 :: 32 word)
+				                            (0 :: 32 word) (length tgt)
+				                            ?data_end ?inst_end ?addr_end
+				                            [] dst
+				                            dc_i ic_i ac_i tp_i np_i which_i st"
+				                          and ic_progress: "ic < ic_i"
+				                          using exit_prems tuple_eq
+				                          by (auto split: exception_or_result_splits)
+				                        have which_eq: "which_i = 2"
+				                        proof -
+				                          have "which_i \<le> (2 :: 32 word)"
+				                            using inner_inv unfolding decode_inner_inv_core_def by simp
+				                          moreover have "\<not> which_i < (2 :: 32 word)"
+				                            using exit_prems tuple_eq by simp
+				                          ultimately show ?thesis by simp
+				                        qed
+				                        obtain dst_i c_i where core_i:
+				                          "decode_loop_inv_core ta patch (unat patch_len)
+				                            src (unat src_len) out (0 :: 32 word)
+				                            (0 :: 32 word) (length tgt)
+				                            ?data_end ?inst_end ?addr_end
+				                            [] dc_i ic_i ac_i tp_i np_i dst_i c_i st"
+				                          and prefix_i:
+				                          "decode_one_prefix [] (unat (0 :: 32 word)) (length tgt)
+				                            dst (unat which_i) dst_i"
+				                          using inner_inv unfolding decode_inner_inv_core_def by blast
+				                        have step_i:
+				                          "decode_one [] (unat (0 :: 32 word)) (length tgt) dst = Inl dst_i"
+				                          using prefix_i which_eq by (simp add: decode_one_prefix_2D)
+				                        have dst_i_eq: "dst_i = dst'"
+				                          using step_i decode_one_step by simp
+				                        have core_after:
+				                          "decode_loop_inv_core ta patch (unat patch_len)
+				                            src (unat src_len) out (0 :: 32 word)
+				                            (0 :: 32 word) (length tgt)
+				                            ?data_end ?inst_end ?addr_end
+				                            [] dc_i ic_i ac_i tp_i np_i dst' (ds_cache dst') st"
+				                        proof -
+				                          have c_eq: "c_i = ds_cache dst'"
+				                            using core_i dst_i_eq unfolding decode_loop_inv_core_def by simp
+				                          show ?thesis
+				                            using core_i dst_i_eq c_eq by simp
+				                        qed
+				                        have core_before_ds:
+				                          "decode_loop_inv_core ta patch (unat patch_len)
+				                            src (unat src_len) out (0 :: 32 word)
+				                            (0 :: 32 word) (length tgt)
+				                            ?data_end ?inst_end ?addr_end
+				                            [] dc ic ac tp np dst (ds_cache dst) t"
+				                          using core_before
+				                          unfolding decode_loop_inv_core_def by simp
+				                        have plus_after:
+				                          "decode_loop_inv_plus ta patch (unat patch_len)
+				                            src (unat src_len) out (0 :: 32 word)
+				                            (0 :: 32 word) (length tgt)
+				                            ?data_end ?inst_end ?addr_end
+				                            [] tgt dc_i ic_i ac_i tp_i np_i st"
+				                          by (rule decode_loop_inv_plus_advance
+				                            [OF inv_plus ic_lt_inst core_before_ds decode_one_step core_after])
+				                        show ?thesis
+				                          using tuple_eq plus_after ic_progress by simp
+				                      qed
+				                      subgoal by simp
+				                      subgoal by simp
+				                      subgoal
+				                        apply (simp add: decode_inner_inv_core_def ic_lt_ic1)
+				                        apply (rule exI[
+				                          where x = "dst\<lparr>ds_inst_rem := tl (ds_inst_rem dst)\<rparr>"])
+				                        apply (intro conjI)
+				                         apply (rule exI[where x = c])
+				                         using core_after_opcode apply simp
+				                        using prefix_zero by simp
+				                      apply fail \<comment> \<open>app-header/code-table-built no-adler no-source inner body cases\<close>
 		  thus ?thesis by (simp add: Inl)
 next
   case (Inr e)
