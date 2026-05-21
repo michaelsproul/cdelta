@@ -40528,7 +40528,27 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 				                          apply_ok])
 				                    done
 				                qed
-				              apply fail \<comment> \<open>app-header/code-table-built no-adler no-source loop residual\<close>
+				              apply (clarsimp split: prod.splits)
+				              apply runs_to_vcg
+				               defer
+				               subgoal
+				                 apply (clarsimp split: prod.splits)
+				                 apply runs_to_vcg
+				                 subgoal premises exit_prems for ac b
+				                 proof -
+				                   have b_len: "length tgt = unat b"
+				                     using exit_prems by simp
+				                   have tgt_val_win: "unat (val_C vab) = pw_tgt_len win"
+				                     using q dec4_ta by simp
+				                   have tgt_val_exit: "unat (val_C vab) = length tgt"
+				                     using tgt_val_win tgt_len_eq by simp
+				                   have "b = val_C vab"
+				                     using b_len tgt_val_exit
+				                     by (simp add: word_unat.Rep_inject)
+				                   with exit_prems show ?thesis by simp
+				                 qed
+				                 done
+				               apply fail \<comment> \<open>app-header/code-table-built no-adler no-source loop body residual\<close>
 		  thus ?thesis by (simp add: Inl)
 next
   case (Inr e)
