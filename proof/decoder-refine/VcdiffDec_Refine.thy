@@ -40787,7 +40787,20 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 				                         apply (rule exI[where x = c])
 				                         using core_after_opcode apply simp
 				                        using prefix_zero by simp
-				                      apply fail \<comment> \<open>app-header/code-table-built no-adler no-source inner body cases\<close>
+				                      subgoal premises loop_body_prems for inner_tuple s_inner
+				                      proof -
+				                        obtain x1 x1a x1b x1c x1d x2d where inner_tuple_eq:
+				                          "inner_tuple = (x1, x1a, x1b, x1c, x1d, x2d)"
+				                          by (cases inner_tuple) auto
+				                        show ?thesis
+				                          using loop_body_prems inner_tuple_eq
+				                          apply clarsimp
+				                          apply runs_to_vcg
+				                          apply (simp_all add: word_less_nat_alt word_le_nat_alt
+				                            which_lt2_slot_arith ucast8_32_unat_lt_256
+				                            split: if_splits)
+				                          apply fail
+				                            \<comment> \<open>app-header/code-table-built no-adler no-source inner body split\<close>
 		  thus ?thesis by (simp add: Inl)
 next
   case (Inr e)
