@@ -51608,8 +51608,111 @@ next
     show ?thesis
     proof (cases "parse_window rest")
       case (Inr we)
+      let ?bs = "heap_bytes s patch (unat patch_len)"
+      from header_ok obtain b0 b1 b2 b3 hi body where
+        bs_form: "?bs = b0 # b1 # b2 # b3 # hi # body" and
+        magic: "[b0, b1, b2, b3] = [0xD6, 0xC3, 0xC4, 0x00]" and
+        hdr3: "hi AND 0x03 = 0"
+        unfolding parse_header_def
+        by (auto split: list.splits if_splits)
+      from magic have b0_eq: "b0 = 0xD6" and b1_eq: "b1 = 0xC3"
+        and b2_eq: "b2 = 0xC4" and b3_eq: "b3 = 0x00" by auto
+      have body_from_drop5: "body = drop 5 ?bs"
+        using bs_form by simp
+      define app_bit where "app_bit = (hi AND 0x04 \<noteq> 0)"
+      have parse_header_noapp:
+        "\<not> app_bit \<Longrightarrow> rest = body"
+        using header_ok bs_form hdr3 unfolding parse_header_def app_bit_def
+        by (auto split: list.splits if_splits option.splits)
+      have ucast_and_4_equiv:
+        "(UCAST(8 \<rightarrow> 32) hi AND 4 \<noteq> 0) = (hi AND 4 \<noteq> 0)"
+        by word_bitwise
       show ?thesis
-        sorry
+      proof (cases app_bit)
+        case True
+        show ?thesis
+          sorry
+      next
+        case no_app: False
+        have rest_body: "rest = body"
+          using parse_header_noapp no_app by simp
+        show ?thesis
+        proof (cases rest)
+          case Nil
+          show ?thesis
+            sorry
+        next
+          case (Cons win_ind rest1)
+          show ?thesis
+          proof (cases "win_ind AND (0x02 :: 8 word) \<noteq> 0")
+            case target_bad: True
+            have len_gt5_nat: "5 < unat patch_len"
+            proof -
+              have body_nonempty: "body \<noteq> []"
+                using rest_body Cons by auto
+              have "6 \<le> length ?bs"
+                using bs_form body_nonempty by (cases body) auto
+              thus ?thesis by simp
+            qed
+            have len_gt5_word: "(5 :: 32 word) < patch_len"
+              using len_gt5_nat by (simp add: word_less_nat_alt)
+            have nth_eq:
+              "\<And>i. i < 6 \<Longrightarrow>
+                heap_w8 s (patch +\<^sub>p int i) = ?bs ! i"
+              using len_gt5_nat by (simp add: heap_bytes_nth)
+            have magic0_uint: "uint (heap_w8 s patch) = 214"
+              using nth_eq[of 0] bs_form b0_eq by simp
+            have magic1_uint: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+              using nth_eq[of 1] bs_form b1_eq by simp
+            have magic2_uint: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
+              using nth_eq[of 2] bs_form b2_eq by simp
+            have magic3_uint: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
+              using nth_eq[of 3] bs_form b3_eq by simp
+            have hi_v: "heap_w8 s (patch +\<^sub>p 4) = hi"
+              using nth_eq[of 4] bs_form by simp
+            have hdr_ok32:
+              "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND (3 :: 32 word) = 0"
+            proof -
+              have "(UCAST(8 \<rightarrow> 32) hi AND (3 :: 32 word) = 0) =
+                    (hi AND (0x03 :: 8 word) = 0)"
+                by word_bitwise
+              thus ?thesis using hdr3 hi_v by simp
+            qed
+            have app_clear32:
+              "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND (4 :: 32 word) = 0"
+            proof -
+              have hi_app_clear: "hi AND (0x04 :: 8 word) = 0"
+                using no_app unfolding app_bit_def by simp
+              have "(UCAST(8 \<rightarrow> 32) hi AND (4 :: 32 word) = 0) =
+                    (hi AND (0x04 :: 8 word) = 0)"
+                by word_bitwise
+              thus ?thesis using hi_app_clear hi_v by simp
+            qed
+            have win_v: "heap_w8 s (patch +\<^sub>p 5) = win_ind"
+            proof -
+              have body_eq: "body = win_ind # rest1"
+                using rest_body Cons by auto
+              show ?thesis using nth_eq[of 5] bs_form body_eq by simp
+            qed
+            have win_bad32:
+              "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND (2 :: 32 word) \<noteq> 0"
+            proof -
+              have "(UCAST(8 \<rightarrow> 32) win_ind AND (2 :: 32 word) \<noteq> 0) =
+                    (win_ind AND (0x02 :: 8 word) \<noteq> 0)"
+                by word_bitwise
+              thus ?thesis using target_bad win_v by simp
+            qed
+            show ?thesis
+              by (rule vcdiff_decode'_noapp_win_target_bit_nonok
+                [OF out_len_ok patch_ok len_gt5_word magic0_uint magic1_uint
+                    magic2_uint magic3_uint hdr_ok32 app_clear32 win_bad32])
+          next
+            case False
+            show ?thesis
+              sorry
+          qed
+        qed
+      qed
     next
       case (Inl wintail)
       obtain win tail where wintail_eq: "wintail = (win, tail)"
