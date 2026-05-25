@@ -66,13 +66,24 @@ Validated facts:
 ## Proof Work
 
 - App-header/code-table-built no-source payload success loop is closed. The
-  next residual is the no-source/no-Adler tail admit; a quick `simp` probe shows
-  it still contains two full `parse_window_prefix'` obligations, one for each
-  code-table-built path, before the final cursor/write checks.
-- Remove the no-source/no-Adler tail `sorry` by first splitting the two exposed
-  `parse_window_prefix'` obligations, then replaying the exit-weakening/post-loop
-  cursor proof against the record-shaped cursor state (`addr_pos_C v`,
-  `data_pos_C v`, `inst_pos_C v`).
+  next residual is the no-app `parse_window_prefix' ... 5` success path; the
+  stale build-code-table branch closes from `code_tbl_ready`, leaving the
+  already-built prefix obligation before the final cursor/write checks.
+- A reusable no-app/no-source heap bridge,
+  `noapp_no_source_prefix_decodes_heap`, now turns
+  `parse_window (drop 5 ...)` plus the concrete no-source bit into the dlen,
+  target-length, DI, data, instruction, and address varint chain.  Use it to
+  stage the no-source/no-Adler payload facts instead of copying the app-header
+  prefix proof.
+- The no-app bridge now has two cursor-alignment helpers:
+  `noapp_no_source_tgt_decode_some_heap` for the target-length read, and
+  `noapp_no_source_payload_stage_heap` for the dlen/tgt cursor drops plus the
+  staged payload chain.  These are placed after `varint_decode_drop_rest` so
+  they can reuse the common varint suffix/drop alignment fact.
+- Remove the no-app/no-source/no-Adler `sorry` by splitting the exposed
+  `parse_window_prefix'` obligation, applying the new prefix bridge, then
+  replaying the exit-weakening/post-loop cursor proof against the record-shaped
+  cursor state (`addr_pos_C v`, `data_pos_C v`, `inst_pos_C v`).
 - Continue reusing `decode_inner_body_preserves_no_source` for no-source loop
   bodies; avoid reintroducing expanded inner-body proofs.
 - Finish the Inr case by contrapositive: if C returns `Result 0`, the tightened
