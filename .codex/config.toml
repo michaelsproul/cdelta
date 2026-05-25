@@ -4,4 +4,4 @@ personality = "pragmatic"
 sandbox_mode = "danger-full-access"
 
 [features]
-fast_mode = false
+fast_mode = true
