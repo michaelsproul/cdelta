@@ -3490,7 +3490,7 @@ lemma vcdiff_decode'_appheader_parse_header_inr_nonok:
       and ph_inr:
         "parse_header (heap_bytes s patch (unat patch_len)) = Inr e"
   shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
-           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+           \<lbrace> \<lambda>r t. \<exists>e. r = Result e \<and> e \<noteq> 0 \<rbrace>"
 proof -
   let ?bs = "heap_bytes s patch (unat patch_len)"
   have len5_nat: "5 \<le> unat patch_len"
@@ -3722,11 +3722,12 @@ lemma vcdiff_decode'_parse_header_inr_nonok:
       and ph_inr:
         "parse_header (heap_bytes s patch (unat patch_len)) = Inr e"
   shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
-           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+           \<lbrace> \<lambda>r t. \<exists>e. r = Result e \<and> e \<noteq> 0 \<rbrace>"
 proof (cases "patch_len < (5 :: 32 word)")
   case True
   show ?thesis
-    by (rule vcdiff_decode'_short_nonok[OF out_len_ok True])
+    apply (rule runs_to_weaken[OF vcdiff_decode'_short_patch[OF out_len_ok True]])
+    by auto
 next
   case False
   let ?bs = "heap_bytes s patch (unat patch_len)"
@@ -3758,39 +3759,49 @@ next
   proof (cases "uint (heap_w8 s patch) = 214")
     case False
     show ?thesis
-      by (rule vcdiff_decode'_magic0_nonok[OF out_len_ok patch1 len_ok False])
+      apply (rule runs_to_weaken[
+        OF vcdiff_decode'_magic0_fail[OF out_len_ok patch1 len_ok False]])
+      by auto
   next
     case magic0_ok: True
     show ?thesis
     proof (cases "uint (heap_w8 s (patch +\<^sub>p 1)) = 195")
       case False
       show ?thesis
-        by (rule vcdiff_decode'_magic1_nonok
-          [OF out_len_ok patch2 len_ok magic0_ok False])
+        apply (rule runs_to_weaken[
+          OF vcdiff_decode'_magic1_fail
+            [OF out_len_ok patch2 len_ok magic0_ok False]])
+        by auto
     next
       case magic1_ok: True
       show ?thesis
       proof (cases "uint (heap_w8 s (patch +\<^sub>p 2)) = 196")
         case False
         show ?thesis
-          by (rule vcdiff_decode'_magic2_nonok
-            [OF out_len_ok patch3 len_ok magic0_ok magic1_ok False])
+          apply (rule runs_to_weaken[
+            OF vcdiff_decode'_magic2_fail
+              [OF out_len_ok patch3 len_ok magic0_ok magic1_ok False]])
+          by auto
       next
         case magic2_ok: True
         show ?thesis
         proof (cases "uint (heap_w8 s (patch +\<^sub>p 3)) = 0")
           case False
           show ?thesis
-            by (rule vcdiff_decode'_magic3_nonok
-              [OF out_len_ok patch4 len_ok magic0_ok magic1_ok magic2_ok False])
+            apply (rule runs_to_weaken[
+              OF vcdiff_decode'_magic3_fail
+                [OF out_len_ok patch4 len_ok magic0_ok magic1_ok magic2_ok False]])
+            by auto
         next
           case magic3_ok: True
           show ?thesis
           proof (cases "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND (3 :: 32 word) \<noteq> 0")
             case True
             show ?thesis
-              by (rule vcdiff_decode'_hdr_nonok
-                [OF out_len_ok patch5 len_ok magic0_ok magic1_ok magic2_ok magic3_ok True])
+              apply (rule runs_to_weaken[
+                OF vcdiff_decode'_hdr_fail
+                  [OF out_len_ok patch5 len_ok magic0_ok magic1_ok magic2_ok magic3_ok True]])
+              by auto
           next
             case hdr_not_bad: False
             have hdr_ok:
