@@ -3477,6 +3477,173 @@ proof -
     done
 qed
 
+lemma vcdiff_decode'_appheader_parse_header_inr_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch (unat patch_len)"
+      and len_ok: "(5 :: 32 word) \<le> patch_len"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and magic1_ok: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+      and magic2_ok: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
+      and magic3_ok: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
+      and hdr_ok: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 3 = 0"
+      and app_set: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 4 \<noteq> 0"
+      and ph_inr:
+        "parse_header (heap_bytes s patch (unat patch_len)) = Inr e"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+proof -
+  let ?bs = "heap_bytes s patch (unat patch_len)"
+  have len5_nat: "5 \<le> unat patch_len"
+    using len_ok by (simp add: word_le_nat_alt)
+  have patch0_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 0)"
+    using buf_validD[OF patch_ok, of 0] len5_nat by simp
+  have patch1_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 1)"
+    using buf_validD[OF patch_ok, of 1] len5_nat by simp
+  have patch2_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 2)"
+    using buf_validD[OF patch_ok, of 2] len5_nat by simp
+  have patch3_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 3)"
+    using buf_validD[OF patch_ok, of 3] len5_nat by simp
+  have patch4_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 4)"
+    using buf_validD[OF patch_ok, of 4] len5_nat by simp
+  have patch5_valid:
+    "buf_valid (heap_w32_update (\<lambda>h. h(out_len := 0)) s) patch
+      (unat patch_len)"
+    using patch_ok by simp
+  have nth_eq:
+    "\<And>i. i < 5 \<Longrightarrow>
+      heap_w8 s (patch +\<^sub>p int i) = ?bs ! i"
+    using len5_nat by (simp add: heap_bytes_nth)
+  have len_bs5: "5 \<le> length ?bs"
+    using len5_nat by simp
+  obtain b0 r0 where bs0: "?bs = b0 # r0" and len_r0: "4 \<le> length r0"
+    using len_bs5 by (cases ?bs) auto
+  obtain b1 r1 where r0: "r0 = b1 # r1" and len_r1: "3 \<le> length r1"
+    using len_r0 by (cases r0) auto
+  obtain b2 r2 where r1: "r1 = b2 # r2" and len_r2: "2 \<le> length r2"
+    using len_r1 by (cases r1) auto
+  obtain b3 r3 where r2: "r2 = b3 # r3" and len_r3: "1 \<le> length r3"
+    using len_r2 by (cases r2) auto
+  obtain hi body where r3: "r3 = hi # body"
+    using len_r3 by (cases r3) auto
+  have bs_eq: "?bs = b0 # b1 # b2 # b3 # hi # body"
+    using bs0 r0 r1 r2 r3 by simp
+  have body_eq: "body = drop 5 ?bs"
+    using bs_eq by simp
+  have b0_eq: "b0 = 0xD6"
+  proof -
+    have "uint b0 = uint (0xD6 :: 8 word)"
+      using magic0_ok nth_eq[of 0] bs_eq by simp
+    thus ?thesis by (rule word_uint_eqI)
+  qed
+  have b1_eq: "b1 = 0xC3"
+  proof -
+    have "uint b1 = uint (0xC3 :: 8 word)"
+      using magic1_ok nth_eq[of 1] bs_eq by simp
+    thus ?thesis by (rule word_uint_eqI)
+  qed
+  have b2_eq: "b2 = 0xC4"
+  proof -
+    have "uint b2 = uint (0xC4 :: 8 word)"
+      using magic2_ok nth_eq[of 2] bs_eq by simp
+    thus ?thesis by (rule word_uint_eqI)
+  qed
+  have b3_eq: "b3 = 0"
+  proof -
+    have "uint b3 = uint (0 :: 8 word)"
+      using magic3_ok nth_eq[of 3] bs_eq by simp
+    thus ?thesis by (rule word_uint_eqI)
+  qed
+  have hdr_clear: "hi AND 0x03 = 0"
+  proof -
+    have "(UCAST(8 \<rightarrow> 32) hi AND (3 :: 32 word) = 0) =
+          (hi AND (0x03 :: 8 word) = 0)"
+      by word_bitwise
+    thus ?thesis using hdr_ok nth_eq[of 4] bs_eq by simp
+  qed
+  have app_nonzero: "hi AND 0x04 \<noteq> 0"
+  proof -
+    have "(UCAST(8 \<rightarrow> 32) hi AND (4 :: 32 word) \<noteq> 0) =
+          (hi AND (0x04 :: 8 word) \<noteq> 0)"
+      by word_bitwise
+    thus ?thesis using app_set nth_eq[of 4] bs_eq by simp
+  qed
+  have app_bad:
+    "case varint_decode (drop 5 ?bs) of
+       None \<Rightarrow> True
+     | Some (app_len, rest) \<Rightarrow> length rest < app_len"
+    using ph_inr b0_eq b1_eq b2_eq b3_eq hdr_clear app_nonzero body_eq
+    unfolding parse_header_def bs_eq
+    by (auto split: option.splits if_splits)
+  show ?thesis
+    unfolding vcdiff_decode'_def
+    supply read_varint'_spec [runs_to_vcg]
+    apply runs_to_vcg
+    using out_len_ok len_ok magic0_ok magic1_ok magic2_ok magic3_ok
+      hdr_ok app_set patch0_ok patch1_ok patch2_ok patch3_ok patch4_ok
+    apply (auto simp: word_less_nat_alt word_le_nat_alt)
+    subgoal
+      using patch5_valid by simp
+	    subgoal premises prems for app_p
+	    proof -
+	      obtain rest where dec:
+	        "varint_decode (drop 5 ?bs) = Some (unat (val_C app_p), rest)"
+	        using prems by (cases "varint_decode (drop 5 ?bs)") auto
+	      have app_len_gt: "length rest < unat (val_C app_p)"
+	        using app_bad dec by simp
+	      have pos_eq: "unat (pr_t_C.pos_C app_p) = unat patch_len - length rest"
+	        using prems dec by simp
+	      have rest_le: "length rest \<le> unat patch_len"
+	        using varint_decode_length[OF dec] by simp
+	      have diff_unat:
+	        "unat (patch_len - pr_t_C.pos_C app_p) = length rest"
+	      proof -
+	        have "unat (patch_len - pr_t_C.pos_C app_p) =
+	              unat patch_len - unat (pr_t_C.pos_C app_p)"
+	          using prems by (simp add: unat_sub word_le_nat_alt)
+	        also have "\<dots> = length rest"
+	          using pos_eq rest_le by arith
+	        finally show ?thesis .
+	      qed
+	      have "patch_len - pr_t_C.pos_C app_p < val_C app_p"
+	        using app_len_gt diff_unat by (simp add: word_less_nat_alt)
+	      hence "unat (patch_len - pr_t_C.pos_C app_p) < unat (val_C app_p)"
+	        by (simp add: word_less_nat_alt)
+	      hence False using prems by simp
+	      thus ?thesis by simp
+	    qed
+    subgoal premises prems for app_p
+    proof -
+      obtain app_len rest where dec:
+        "varint_decode (drop 5 ?bs) = Some (app_len, rest)"
+        using prems by (cases "varint_decode (drop 5 ?bs)") auto
+      have app_len_gt: "length rest < app_len"
+        using app_bad dec by simp
+      have pos_eq: "unat (pr_t_C.pos_C app_p) = unat patch_len - length rest"
+        using prems dec by simp
+      have val_eq: "unat (val_C app_p) = app_len"
+        using prems dec by simp
+      have rest_le: "length rest \<le> unat patch_len"
+        using varint_decode_length[OF dec] by simp
+      have diff_unat:
+        "unat (patch_len - pr_t_C.pos_C app_p) = length rest"
+      proof -
+        have "unat (patch_len - pr_t_C.pos_C app_p) =
+              unat patch_len - unat (pr_t_C.pos_C app_p)"
+          using prems by (simp add: unat_sub word_le_nat_alt)
+        also have "\<dots> = length rest"
+          using pos_eq rest_le by arith
+        finally show ?thesis .
+      qed
+	      have "patch_len - pr_t_C.pos_C app_p < val_C app_p"
+	        using app_len_gt diff_unat val_eq by (simp add: word_less_nat_alt)
+	      hence "unat (patch_len - pr_t_C.pos_C app_p) < unat (val_C app_p)"
+	        by (simp add: word_less_nat_alt)
+	      hence False using prems by simp
+	      thus ?thesis by simp
+	    qed
+    done
+qed
+
 lemma vcdiff_decode'_short_nonok:
   assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
       and short_patch: "patch_len < 5"
