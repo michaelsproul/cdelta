@@ -42577,8 +42577,39 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 					      `noapp_no_source_payload_stage_heap`; the remaining work is
 					      to split the prefix VCG and replay the already factored
 					      outer-loop/tail proof against the fixed position 5 state.\<close>
-					  sorry
+				  subgoal premises prems for t ta
+				  proof -
+				    let ?bs_s = "heap_bytes s patch (unat patch_len)"
+				    let ?bs_ta = "heap_bytes ta patch (unat patch_len)"
+				    have no_app_bit: "\<not> app_bit"
+				      using prems hi_v ucast_and_4_equiv
+				      unfolding app_bit_def by simp
+				    have rest_drop5: "rest = drop 5 ?bs_s"
+				      using parse_header_noapp[OF no_app_bit] body_from_drop5 by simp
+				    have parsed_drop5_s: "parse_window (drop 5 ?bs_s) = Inl (win, tail)"
+				      using pw rest_drop5 by simp
+				    have rest_nonempty: "drop 5 ?bs_s \<noteq> []"
+				      using parsed_drop5_s unfolding parse_window_def pop_byte_def
+				      by (cases "drop 5 ?bs_s") (auto split: if_splits option.splits)
+				    have len_gt5: "5 < unat patch_len"
+				      using rest_nonempty by (simp add: drop_eq_Nil)
+				    have heap_eq_ta_s: "?bs_ta = ?bs_s"
+				      using prems by simp
+				    have parsed_drop5_ta: "parse_window (drop 5 ?bs_ta) = Inl (win, tail)"
+				      using parsed_drop5_s heap_eq_ta_s by simp
+				    have patch_valid_ta: "buf_valid ta patch (unat patch_len)"
+				      using patch_ok prems by (simp add: buf_valid_def)
+				    show ?thesis
+				      supply gets_the_read_byte'_spec [runs_to_vcg]
+				      unfolding parse_window_prefix'_def
+				      apply runs_to_vcg
+				      using code_tbl_ready prems patch_valid_ta parsed_drop5_ta len_gt5
+				      by simp
 				  qed
+				  subgoal
+				    sorry
+				  done
+					  qed
 			  thus ?thesis by (simp add: Inl)
 next
   case (Inr e)

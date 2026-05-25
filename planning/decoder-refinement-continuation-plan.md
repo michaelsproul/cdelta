@@ -69,6 +69,11 @@ Validated facts:
   next residual is the no-app `parse_window_prefix' ... 5` success path; the
   stale build-code-table branch closes from `code_tbl_ready`, leaving the
   already-built prefix obligation before the final cursor/write checks.
+- Update 2026-05-25: the no-app prefix obligation is now split far enough that
+  the stale sibling closes from the no-app header/drop-5 facts.  Expanding the
+  remaining sibling exposes the source-window path first, so the next useful
+  refactor is a fixed-position no-app/source prefix bridge analogous to the
+  app-header source staging facts, not another copy of the outer-loop body.
 - A reusable no-app/no-source heap bridge,
   `noapp_no_source_prefix_decodes_heap`, now turns
   `parse_window (drop 5 ...)` plus the concrete no-source bit into the dlen,
