@@ -51503,6 +51503,7 @@ next
       decoder returns a nonzero error code.  Strategy: run the full
       supply-runs_to_vcg and let the residual subgoals identify the
       specific failure path in C corresponding to each spec failure.\<close>
+  note decode_reject = Inr
   let ?Post = "\<lambda>r t. \<exists>e. r = Result (e :: int) \<and> e \<noteq> 0"
   have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
   proof (cases "parse_header (heap_bytes s patch (unat patch_len))")
@@ -51511,8 +51512,23 @@ next
       by (rule vcdiff_decode'_parse_header_inr_nonok[OF out_len_ok patch_ok Inr])
   next
     case (Inl rest)
+    note header_ok = Inl
     show ?thesis
-      sorry
+    proof (cases "parse_window rest")
+      case (Inr we)
+      show ?thesis
+        sorry
+    next
+      case (Inl wintail)
+      obtain win tail where wintail_eq: "wintail = (win, tail)"
+        by (cases wintail) auto
+      have apply_inr:
+        "apply_window win (heap_bytes s src (unat src_len)) = Inr e"
+        using decode_reject header_ok Inl wintail_eq
+        unfolding decode_spec_def by simp
+      show ?thesis
+        sorry
+    qed
   qed
   thus ?thesis by (simp add: Inr)
 qed
