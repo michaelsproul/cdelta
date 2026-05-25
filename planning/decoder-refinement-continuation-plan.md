@@ -3,11 +3,11 @@
 ## Summary
 
 Update 2026-05-25: `CdeltaRefine` builds again under the current
-`quick_and_dirty` setting after replacing the final no-source/no-Adler
-inner-body `apply fail` with the completed copied body-preservation proof
-shape.  The copied proof discharges the concrete opcode/which-loop body
-for that branch; the remaining residual there is now localized to the
-success-tail weakening after the outer loop.
+`quick_and_dirty` setting after factoring the no-source/no-Adler concrete
+inner-body preservation proof into `decode_inner_body_preserves_no_source`.
+Both no-source/no-Adler outer-loop call sites now reuse that helper instead
+of carrying separate 4.5k-line body proofs.  The remaining residual there is
+still localized to the success-tail weakening after the outer loop.
 
 The rescue branch is structurally viable, but the current theorem is not
 integrity-safe because the pure decoder accepts some patches the C decoder
@@ -23,7 +23,7 @@ Validated facts:
 - Remaining active proof debt in `proof/decoder-refine/VcdiffDec_Refine.thy`
   is now three localized `sorry`s:
   - app-header/code-table-built no-source payload residual,
-  - no-source/no-Adler success-tail weakening after the copied body proof,
+  - no-source/no-Adler success-tail weakening after the factored body proof,
   - the Inr rejection case.
   Older notes about `build_code_table'_preserves_typing` and
   `vcdiff_decode'_prefix_correct` being active sorries are stale.
@@ -62,12 +62,11 @@ Validated facts:
   local branch.  The nearby completed no-source/no-Adler proof now gives the
   body-preservation shape to replay, but the pre-loop payload/position bridge
   still needs to be connected.
-- Remove the new success-tail `sorry` after the copied no-source/no-Adler body
+- Remove the new success-tail `sorry` after the factored no-source/no-Adler body
   proof by replaying the exit-weakening/post-loop cursor proof against the
   record-shaped cursor state (`addr_pos_C v`, `data_pos_C v`, `inst_pos_C v`).
-- Factor the concrete outer-loop body preservation once.  The latest copied
-  proof confirms the branch shape scales, but the duplication is now very
-  expensive for both maintenance and build time.
+- Keep the factored concrete outer-loop body helper narrow: it currently covers
+  the no-source/no-Adler body shape used by the two duplicated call sites.
 - Finish the Inr case by contrapositive: if C returns `Result 0`, the tightened
   `decode_spec` returns `Inl` with matching output.
 
