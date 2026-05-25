@@ -3329,6 +3329,25 @@ proof -
     done
 qed
 
+lemma parse_window_prefix'_win_ind_at_end_nonok:
+  assumes patch_ok: "buf_valid s patch (unat patch_len)"
+      and len_eq: "patch_len = (5 :: 32 word)"
+  shows "parse_window_prefix' patch patch_len src src_len out_cap 5 \<bullet> s
+     \<lbrace> \<lambda>r t. \<exists>w. r = Result w \<and> t = s \<and> win_t_C.err_C w \<noteq> 0 \<rbrace>"
+proof -
+  have pos_ok: "(5 :: 32 word) \<le> patch_len"
+    using len_eq by simp
+  show ?thesis
+    unfolding parse_window_prefix'_def
+    apply runs_to_vcg
+    apply (rule read_byte'_gets_the_discharge[OF patch_ok pos_ok])
+     subgoal
+       using len_eq by simp
+    subgoal
+      by runs_to_vcg
+    done
+qed
+
 
 lemma vcdiff_decode'_short_patch:
   assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
@@ -12435,6 +12454,57 @@ proof -
         by simp
       show ?thesis using prems byte_eq by simp
     qed
+    done
+qed
+
+lemma vcdiff_decode'_noapp_win_ind_at_end_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch (unat patch_len)"
+      and len_eq: "patch_len = (5 :: 32 word)"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and magic1_ok: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+      and magic2_ok: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
+      and magic3_ok: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
+      and hdr_ok: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 3 = 0"
+      and app_clear: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 4 = 0"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. \<exists>e. r = Result e \<and> e \<noteq> 0 \<rbrace>"
+proof -
+  have len5_nat: "5 \<le> unat patch_len"
+    using len_eq by simp
+  have patch0_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 0)"
+    using buf_validD[OF patch_ok, of 0] len5_nat by simp
+  have patch1_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 1)"
+    using buf_validD[OF patch_ok, of 1] len5_nat by simp
+  have patch2_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 2)"
+    using buf_validD[OF patch_ok, of 2] len5_nat by simp
+  have patch3_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 3)"
+    using buf_validD[OF patch_ok, of 3] len5_nat by simp
+  have patch4_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 4)"
+    using buf_validD[OF patch_ok, of 4] len5_nat by simp
+  show ?thesis
+    unfolding vcdiff_decode'_def
+    supply gets_the_read_byte'_spec [runs_to_vcg]
+    supply parse_window_prefix'_win_ind_at_end_nonok [runs_to_vcg]
+    supply build_code_table'_setup
+      [where patch = patch and patch_n = "unat patch_len"
+         and src = src and src_n = "unat src_len" and out_len = out_len,
+       runs_to_vcg]
+    supply near_init_setup_zero_word
+      [where patch = patch and patch_n = "unat patch_len"
+         and src = src and src_n = "unat src_len" and out_len = out_len,
+       runs_to_vcg]
+    supply same_init_setup_zero_word
+      [where patch = patch and patch_n = "unat patch_len"
+         and src = src and src_n = "unat src_len" and out_len = out_len,
+       runs_to_vcg]
+    apply runs_to_vcg
+    using out_len_ok len_eq magic0_ok magic1_ok magic2_ok magic3_ok
+      hdr_ok app_clear patch0_ok patch1_ok patch2_ok patch3_ok patch4_ok
+      patch_ok
+    apply (simp_all add: word_less_nat_alt word_le_nat_alt)
+    subgoal
+      by (simp add: buf_valid_def)
     done
 qed
 
