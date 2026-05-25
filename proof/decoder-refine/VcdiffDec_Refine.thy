@@ -3716,6 +3716,181 @@ lemma vcdiff_decode'_hdr_nonok:
     OF vcdiff_decode'_hdr_fail[OF out_len_ok patch_ok len_ok magic0_ok magic1_ok magic2_ok magic3_ok bad_hdr]])
   by simp
 
+lemma vcdiff_decode'_parse_header_inr_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch (unat patch_len)"
+      and ph_inr:
+        "parse_header (heap_bytes s patch (unat patch_len)) = Inr e"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. r \<noteq> Result 0 \<and> heap_w32 t out_len = (0 :: 32 word) \<rbrace>"
+proof (cases "patch_len < (5 :: 32 word)")
+  case True
+  show ?thesis
+    by (rule vcdiff_decode'_short_nonok[OF out_len_ok True])
+next
+  case False
+  let ?bs = "heap_bytes s patch (unat patch_len)"
+  have len_ok: "(5 :: 32 word) \<le> patch_len"
+    using False by simp
+  have len5_nat: "5 \<le> unat patch_len"
+    using len_ok by (simp add: word_le_nat_alt)
+  have patch_valid_upto: "\<And>n::nat. n \<le> 5 \<Longrightarrow> buf_valid s patch n"
+    unfolding buf_valid_def
+  proof (intro allI impI)
+    fix n i :: nat
+    assume n_le: "n \<le> 5" and i_lt: "i < n"
+    have "i < unat patch_len"
+      using i_lt n_le len5_nat by linarith
+    thus "ptr_valid (heap_typing s) (patch +\<^sub>p int i)"
+      using patch_ok unfolding buf_valid_def by blast
+  qed
+  have patch1: "buf_valid s patch 1"
+    by (rule patch_valid_upto) simp
+  have patch2: "buf_valid s patch 2"
+    by (rule patch_valid_upto) simp
+  have patch3: "buf_valid s patch 3"
+    by (rule patch_valid_upto) simp
+  have patch4: "buf_valid s patch 4"
+    by (rule patch_valid_upto) simp
+  have patch5: "buf_valid s patch 5"
+    by (rule patch_valid_upto) simp
+  show ?thesis
+  proof (cases "uint (heap_w8 s patch) = 214")
+    case False
+    show ?thesis
+      by (rule vcdiff_decode'_magic0_nonok[OF out_len_ok patch1 len_ok False])
+  next
+    case magic0_ok: True
+    show ?thesis
+    proof (cases "uint (heap_w8 s (patch +\<^sub>p 1)) = 195")
+      case False
+      show ?thesis
+        by (rule vcdiff_decode'_magic1_nonok
+          [OF out_len_ok patch2 len_ok magic0_ok False])
+    next
+      case magic1_ok: True
+      show ?thesis
+      proof (cases "uint (heap_w8 s (patch +\<^sub>p 2)) = 196")
+        case False
+        show ?thesis
+          by (rule vcdiff_decode'_magic2_nonok
+            [OF out_len_ok patch3 len_ok magic0_ok magic1_ok False])
+      next
+        case magic2_ok: True
+        show ?thesis
+        proof (cases "uint (heap_w8 s (patch +\<^sub>p 3)) = 0")
+          case False
+          show ?thesis
+            by (rule vcdiff_decode'_magic3_nonok
+              [OF out_len_ok patch4 len_ok magic0_ok magic1_ok magic2_ok False])
+        next
+          case magic3_ok: True
+          show ?thesis
+          proof (cases "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND (3 :: 32 word) \<noteq> 0")
+            case True
+            show ?thesis
+              by (rule vcdiff_decode'_hdr_nonok
+                [OF out_len_ok patch5 len_ok magic0_ok magic1_ok magic2_ok magic3_ok True])
+          next
+            case hdr_not_bad: False
+            have hdr_ok:
+              "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND (3 :: 32 word) = 0"
+              using hdr_not_bad by simp
+            show ?thesis
+            proof (cases "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND (4 :: 32 word) \<noteq> 0")
+              case app_set: True
+              show ?thesis
+                by (rule vcdiff_decode'_appheader_parse_header_inr_nonok
+                  [OF out_len_ok patch_ok len_ok magic0_ok magic1_ok magic2_ok
+                      magic3_ok hdr_ok app_set ph_inr])
+            next
+              case no_app: False
+              have nth_eq:
+                "\<And>i. i < 5 \<Longrightarrow>
+                  heap_w8 s (patch +\<^sub>p int i) = ?bs ! i"
+                using len5_nat by (simp add: heap_bytes_nth)
+              have magic0_bs: "?bs ! 0 = 0xD6"
+              proof -
+                have "uint (?bs ! 0) = uint (0xD6 :: 8 word)"
+                  using magic0_ok nth_eq[of 0] by simp
+                thus ?thesis by (rule word_uint_eqI)
+              qed
+              have magic1_bs: "?bs ! 1 = 0xC3"
+              proof -
+                have "uint (?bs ! 1) = uint (0xC3 :: 8 word)"
+                  using magic1_ok nth_eq[of 1] by simp
+                thus ?thesis by (rule word_uint_eqI)
+              qed
+              have magic2_bs: "?bs ! 2 = 0xC4"
+              proof -
+                have "uint (?bs ! 2) = uint (0xC4 :: 8 word)"
+                  using magic2_ok nth_eq[of 2] by simp
+                thus ?thesis by (rule word_uint_eqI)
+              qed
+              have magic3_bs: "?bs ! 3 = 0"
+              proof -
+                have "uint (?bs ! 3) = uint (0 :: 8 word)"
+                  using magic3_ok nth_eq[of 3] by simp
+                thus ?thesis by (rule word_uint_eqI)
+              qed
+              have hdr_bs: "?bs ! 4 AND (0x03 :: 8 word) = 0"
+              proof -
+                have "(UCAST(8 \<rightarrow> 32) (?bs ! 4) AND (3 :: 32 word) = 0) =
+                      (?bs ! 4 AND (0x03 :: 8 word) = 0)"
+                  by word_bitwise
+                thus ?thesis using hdr_ok nth_eq[of 4] by simp
+              qed
+              have no_app_bs: "?bs ! 4 AND (0x04 :: 8 word) = 0"
+              proof -
+                have "(UCAST(8 \<rightarrow> 32) (?bs ! 4) AND (4 :: 32 word) = 0) =
+                      (?bs ! 4 AND (0x04 :: 8 word) = 0)"
+                  by word_bitwise
+                thus ?thesis using no_app nth_eq[of 4] by simp
+              qed
+              have "parse_header ?bs = Inl (drop 5 ?bs)"
+              proof -
+                have len_bs5: "5 \<le> length ?bs"
+                  using len5_nat by simp
+                obtain b0 r0 where bs0: "?bs = b0 # r0" and len_r0: "4 \<le> length r0"
+                  using len_bs5 by (cases ?bs) auto
+                obtain b1 r1 where r0: "r0 = b1 # r1" and len_r1: "3 \<le> length r1"
+                  using len_r0 by (cases r0) auto
+                obtain b2 r2 where r1: "r1 = b2 # r2" and len_r2: "2 \<le> length r2"
+                  using len_r1 by (cases r1) auto
+                obtain b3 r3 where r2: "r2 = b3 # r3" and len_r3: "1 \<le> length r3"
+                  using len_r2 by (cases r2) auto
+                obtain hi body where r3: "r3 = hi # body"
+                  using len_r3 by (cases r3) auto
+                have bs_eq: "?bs = b0 # b1 # b2 # b3 # hi # body"
+                  using bs0 r0 r1 r2 r3 by simp
+                have body_eq: "body = drop 5 ?bs"
+                  using bs_eq by simp
+                have b0_eq: "b0 = 0xD6"
+                  using magic0_bs bs_eq by simp
+                have b1_eq: "b1 = 0xC3"
+                  using magic1_bs bs_eq by simp
+                have b2_eq: "b2 = 0xC4"
+                  using magic2_bs bs_eq by simp
+                have b3_eq: "b3 = 0"
+                  using magic3_bs bs_eq by simp
+                have hi_hdr: "hi AND (0x03 :: 8 word) = 0"
+                  using hdr_bs bs_eq by simp
+                have hi_app: "hi AND (0x04 :: 8 word) = 0"
+                  using no_app_bs bs_eq by simp
+                show ?thesis
+                  unfolding parse_header_def bs_eq
+                  using b0_eq b1_eq b2_eq b3_eq hi_hdr hi_app body_eq
+                  by simp
+              qed
+              with ph_inr show ?thesis by simp
+            qed
+          qed
+        qed
+      qed
+    qed
+  qed
+qed
+
 lemma near_init_loop_res_w32:
   "(whileLoop (\<lambda>idx st. unat idx < 4)
       (\<lambda>idx. do {
