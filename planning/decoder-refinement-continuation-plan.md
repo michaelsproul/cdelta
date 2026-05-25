@@ -9,6 +9,14 @@ Both no-source/no-Adler outer-loop call sites now reuse that helper instead
 of carrying separate 4.5k-line body proofs.  The remaining residual there is
 still localized to the success-tail weakening after the outer loop.
 
+Update 2026-05-25 later: the app-header/code-table-built no-source payload
+branch now has a staged payload fact (`app_no_source_payload_stage`) and the
+read-byte, payload varint, dlen-length, and payload-size guards are discharged.
+The success-loop application in that branch is now closed via
+`outer_whileLoop_correct_success_abstract`; the entry proof reconstructs the
+no-source payload slices from the staged facts, and the loop body reuses
+`decode_inner_body_preserves_no_source`.
+
 The rescue branch is structurally viable, but the current theorem is not
 integrity-safe because the pure decoder accepts some patches the C decoder
 rejects. Align the pure spec with the C decoder first, then continue from the
@@ -21,8 +29,7 @@ Validated facts:
 - The latest docs are stale in places: the three outer-loop API lemmas listed
   as sorries are now proved.
 - Remaining active proof debt in `proof/decoder-refine/VcdiffDec_Refine.thy`
-  is now three localized `sorry`s:
-  - app-header/code-table-built no-source payload residual,
+  is now two localized `sorry`s:
   - no-source/no-Adler success-tail weakening after the factored body proof,
   - the Inr rejection case.
   Older notes about `build_code_table'_preserves_typing` and
@@ -58,15 +65,16 @@ Validated facts:
 
 ## Proof Work
 
-- Close the app-header/code-table-built no-source payload residual at the old
-  local branch.  The nearby completed no-source/no-Adler proof now gives the
-  body-preservation shape to replay, but the pre-loop payload/position bridge
-  still needs to be connected.
-- Remove the new success-tail `sorry` after the factored no-source/no-Adler body
-  proof by replaying the exit-weakening/post-loop cursor proof against the
-  record-shaped cursor state (`addr_pos_C v`, `data_pos_C v`, `inst_pos_C v`).
-- Keep the factored concrete outer-loop body helper narrow: it currently covers
-  the no-source/no-Adler body shape used by the two duplicated call sites.
+- App-header/code-table-built no-source payload success loop is closed. The
+  next residual is the no-source/no-Adler tail admit; a quick `simp` probe shows
+  it still contains two full `parse_window_prefix'` obligations, one for each
+  code-table-built path, before the final cursor/write checks.
+- Remove the no-source/no-Adler tail `sorry` by first splitting the two exposed
+  `parse_window_prefix'` obligations, then replaying the exit-weakening/post-loop
+  cursor proof against the record-shaped cursor state (`addr_pos_C v`,
+  `data_pos_C v`, `inst_pos_C v`).
+- Continue reusing `decode_inner_body_preserves_no_source` for no-source loop
+  bodies; avoid reintroducing expanded inner-body proofs.
 - Finish the Inr case by contrapositive: if C returns `Result 0`, the tightened
   `decode_spec` returns `Inl` with matching output.
 
