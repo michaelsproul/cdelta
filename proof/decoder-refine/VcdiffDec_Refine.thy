@@ -4803,6 +4803,435 @@ proof -
     using src_len_val src_off_val by simp
 qed
 
+lemma noapp_source_dlen_decode_some_heap:
+  assumes parsed:
+      "parse_window (drop 5 (heap_bytes s patch (unat patch_len))) =
+       Inl (win, tail)"
+    and len_gt5: "5 < unat patch_len"
+    and heap_eq:
+      "heap_bytes ta patch (unat patch_len) =
+       heap_bytes s patch (unat patch_len)"
+    and source:
+      "UCAST(8 \<rightarrow> 32) (heap_w8 ta (patch +\<^sub>p 5)) AND (1 :: 32 word) = 1"
+    and src_len_read:
+      "case varint_decode (drop 6 (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C src_len_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C src_len_p = 0 \<and>
+           unat (pr_t_C.pos_C src_len_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C src_len_p)"
+    and src_len_ok: "pr_t_C.err_C src_len_p = 0"
+    and src_off_read:
+      "case varint_decode
+        (drop (unat (pr_t_C.pos_C src_len_p))
+          (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C src_off_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C src_off_p = 0 \<and>
+           unat (pr_t_C.pos_C src_off_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C src_off_p)"
+    and src_off_ok: "pr_t_C.err_C src_off_p = 0"
+  shows "\<exists>nv rest.
+           varint_decode
+             (drop (unat (pr_t_C.pos_C src_off_p))
+               (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+proof -
+  obtain rest1 rest2 rest3 dlen where
+    dec1: "varint_decode (drop 6 (heap_bytes ta patch (unat patch_len))) =
+           Some (pw_src_seg_len win, rest1)"
+    and dec2: "varint_decode rest1 = Some (pw_src_seg_off win, rest2)"
+    and dec3: "varint_decode rest2 = Some (dlen, rest3)"
+    using noapp_source_prefix_decodes_heap
+      [OF parsed len_gt5 heap_eq source]
+    by blast
+  have pos_src_len:
+    "unat (pr_t_C.pos_C src_len_p) = unat patch_len - length rest1"
+    using src_len_read src_len_ok dec1 by simp
+  have drop_rest1:
+    "drop (unat (pr_t_C.pos_C src_len_p))
+      (heap_bytes ta patch (unat patch_len)) = rest1"
+    using varint_decode_drop_rest[OF dec1] pos_src_len by simp
+  have dec2_ta:
+    "varint_decode
+      (drop (unat (pr_t_C.pos_C src_len_p))
+        (heap_bytes ta patch (unat patch_len))) =
+     Some (pw_src_seg_off win, rest2)"
+    using dec2 drop_rest1 by simp
+  have pos_src_off:
+    "unat (pr_t_C.pos_C src_off_p) = unat patch_len - length rest2"
+    using src_off_read src_off_ok dec2_ta by simp
+  have drop_rest2:
+    "drop (unat (pr_t_C.pos_C src_off_p))
+      (heap_bytes ta patch (unat patch_len)) = rest2"
+    using varint_decode_drop_rest[OF dec2_ta] pos_src_off by simp
+  show ?thesis
+    using dec3 drop_rest2 by simp
+qed
+
+lemma noapp_source_dlen_stage_heap:
+  assumes parsed:
+      "parse_window (drop 5 (heap_bytes s patch (unat patch_len))) =
+       Inl (win, tail)"
+    and len_gt5: "5 < unat patch_len"
+    and heap_eq:
+      "heap_bytes ta patch (unat patch_len) =
+       heap_bytes s patch (unat patch_len)"
+    and source:
+      "UCAST(8 \<rightarrow> 32) (heap_w8 ta (patch +\<^sub>p 5)) AND (1 :: 32 word) = 1"
+    and src_len_read:
+      "case varint_decode (drop 6 (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C src_len_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C src_len_p = 0 \<and>
+           unat (pr_t_C.pos_C src_len_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C src_len_p)"
+    and src_len_ok: "pr_t_C.err_C src_len_p = 0"
+    and src_off_read:
+      "case varint_decode
+        (drop (unat (pr_t_C.pos_C src_len_p))
+          (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C src_off_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C src_off_p = 0 \<and>
+           unat (pr_t_C.pos_C src_off_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C src_off_p)"
+    and src_off_ok: "pr_t_C.err_C src_off_p = 0"
+  shows "\<exists>rest3 rest4 rest5 rest6 rest7 rest8 dlen data_len inst_len addr_len alen.
+           varint_decode
+             (drop (unat (pr_t_C.pos_C src_off_p))
+               (heap_bytes ta patch (unat patch_len))) = Some (dlen, rest3) \<and>
+           varint_decode rest3 = Some (pw_tgt_len win, rest4) \<and>
+           pop_byte rest4 = Some (0, rest5) \<and>
+           varint_decode rest5 = Some (data_len, rest6) \<and>
+           varint_decode rest6 = Some (inst_len, rest7) \<and>
+           varint_decode rest7 = Some (addr_len, rest8) \<and>
+           alen + data_len + inst_len + addr_len \<le> length rest8 \<and>
+           dlen = (length rest3 - length rest8) +
+                  alen + data_len + inst_len + addr_len \<and>
+           alen =
+             (if UCAST(8 \<rightarrow> 32) (heap_w8 ta (patch +\<^sub>p 5)) AND
+                 (4 :: 32 word) \<noteq> 0
+              then 4 else 0)"
+proof -
+  obtain rest1 rest2 rest3 rest4 rest5 rest6 rest7 rest8 dlen data_len inst_len addr_len alen where
+    dec1: "varint_decode (drop 6 (heap_bytes ta patch (unat patch_len))) =
+           Some (pw_src_seg_len win, rest1)"
+    and dec2: "varint_decode rest1 = Some (pw_src_seg_off win, rest2)"
+    and dec3: "varint_decode rest2 = Some (dlen, rest3)"
+    and dec4: "varint_decode rest3 = Some (pw_tgt_len win, rest4)"
+    and di0: "pop_byte rest4 = Some (0, rest5)"
+    and dec5: "varint_decode rest5 = Some (data_len, rest6)"
+    and dec6: "varint_decode rest6 = Some (inst_len, rest7)"
+    and dec7: "varint_decode rest7 = Some (addr_len, rest8)"
+    and sizes_ok:
+      "alen + data_len + inst_len + addr_len \<le> length rest8"
+    and dlen_exact:
+      "dlen = (length rest3 - length rest8) +
+              alen + data_len + inst_len + addr_len"
+    and alen_eq:
+      "alen =
+        (if UCAST(8 \<rightarrow> 32) (heap_w8 ta (patch +\<^sub>p 5)) AND
+            (4 :: 32 word) \<noteq> 0
+         then 4 else 0)"
+    using noapp_source_prefix_decodes_heap
+      [OF parsed len_gt5 heap_eq source]
+    by blast
+  have pos_src_len:
+    "unat (pr_t_C.pos_C src_len_p) = unat patch_len - length rest1"
+    using src_len_read src_len_ok dec1 by simp
+  have drop_rest1:
+    "drop (unat (pr_t_C.pos_C src_len_p))
+      (heap_bytes ta patch (unat patch_len)) = rest1"
+    using varint_decode_drop_rest[OF dec1] pos_src_len by simp
+  have dec2_ta:
+    "varint_decode
+      (drop (unat (pr_t_C.pos_C src_len_p))
+        (heap_bytes ta patch (unat patch_len))) =
+     Some (pw_src_seg_off win, rest2)"
+    using dec2 drop_rest1 by simp
+  have pos_src_off:
+    "unat (pr_t_C.pos_C src_off_p) = unat patch_len - length rest2"
+    using src_off_read src_off_ok dec2_ta by simp
+  have drop_rest2:
+    "drop (unat (pr_t_C.pos_C src_off_p))
+      (heap_bytes ta patch (unat patch_len)) = rest2"
+    using varint_decode_drop_rest[OF dec2_ta] pos_src_off by simp
+  have dec3_ta:
+    "varint_decode
+      (drop (unat (pr_t_C.pos_C src_off_p))
+        (heap_bytes ta patch (unat patch_len))) =
+     Some (dlen, rest3)"
+    using dec3 drop_rest2 by simp
+  show ?thesis
+    using dec3_ta dec4 di0 dec5 dec6 dec7 sizes_ok dlen_exact alen_eq
+    by blast
+qed
+
+lemma noapp_source_tgt_decode_some_heap:
+  assumes parsed:
+      "parse_window (drop 5 (heap_bytes s patch (unat patch_len))) =
+       Inl (win, tail)"
+    and len_gt5: "5 < unat patch_len"
+    and heap_eq:
+      "heap_bytes ta patch (unat patch_len) =
+       heap_bytes s patch (unat patch_len)"
+    and source:
+      "UCAST(8 \<rightarrow> 32) (heap_w8 ta (patch +\<^sub>p 5)) AND (1 :: 32 word) = 1"
+    and src_len_read:
+      "case varint_decode (drop 6 (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C src_len_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C src_len_p = 0 \<and>
+           unat (pr_t_C.pos_C src_len_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C src_len_p)"
+    and src_len_ok: "pr_t_C.err_C src_len_p = 0"
+    and src_off_read:
+      "case varint_decode
+        (drop (unat (pr_t_C.pos_C src_len_p))
+          (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C src_off_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C src_off_p = 0 \<and>
+           unat (pr_t_C.pos_C src_off_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C src_off_p)"
+    and src_off_ok: "pr_t_C.err_C src_off_p = 0"
+    and dlen_read:
+      "case varint_decode
+        (drop (unat (pr_t_C.pos_C src_off_p))
+          (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C dlen_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C dlen_p = 0 \<and>
+           unat (pr_t_C.pos_C dlen_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C dlen_p)"
+    and dlen_ok: "pr_t_C.err_C dlen_p = 0"
+  shows "\<exists>nv rest.
+           varint_decode
+             (drop (unat (pr_t_C.pos_C dlen_p))
+               (heap_bytes ta patch (unat patch_len))) = Some (nv, rest)"
+proof -
+  obtain rest3 rest4 dlen where
+    dec3:
+      "varint_decode
+        (drop (unat (pr_t_C.pos_C src_off_p))
+          (heap_bytes ta patch (unat patch_len))) = Some (dlen, rest3)"
+    and dec4: "varint_decode rest3 = Some (pw_tgt_len win, rest4)"
+    using noapp_source_dlen_stage_heap
+      [OF parsed len_gt5 heap_eq source src_len_read src_len_ok
+          src_off_read src_off_ok]
+    by blast
+  have pos_dlen:
+    "unat (pr_t_C.pos_C dlen_p) = unat patch_len - length rest3"
+    using dlen_read dlen_ok dec3 by simp
+  have drop_rest3:
+    "drop (unat (pr_t_C.pos_C dlen_p))
+      (heap_bytes ta patch (unat patch_len)) = rest3"
+    using varint_decode_drop_rest[OF dec3] pos_dlen by simp
+  show ?thesis
+    using dec4 drop_rest3 by simp
+qed
+
+lemma noapp_source_tgt_value_heap:
+  assumes parsed:
+      "parse_window (drop 5 (heap_bytes s patch (unat patch_len))) =
+       Inl (win, tail)"
+    and len_gt5: "5 < unat patch_len"
+    and heap_eq:
+      "heap_bytes ta patch (unat patch_len) =
+       heap_bytes s patch (unat patch_len)"
+    and source:
+      "UCAST(8 \<rightarrow> 32) (heap_w8 ta (patch +\<^sub>p 5)) AND (1 :: 32 word) = 1"
+    and src_len_read:
+      "case varint_decode (drop 6 (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C src_len_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C src_len_p = 0 \<and>
+           unat (pr_t_C.pos_C src_len_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C src_len_p)"
+    and src_len_ok: "pr_t_C.err_C src_len_p = 0"
+    and src_off_read:
+      "case varint_decode
+        (drop (unat (pr_t_C.pos_C src_len_p))
+          (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C src_off_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C src_off_p = 0 \<and>
+           unat (pr_t_C.pos_C src_off_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C src_off_p)"
+    and src_off_ok: "pr_t_C.err_C src_off_p = 0"
+    and dlen_read:
+      "case varint_decode
+        (drop (unat (pr_t_C.pos_C src_off_p))
+          (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C dlen_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C dlen_p = 0 \<and>
+           unat (pr_t_C.pos_C dlen_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C dlen_p)"
+    and dlen_ok: "pr_t_C.err_C dlen_p = 0"
+    and tgt_read:
+      "case varint_decode
+        (drop (unat (pr_t_C.pos_C dlen_p))
+          (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C tgt_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C tgt_p = 0 \<and>
+           unat (pr_t_C.pos_C tgt_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C tgt_p)"
+    and tgt_ok: "pr_t_C.err_C tgt_p = 0"
+  shows "unat (val_C tgt_p) = pw_tgt_len win"
+proof -
+  obtain rest3 rest4 dlen where
+    dec3:
+      "varint_decode
+        (drop (unat (pr_t_C.pos_C src_off_p))
+          (heap_bytes ta patch (unat patch_len))) = Some (dlen, rest3)"
+    and dec4: "varint_decode rest3 = Some (pw_tgt_len win, rest4)"
+    using noapp_source_dlen_stage_heap
+      [OF parsed len_gt5 heap_eq source src_len_read src_len_ok
+          src_off_read src_off_ok]
+    by blast
+  have pos_dlen:
+    "unat (pr_t_C.pos_C dlen_p) = unat patch_len - length rest3"
+    using dlen_read dlen_ok dec3 by simp
+  have drop_rest3:
+    "drop (unat (pr_t_C.pos_C dlen_p))
+      (heap_bytes ta patch (unat patch_len)) = rest3"
+    using varint_decode_drop_rest[OF dec3] pos_dlen by simp
+  have dec4_ta:
+    "varint_decode
+      (drop (unat (pr_t_C.pos_C dlen_p))
+        (heap_bytes ta patch (unat patch_len))) =
+     Some (pw_tgt_len win, rest4)"
+    using dec4 drop_rest3 by simp
+  show ?thesis
+    using tgt_read tgt_ok dec4_ta by simp
+qed
+
+lemma noapp_source_payload_stage_heap:
+  assumes parsed:
+      "parse_window (drop 5 (heap_bytes s patch (unat patch_len))) =
+       Inl (win, tail)"
+    and len_gt5: "5 < unat patch_len"
+    and heap_eq:
+      "heap_bytes ta patch (unat patch_len) =
+       heap_bytes s patch (unat patch_len)"
+    and source:
+      "UCAST(8 \<rightarrow> 32) (heap_w8 ta (patch +\<^sub>p 5)) AND (1 :: 32 word) = 1"
+    and src_len_read:
+      "case varint_decode (drop 6 (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C src_len_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C src_len_p = 0 \<and>
+           unat (pr_t_C.pos_C src_len_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C src_len_p)"
+    and src_len_ok: "pr_t_C.err_C src_len_p = 0"
+    and src_off_read:
+      "case varint_decode
+        (drop (unat (pr_t_C.pos_C src_len_p))
+          (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C src_off_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C src_off_p = 0 \<and>
+           unat (pr_t_C.pos_C src_off_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C src_off_p)"
+    and src_off_ok: "pr_t_C.err_C src_off_p = 0"
+    and dlen_read:
+      "case varint_decode
+        (drop (unat (pr_t_C.pos_C src_off_p))
+          (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C dlen_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C dlen_p = 0 \<and>
+           unat (pr_t_C.pos_C dlen_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C dlen_p)"
+    and dlen_ok: "pr_t_C.err_C dlen_p = 0"
+    and tgt_read:
+      "case varint_decode
+        (drop (unat (pr_t_C.pos_C dlen_p))
+          (heap_bytes ta patch (unat patch_len))) of
+         None \<Rightarrow> pr_t_C.err_C tgt_p \<noteq> 0
+       | Some (nv, rest) \<Rightarrow>
+           pr_t_C.err_C tgt_p = 0 \<and>
+           unat (pr_t_C.pos_C tgt_p) = unat patch_len - length rest \<and>
+           nv = unat (val_C tgt_p)"
+    and tgt_ok: "pr_t_C.err_C tgt_p = 0"
+  shows "\<exists>rest3 rest4 rest5 rest6 rest7 rest8 dlen data_len inst_len addr_len alen.
+           varint_decode
+             (drop (unat (pr_t_C.pos_C src_off_p))
+               (heap_bytes ta patch (unat patch_len))) = Some (dlen, rest3) \<and>
+           drop (unat (pr_t_C.pos_C dlen_p))
+             (heap_bytes ta patch (unat patch_len)) = rest3 \<and>
+           varint_decode rest3 = Some (pw_tgt_len win, rest4) \<and>
+           drop (unat (pr_t_C.pos_C tgt_p))
+             (heap_bytes ta patch (unat patch_len)) = rest4 \<and>
+           pop_byte rest4 = Some (0, rest5) \<and>
+           varint_decode rest5 = Some (data_len, rest6) \<and>
+           varint_decode rest6 = Some (inst_len, rest7) \<and>
+           varint_decode rest7 = Some (addr_len, rest8) \<and>
+           alen + data_len + inst_len + addr_len \<le> length rest8 \<and>
+           dlen = (length rest3 - length rest8) +
+                  alen + data_len + inst_len + addr_len \<and>
+           unat (val_C dlen_p) = dlen \<and>
+           unat (val_C tgt_p) = pw_tgt_len win \<and>
+           alen =
+             (if UCAST(8 \<rightarrow> 32) (heap_w8 ta (patch +\<^sub>p 5)) AND
+                 (4 :: 32 word) \<noteq> 0
+              then 4 else 0)"
+proof -
+  obtain rest3 rest4 rest5 rest6 rest7 rest8 dlen data_len inst_len addr_len alen where
+    dec3:
+      "varint_decode
+        (drop (unat (pr_t_C.pos_C src_off_p))
+          (heap_bytes ta patch (unat patch_len))) = Some (dlen, rest3)"
+    and dec4: "varint_decode rest3 = Some (pw_tgt_len win, rest4)"
+    and di0: "pop_byte rest4 = Some (0, rest5)"
+    and dec5: "varint_decode rest5 = Some (data_len, rest6)"
+    and dec6: "varint_decode rest6 = Some (inst_len, rest7)"
+    and dec7: "varint_decode rest7 = Some (addr_len, rest8)"
+    and sizes_ok:
+      "alen + data_len + inst_len + addr_len \<le> length rest8"
+    and dlen_exact:
+      "dlen = (length rest3 - length rest8) +
+              alen + data_len + inst_len + addr_len"
+    and alen_eq:
+      "alen =
+        (if UCAST(8 \<rightarrow> 32) (heap_w8 ta (patch +\<^sub>p 5)) AND
+            (4 :: 32 word) \<noteq> 0
+         then 4 else 0)"
+    using noapp_source_dlen_stage_heap
+      [OF parsed len_gt5 heap_eq source src_len_read src_len_ok
+          src_off_read src_off_ok]
+    by blast
+  have pos_dlen:
+    "unat (pr_t_C.pos_C dlen_p) = unat patch_len - length rest3"
+    using dlen_read dlen_ok dec3 by simp
+  have drop_rest3:
+    "drop (unat (pr_t_C.pos_C dlen_p))
+      (heap_bytes ta patch (unat patch_len)) = rest3"
+    using varint_decode_drop_rest[OF dec3] pos_dlen by simp
+  have dec4_ta:
+    "varint_decode
+      (drop (unat (pr_t_C.pos_C dlen_p))
+        (heap_bytes ta patch (unat patch_len))) =
+     Some (pw_tgt_len win, rest4)"
+    using dec4 drop_rest3 by simp
+  have pos_tgt:
+    "unat (pr_t_C.pos_C tgt_p) = unat patch_len - length rest4"
+    using tgt_read tgt_ok dec4_ta by simp
+  have drop_rest4:
+    "drop (unat (pr_t_C.pos_C tgt_p))
+      (heap_bytes ta patch (unat patch_len)) = rest4"
+    using varint_decode_drop_rest[OF dec4_ta] pos_tgt by simp
+  have dlen_val: "unat (val_C dlen_p) = dlen"
+    using dlen_read dlen_ok dec3 by simp
+  have tgt_val: "unat (val_C tgt_p) = pw_tgt_len win"
+    using tgt_read tgt_ok dec4_ta by simp
+  show ?thesis
+    using dec3 drop_rest3 dec4 drop_rest4 di0 dec5 dec6 dec7
+          sizes_ok dlen_exact dlen_val tgt_val alen_eq by blast
+qed
+
 lemma noapp_no_source_tgt_decode_some_heap:
   assumes parsed:
       "parse_window (drop 5 (heap_bytes s patch (unat patch_len))) =
