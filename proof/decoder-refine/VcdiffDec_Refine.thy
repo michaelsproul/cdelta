@@ -51505,7 +51505,15 @@ next
       specific failure path in C corresponding to each spec failure.\<close>
   let ?Post = "\<lambda>r t. \<exists>e. r = Result (e :: int) \<and> e \<noteq> 0"
   have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
-    sorry
+  proof (cases "parse_header (heap_bytes s patch (unat patch_len))")
+    case (Inr pe)
+    show ?thesis
+      by (rule vcdiff_decode'_parse_header_inr_nonok[OF out_len_ok patch_ok Inr])
+  next
+    case (Inl rest)
+    show ?thesis
+      sorry
+  qed
   thus ?thesis by (simp add: Inr)
 qed
 
