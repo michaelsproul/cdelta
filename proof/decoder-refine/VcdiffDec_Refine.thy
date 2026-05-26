@@ -1304,6 +1304,18 @@ proof -
     done
 qed
 
+lemma read_varint'_none_nonok:
+  assumes buf_ok: "buf_valid s buf (unat len)"
+      and pos_ok: "pos \<le> len"
+      and vd_none:
+        "varint_decode (drop (unat pos) (heap_bytes s buf (unat len))) = None"
+  shows "read_varint' buf len pos \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and> (\<exists>v. r = Result v \<and> pr_t_C.err_C v \<noteq> VCD_OK) \<rbrace>"
+  apply (rule runs_to_weaken[OF read_varint'_spec[OF buf_ok pos_ok]])
+  using vd_none
+  apply (clarsimp split: option.splits)
+  done
+
 (*
   AutoCorres lifts `near_arr` / `same_arr` as record fields of
   `lifted_globals`, of array type. They are indexed via `.[unat i]`
@@ -3373,6 +3385,43 @@ proof -
     done
 qed
 
+lemma parse_window_prefix'_noapp_no_source_dlen_none_nonok:
+  assumes patch_ok: "buf_valid s patch (unat patch_len)"
+      and len_gt5: "(5 :: 32 word) < patch_len"
+      and target_clear:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 2 = 0"
+      and mask_clear:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND (0xFFFFFFFA :: 32 word) = 0"
+      and no_source:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 1 = 0"
+      and dlen_none:
+        "varint_decode (drop 6 (heap_bytes s patch (unat patch_len))) = None"
+  shows "parse_window_prefix' patch patch_len src src_len out_cap 5 \<bullet> s
+     \<lbrace> \<lambda>r t. \<exists>w. r = Result w \<and> t = s \<and> win_t_C.err_C w \<noteq> 0 \<rbrace>"
+proof -
+  have pos5_ok: "(5 :: 32 word) \<le> patch_len"
+    using len_gt5 by simp
+  have pos6_ok: "(6 :: 32 word) \<le> patch_len"
+    using len_gt5 by (simp add: word_less_nat_alt word_le_nat_alt)
+  have dlen_none_unat:
+    "varint_decode
+      (drop (unat (6 :: 32 word)) (heap_bytes s patch (unat patch_len))) = None"
+    using dlen_none by simp
+  show ?thesis
+    unfolding parse_window_prefix'_def
+    apply runs_to_vcg
+    apply (rule read_byte'_gets_the_discharge[OF patch_ok pos5_ok])
+     subgoal
+       supply read_varint'_none_nonok
+         [where s = s and buf = patch and len = patch_len and pos = "6 :: 32 word",
+          OF patch_ok pos6_ok dlen_none_unat, runs_to_vcg]
+       apply runs_to_vcg
+       using target_clear mask_clear no_source
+       by (simp_all add: word_less_nat_alt word_le_nat_alt)
+    subgoal
+      using len_gt5 by simp
+    done
+qed
 
 lemma vcdiff_decode'_short_patch:
   assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
@@ -5136,6 +5185,275 @@ proof -
   also have "k + length pfx = length bs - length rest"
     using pfx_len k_le rest_len by simp
   finally show ?thesis by simp
+qed
+
+lemma parse_window_prefix'_noapp_no_source_tgt_none_nonok:
+  assumes patch_ok: "buf_valid s patch (unat patch_len)"
+      and len_gt5: "(5 :: 32 word) < patch_len"
+      and target_clear:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 2 = 0"
+      and mask_clear:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND (0xFFFFFFFA :: 32 word) = 0"
+      and no_source:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 1 = 0"
+      and dlen_ok:
+        "varint_decode (drop 6 (heap_bytes s patch (unat patch_len))) =
+         Some (dlen, rest3)"
+      and tgt_none: "varint_decode rest3 = None"
+  shows "parse_window_prefix' patch patch_len src src_len out_cap 5 \<bullet> s
+     \<lbrace> \<lambda>r t. \<exists>w. r = Result w \<and> t = s \<and> win_t_C.err_C w \<noteq> 0 \<rbrace>"
+proof -
+  let ?bs = "heap_bytes s patch (unat patch_len)"
+  let ?tgt_pos = "patch_len - of_nat (length rest3) :: 32 word"
+  have pos5_ok: "(5 :: 32 word) \<le> patch_len"
+    using len_gt5 by simp
+  have pos6_ok: "(6 :: 32 word) \<le> patch_len"
+    using len_gt5 by (simp add: word_less_nat_alt word_le_nat_alt)
+  have dlen_ok_unat:
+    "varint_decode
+      (drop (unat (6 :: 32 word)) (heap_bytes s patch (unat patch_len))) =
+     Some (dlen, rest3)"
+    using dlen_ok by simp
+  have dlen_fits: "dlen < 2 ^ 32"
+    by (rule varint_decode_value_bound[OF dlen_ok])
+  have rest3_le_drop: "length rest3 \<le> length (drop 6 ?bs)"
+    by (rule varint_decode_length[OF dlen_ok])
+  have rest3_le: "length rest3 \<le> unat patch_len"
+    using rest3_le_drop by simp
+  have patch_len_lt_2p32: "unat patch_len < 2 ^ 32"
+    using unat_lt2p[of patch_len] by simp
+  have rest3_lt: "length rest3 < 2 ^ 32"
+    using rest3_le patch_len_lt_2p32 by linarith
+  have unat_tgt_pos:
+    "unat ?tgt_pos = unat patch_len - length rest3"
+  proof -
+    have unat_rest: "unat (of_nat (length rest3) :: 32 word) = length rest3"
+      using rest3_lt by (simp add: unat_of_nat_eq)
+    have "(of_nat (length rest3) :: 32 word) \<le> patch_len"
+      using rest3_le unat_rest by (simp add: word_le_nat_alt)
+    thus ?thesis using unat_rest by (simp add: unat_sub)
+  qed
+  have tgt_pos_ok: "?tgt_pos \<le> patch_len"
+    using unat_tgt_pos rest3_le by (simp add: word_le_nat_alt)
+  have drop_rest3: "drop (unat ?tgt_pos) ?bs = rest3"
+    using varint_decode_drop_rest[OF dlen_ok] unat_tgt_pos by simp
+  have tgt_none_at:
+    "varint_decode (drop (unat ?tgt_pos) ?bs) = None"
+    using drop_rest3 tgt_none by simp
+  show ?thesis
+    unfolding parse_window_prefix'_def
+    apply runs_to_vcg
+    apply (rule read_byte'_gets_the_discharge[OF patch_ok pos5_ok])
+     subgoal
+       supply read_varint'_chain
+         [where s = s and buf = patch and len = patch_len and pos = "6 :: 32 word"
+            and nv = dlen and rest = rest3,
+          OF patch_ok pos6_ok dlen_ok_unat dlen_fits, runs_to_vcg]
+       supply read_varint'_none_nonok
+         [where s = s and buf = patch and len = patch_len and pos = ?tgt_pos,
+          OF patch_ok tgt_pos_ok tgt_none_at, runs_to_vcg]
+       apply runs_to_vcg
+       using target_clear mask_clear no_source
+       by (simp_all add: word_less_nat_alt word_le_nat_alt)
+    subgoal
+      using len_gt5 by simp
+    done
+qed
+
+lemma parse_window_prefix'_noapp_no_source_di_nonok:
+  assumes patch_ok: "buf_valid s patch (unat patch_len)"
+      and len_gt5: "(5 :: 32 word) < patch_len"
+      and target_clear:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 2 = 0"
+      and mask_clear:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND (0xFFFFFFFA :: 32 word) = 0"
+      and no_source:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 1 = 0"
+      and dlen_ok:
+        "varint_decode (drop 6 (heap_bytes s patch (unat patch_len))) =
+         Some (dlen, rest3)"
+      and tgt_ok: "varint_decode rest3 = Some (tgt_len, rest4)"
+      and di_bad:
+        "rest4 = [] \<or> (\<exists>di rest5. rest4 = di # rest5 \<and> di \<noteq> 0)"
+  shows "parse_window_prefix' patch patch_len src src_len out_cap 5 \<bullet> s
+     \<lbrace> \<lambda>r t. \<exists>w. r = Result w \<and> t = s \<and> win_t_C.err_C w \<noteq> 0 \<rbrace>"
+proof -
+  let ?bs = "heap_bytes s patch (unat patch_len)"
+  let ?tgt_pos = "patch_len - of_nat (length rest3) :: 32 word"
+  let ?di_pos = "patch_len - of_nat (length rest4) :: 32 word"
+  have pos5_ok: "(5 :: 32 word) \<le> patch_len"
+    using len_gt5 by simp
+  have pos6_ok: "(6 :: 32 word) \<le> patch_len"
+    using len_gt5 by (simp add: word_less_nat_alt word_le_nat_alt)
+  have dlen_ok_unat:
+    "varint_decode
+      (drop (unat (6 :: 32 word)) (heap_bytes s patch (unat patch_len))) =
+     Some (dlen, rest3)"
+    using dlen_ok by simp
+  have dlen_fits: "dlen < 2 ^ 32"
+    by (rule varint_decode_value_bound[OF dlen_ok])
+  have rest3_le_drop: "length rest3 \<le> length (drop 6 ?bs)"
+    by (rule varint_decode_length[OF dlen_ok])
+  have rest3_le: "length rest3 \<le> unat patch_len"
+    using rest3_le_drop by simp
+  have patch_len_lt_2p32: "unat patch_len < 2 ^ 32"
+    using unat_lt2p[of patch_len] by simp
+  have rest3_lt: "length rest3 < 2 ^ 32"
+    using rest3_le patch_len_lt_2p32 by linarith
+  have unat_tgt_pos:
+    "unat ?tgt_pos = unat patch_len - length rest3"
+  proof -
+    have unat_rest: "unat (of_nat (length rest3) :: 32 word) = length rest3"
+      using rest3_lt by (simp add: unat_of_nat_eq)
+    have "(of_nat (length rest3) :: 32 word) \<le> patch_len"
+      using rest3_le unat_rest by (simp add: word_le_nat_alt)
+    thus ?thesis using unat_rest by (simp add: unat_sub)
+  qed
+  have tgt_pos_ok: "?tgt_pos \<le> patch_len"
+    using unat_tgt_pos rest3_le by (simp add: word_le_nat_alt)
+  have drop_rest3: "drop (unat ?tgt_pos) ?bs = rest3"
+    using varint_decode_drop_rest[OF dlen_ok] unat_tgt_pos by simp
+  have tgt_ok_at:
+    "varint_decode (drop (unat ?tgt_pos) ?bs) = Some (tgt_len, rest4)"
+    using drop_rest3 tgt_ok by simp
+  have tgt_fits: "tgt_len < 2 ^ 32"
+    by (rule varint_decode_value_bound[OF tgt_ok])
+  have rest4_le_rest3: "length rest4 \<le> length rest3"
+    by (rule varint_decode_length[OF tgt_ok])
+  have rest4_le: "length rest4 \<le> unat patch_len"
+    using rest4_le_rest3 rest3_le by linarith
+  have rest4_lt: "length rest4 < 2 ^ 32"
+    using rest4_le patch_len_lt_2p32 by linarith
+  have unat_di_pos:
+    "unat ?di_pos = unat patch_len - length rest4"
+  proof -
+    have unat_rest: "unat (of_nat (length rest4) :: 32 word) = length rest4"
+      using rest4_lt by (simp add: unat_of_nat_eq)
+    have "(of_nat (length rest4) :: 32 word) \<le> patch_len"
+      using rest4_le unat_rest by (simp add: word_le_nat_alt)
+    thus ?thesis using unat_rest by (simp add: unat_sub)
+  qed
+  have di_pos_ok: "?di_pos \<le> patch_len"
+    using unat_di_pos rest4_le by (simp add: word_le_nat_alt)
+  have drop_rest4: "drop (unat ?di_pos) ?bs = rest4"
+    using varint_decode_drop_rest[OF tgt_ok_at] unat_di_pos by simp
+  show ?thesis
+    unfolding parse_window_prefix'_def
+    apply runs_to_vcg
+    apply (rule read_byte'_gets_the_discharge[OF patch_ok pos5_ok])
+     subgoal
+     proof (cases rest4)
+	       case Nil
+	       have di_pos_eq: "?di_pos = patch_len"
+	         using unat_di_pos Nil by (simp add: word_unat_eq_iff)
+	       show ?thesis
+	         supply read_varint'_chain
+	           [where s = s and buf = patch and len = patch_len and pos = "6 :: 32 word"
+	              and nv = dlen and rest = rest3,
+	            OF patch_ok pos6_ok dlen_ok_unat dlen_fits, runs_to_vcg]
+	         supply read_varint'_chain
+	           [where s = s and buf = patch and len = patch_len and pos = ?tgt_pos
+	              and nv = tgt_len and rest = rest4,
+	            OF patch_ok tgt_pos_ok tgt_ok_at tgt_fits, runs_to_vcg]
+	         apply runs_to_vcg
+	         using target_clear mask_clear no_source Nil di_pos_eq
+	         apply (simp_all add: word_less_nat_alt word_le_nat_alt)
+	         subgoal
+	           apply (rule read_byte'_gets_the_discharge
+	             [where s = s and buf = patch and len = patch_len and pos = patch_len])
+	           subgoal using patch_ok by simp
+	           subgoal by simp
+	           subgoal by simp
+	           subgoal by runs_to_vcg
+	           done
+	         subgoal
+	           apply (rule read_byte'_gets_the_discharge
+	             [where s = s and buf = patch and len = patch_len and pos = patch_len])
+	           subgoal using patch_ok by simp
+	           subgoal by simp
+	           subgoal by simp
+	           subgoal by runs_to_vcg
+	           done
+	         done
+     next
+       case (Cons di rest5)
+	       have di_ne: "di \<noteq> 0"
+	         using di_bad Cons by auto
+	       have di32_ne: "UCAST(8 \<rightarrow> 32) di \<noteq> (0 :: 32 word)"
+	         using di_ne by word_bitwise
+	       have di_pos_lt: "?di_pos < patch_len"
+	       proof -
+	         have rest4_len: "length rest4 = Suc (length rest5)"
+	           using Cons by simp
+	         have "Suc (length rest5) \<le> unat patch_len"
+	           using rest4_le rest4_len by simp
+	         hence "unat patch_len - Suc (length rest5) < unat patch_len"
+	           by linarith
+	         thus ?thesis
+	           using unat_di_pos rest4_len by (simp add: word_less_nat_alt)
+	       qed
+       have di_heap:
+         "heap_w8 s (patch +\<^sub>p uint ?di_pos) = di"
+	       proof -
+	         have idx_lt: "unat ?di_pos < length ?bs"
+	           using di_pos_lt by (simp add: word_less_nat_alt)
+	         have bs_nth: "?bs ! unat ?di_pos = di"
+	         proof -
+	           have "?bs ! unat ?di_pos = hd (drop (unat ?di_pos) ?bs)"
+	             using idx_lt by (simp add: hd_drop_conv_nth)
+	           also have "\<dots> = di"
+	             using drop_rest4 Cons by simp
+	           finally show ?thesis .
+	         qed
+	         have heap_int:
+	           "heap_w8 s (patch +\<^sub>p int (unat ?di_pos)) = ?bs ! unat ?di_pos"
+	           using idx_lt by (simp add: heap_bytes_nth)
+	         have ptr_eq:
+	           "patch +\<^sub>p uint ?di_pos = patch +\<^sub>p int (unat ?di_pos)"
+	           by (simp only: uint_nat)
+	         show ?thesis
+	           apply (subst ptr_eq)
+	           by (rule trans[OF heap_int bs_nth])
+	       qed
+	       show ?thesis
+	         supply read_varint'_chain
+	           [where s = s and buf = patch and len = patch_len and pos = "6 :: 32 word"
+	              and nv = dlen and rest = rest3,
+	            OF patch_ok pos6_ok dlen_ok_unat dlen_fits, runs_to_vcg]
+	         supply read_varint'_chain
+	           [where s = s and buf = patch and len = patch_len and pos = ?tgt_pos
+	              and nv = tgt_len and rest = rest4,
+	            OF patch_ok tgt_pos_ok tgt_ok_at tgt_fits, runs_to_vcg]
+	         apply runs_to_vcg
+	         using target_clear mask_clear no_source Cons di_ne di32_ne di_pos_lt di_heap
+	         apply (simp_all add: word_less_nat_alt word_le_nat_alt)
+	         subgoal
+	           apply (rule read_byte'_gets_the_discharge
+	             [where s = s and buf = patch and len = patch_len
+	                and pos = "patch_len - (1 + of_nat (length rest5))"])
+	           subgoal using patch_ok by simp
+	           subgoal using di_pos_ok Cons by simp
+	           subgoal
+	             apply runs_to_vcg
+	             using di_heap di32_ne Cons by simp
+	           subgoal using di_pos_lt Cons by simp
+	           done
+	         subgoal
+	           apply (rule read_byte'_gets_the_discharge
+	             [where s = s and buf = patch and len = patch_len
+	                and pos = "patch_len - (1 + of_nat (length rest5))"])
+	           subgoal using patch_ok by simp
+	           subgoal using di_pos_ok Cons by simp
+	           subgoal
+	             apply runs_to_vcg
+	             using di_heap di32_ne Cons by simp
+	           subgoal using di_pos_lt by simp
+	           done
+	         done
+     qed
+    subgoal
+      using len_gt5 by simp
+    done
 qed
 
 lemma noapp_source_off_decode_some_heap:
@@ -12620,6 +12938,214 @@ proof -
     apply (simp_all add: word_less_nat_alt word_le_nat_alt)
     subgoal
       by (simp add: buf_valid_def)
+    done
+qed
+
+
+lemma vcdiff_decode'_noapp_parse_window_prefix_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch (unat patch_len)"
+      and len_gt5: "(5 :: 32 word) < patch_len"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and magic1_ok: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+      and magic2_ok: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
+      and magic3_ok: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
+      and hdr_ok: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 3 = 0"
+      and app_clear: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 4 = 0"
+      and parse_nonok:
+        "\<And>t. \<lbrakk>
+            heap_bytes t patch (unat patch_len) =
+            heap_bytes s patch (unat patch_len);
+            buf_valid t patch (unat patch_len) =
+            buf_valid s patch (unat patch_len)
+          \<rbrakk> \<Longrightarrow>
+          parse_window_prefix' patch patch_len src src_len out_cap 5 \<bullet> t
+          \<lbrace> \<lambda>r u. \<exists>w. r = Result w \<and> u = t \<and> win_t_C.err_C w \<noteq> 0 \<rbrace>"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. \<exists>e. r = Result e \<and> e \<noteq> 0 \<rbrace>"
+proof -
+  have len6_nat: "6 \<le> unat patch_len"
+    using len_gt5 by (simp add: word_less_nat_alt)
+  have patch0_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 0)"
+    using buf_validD[OF patch_ok, of 0] len6_nat by simp
+  have patch1_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 1)"
+    using buf_validD[OF patch_ok, of 1] len6_nat by simp
+  have patch2_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 2)"
+    using buf_validD[OF patch_ok, of 2] len6_nat by simp
+  have patch3_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 3)"
+    using buf_validD[OF patch_ok, of 3] len6_nat by simp
+  have patch4_ok: "ptr_valid (heap_typing s) (patch +\<^sub>p int 4)"
+    using buf_validD[OF patch_ok, of 4] len6_nat by simp
+  show ?thesis
+    unfolding vcdiff_decode'_def
+    supply gets_the_read_byte'_spec [runs_to_vcg]
+    supply build_code_table'_setup
+      [where patch = patch and patch_n = "unat patch_len"
+         and src = src and src_n = "unat src_len" and out_len = out_len,
+       runs_to_vcg]
+    supply near_init_setup_zero_word
+      [where patch = patch and patch_n = "unat patch_len"
+         and src = src and src_n = "unat src_len" and out_len = out_len,
+       runs_to_vcg]
+    supply same_init_setup_zero_word
+      [where patch = patch and patch_n = "unat patch_len"
+         and src = src and src_n = "unat src_len" and out_len = out_len,
+       runs_to_vcg]
+    supply parse_nonok [runs_to_vcg]
+    apply runs_to_vcg
+    using out_len_ok len_gt5 magic0_ok magic1_ok magic2_ok magic3_ok
+      hdr_ok app_clear patch0_ok patch1_ok patch2_ok patch3_ok patch4_ok
+      patch_ok
+    apply (simp_all add: word_less_nat_alt word_le_nat_alt buf_valid_def)
+    done
+qed
+
+
+lemma vcdiff_decode'_noapp_no_source_dlen_none_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch (unat patch_len)"
+      and len_gt5: "(5 :: 32 word) < patch_len"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and magic1_ok: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+      and magic2_ok: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
+      and magic3_ok: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
+      and hdr_ok: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 3 = 0"
+      and app_clear: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 4 = 0"
+      and target_clear:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 2 = 0"
+      and mask_clear:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND (0xFFFFFFFA :: 32 word) = 0"
+      and no_source:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 1 = 0"
+      and dlen_none:
+        "varint_decode (drop 6 (heap_bytes s patch (unat patch_len))) = None"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. \<exists>e. r = Result e \<and> e \<noteq> 0 \<rbrace>"
+proof -
+  have len6_nat: "6 \<le> unat patch_len"
+    using len_gt5 by (simp add: word_less_nat_alt)
+  show ?thesis
+    apply (rule vcdiff_decode'_noapp_parse_window_prefix_nonok
+      [OF out_len_ok patch_ok len_gt5 magic0_ok magic1_ok magic2_ok
+          magic3_ok hdr_ok app_clear])
+    subgoal premises prems for t
+    proof -
+      have byte5_eq:
+        "heap_w8 t (patch +\<^sub>p int 5) =
+         heap_w8 s (patch +\<^sub>p int 5)"
+        using heap_bytes_eq_heap_w8D[of t patch "unat patch_len" s 5]
+          prems len6_nat
+        by simp
+      have dlen_none_t:
+        "varint_decode (drop 6 (heap_bytes t patch (unat patch_len))) = None"
+        using dlen_none prems by simp
+      show ?thesis
+        by (rule parse_window_prefix'_noapp_no_source_dlen_none_nonok
+          [OF _ len_gt5 _ _ _ dlen_none_t])
+          (use patch_ok target_clear mask_clear no_source prems byte5_eq in simp_all)
+    qed
+    done
+qed
+
+
+lemma vcdiff_decode'_noapp_no_source_tgt_none_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch (unat patch_len)"
+      and len_gt5: "(5 :: 32 word) < patch_len"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and magic1_ok: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+      and magic2_ok: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
+      and magic3_ok: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
+      and hdr_ok: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 3 = 0"
+      and app_clear: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 4 = 0"
+      and target_clear:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 2 = 0"
+      and mask_clear:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND (0xFFFFFFFA :: 32 word) = 0"
+      and no_source:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 1 = 0"
+      and dlen_ok:
+        "varint_decode (drop 6 (heap_bytes s patch (unat patch_len))) =
+         Some (dlen, rest3)"
+      and tgt_none: "varint_decode rest3 = None"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. \<exists>e. r = Result e \<and> e \<noteq> 0 \<rbrace>"
+proof -
+  have len6_nat: "6 \<le> unat patch_len"
+    using len_gt5 by (simp add: word_less_nat_alt)
+  show ?thesis
+    apply (rule vcdiff_decode'_noapp_parse_window_prefix_nonok
+      [OF out_len_ok patch_ok len_gt5 magic0_ok magic1_ok magic2_ok
+          magic3_ok hdr_ok app_clear])
+    subgoal premises prems for t
+    proof -
+      have byte5_eq:
+        "heap_w8 t (patch +\<^sub>p int 5) =
+         heap_w8 s (patch +\<^sub>p int 5)"
+        using heap_bytes_eq_heap_w8D[of t patch "unat patch_len" s 5]
+          prems len6_nat
+        by simp
+      have dlen_ok_t:
+        "varint_decode (drop 6 (heap_bytes t patch (unat patch_len))) =
+         Some (dlen, rest3)"
+        using dlen_ok prems by simp
+      show ?thesis
+        by (rule parse_window_prefix'_noapp_no_source_tgt_none_nonok
+          [OF _ len_gt5 _ _ _ dlen_ok_t tgt_none])
+          (use patch_ok target_clear mask_clear no_source prems byte5_eq in simp_all)
+    qed
+    done
+qed
+
+
+lemma vcdiff_decode'_noapp_no_source_di_nonok:
+  assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
+      and patch_ok: "buf_valid s patch (unat patch_len)"
+      and len_gt5: "(5 :: 32 word) < patch_len"
+      and magic0_ok: "uint (heap_w8 s patch) = 214"
+      and magic1_ok: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
+      and magic2_ok: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
+      and magic3_ok: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
+      and hdr_ok: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 3 = 0"
+      and app_clear: "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND 4 = 0"
+      and target_clear:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 2 = 0"
+      and mask_clear:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND (0xFFFFFFFA :: 32 word) = 0"
+      and no_source:
+        "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND 1 = 0"
+      and dlen_ok:
+        "varint_decode (drop 6 (heap_bytes s patch (unat patch_len))) =
+         Some (dlen, rest3)"
+      and tgt_ok: "varint_decode rest3 = Some (tgt_len, rest4)"
+      and di_bad:
+        "rest4 = [] \<or> (\<exists>di rest5. rest4 = di # rest5 \<and> di \<noteq> 0)"
+  shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
+           \<lbrace> \<lambda>r t. \<exists>e. r = Result e \<and> e \<noteq> 0 \<rbrace>"
+proof -
+  have len6_nat: "6 \<le> unat patch_len"
+    using len_gt5 by (simp add: word_less_nat_alt)
+  show ?thesis
+    apply (rule vcdiff_decode'_noapp_parse_window_prefix_nonok
+      [OF out_len_ok patch_ok len_gt5 magic0_ok magic1_ok magic2_ok
+          magic3_ok hdr_ok app_clear])
+    subgoal premises prems for t
+    proof -
+      have byte5_eq:
+        "heap_w8 t (patch +\<^sub>p int 5) =
+         heap_w8 s (patch +\<^sub>p int 5)"
+        using heap_bytes_eq_heap_w8D[of t patch "unat patch_len" s 5]
+          prems len6_nat
+        by simp
+      have dlen_ok_t:
+        "varint_decode (drop 6 (heap_bytes t patch (unat patch_len))) =
+         Some (dlen, rest3)"
+        using dlen_ok prems by simp
+      show ?thesis
+        by (rule parse_window_prefix'_noapp_no_source_di_nonok
+          [OF _ len_gt5 _ _ _ dlen_ok_t tgt_ok di_bad])
+          (use patch_ok target_clear mask_clear no_source prems byte5_eq in simp_all)
+    qed
     done
 qed
 
@@ -51966,9 +52492,94 @@ next
                       magic2_uint magic3_uint hdr_ok32 app_clear32 target_clear32
                       mask_bad32])
             next
-              case False
-              show ?thesis
-                sorry
+              case mask_clear: False
+              have mask_clear32:
+                "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND
+                  (0xFFFFFFFA :: 32 word) = 0"
+              proof -
+                have win_mask_clear: "win_ind AND (0xFA :: 8 word) = 0"
+                  using mask_clear by simp
+                have "(UCAST(8 \<rightarrow> 32) win_ind AND
+                        (0xFFFFFFFA :: 32 word) = 0) =
+                      (win_ind AND (0xFA :: 8 word) = 0)"
+                  by word_bitwise
+	                thus ?thesis using win_mask_clear win_v by simp
+	              qed
+	              show ?thesis
+	              proof (cases "win_ind AND (0x01 :: 8 word) = 0 \<and>
+	                  (varint_decode (drop 6 ?bs) = None \<or>
+	                   (\<exists>dlen rest3.
+	                      varint_decode (drop 6 ?bs) = Some (dlen, rest3) \<and>
+	                      (varint_decode rest3 = None \<or>
+	                       (\<exists>tgt_len rest4.
+	                          varint_decode rest3 = Some (tgt_len, rest4) \<and>
+	                          (rest4 = [] \<or>
+	                           (\<exists>di rest5. rest4 = di # rest5 \<and> di \<noteq> 0))))))")
+	                case True
+	                have no_source8: "win_ind AND (0x01 :: 8 word) = 0"
+	                  using True by simp
+	                have no_source32:
+	                  "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND
+	                    (1 :: 32 word) = 0"
+	                proof -
+                  have "(UCAST(8 \<rightarrow> 32) win_ind AND (1 :: 32 word) = 0) =
+                        (win_ind AND (0x01 :: 8 word) = 0)"
+	                    by word_bitwise
+	                  thus ?thesis using no_source8 win_v by simp
+	                qed
+	                show ?thesis
+	                proof (cases "varint_decode (drop 6 ?bs)")
+	                  case None
+	                  have dlen_none:
+	                    "varint_decode
+	                      (drop 6 (heap_bytes s patch (unat patch_len))) = None"
+	                    using None by simp
+	                  show ?thesis
+	                    by (rule vcdiff_decode'_noapp_no_source_dlen_none_nonok
+	                      [OF out_len_ok patch_ok len_gt5_word magic0_uint magic1_uint
+	                          magic2_uint magic3_uint hdr_ok32 app_clear32
+	                          target_clear32 mask_clear32 no_source32 dlen_none])
+	                next
+	                  case (Some dlen_rest)
+	                  obtain dlen rest3 where dlen_ok_bs:
+	                    "varint_decode (drop 6 ?bs) = Some (dlen, rest3)"
+	                    using Some by (cases dlen_rest) auto
+		                  have dlen_ok:
+		                    "varint_decode
+		                      (drop 6 (heap_bytes s patch (unat patch_len))) =
+		                     Some (dlen, rest3)"
+		                    using dlen_ok_bs by simp
+		                  show ?thesis
+	                  proof (cases "varint_decode rest3")
+	                    case None
+	                    show ?thesis
+	                      by (rule vcdiff_decode'_noapp_no_source_tgt_none_nonok
+	                        [OF out_len_ok patch_ok len_gt5_word magic0_uint magic1_uint
+	                            magic2_uint magic3_uint hdr_ok32 app_clear32
+	                            target_clear32 mask_clear32 no_source32 dlen_ok
+	                            None])
+	                  next
+	                    case (Some tgt_rest)
+	                    obtain tgt_len rest4 where tgt_ok:
+	                      "varint_decode rest3 = Some (tgt_len, rest4)"
+	                      using Some by (cases tgt_rest) auto
+	                    have di_bad:
+	                      "rest4 = [] \<or>
+	                       (\<exists>di rest5. rest4 = di # rest5 \<and> di \<noteq> 0)"
+	                      using True dlen_ok_bs tgt_ok by auto
+	                    show ?thesis
+	                      by (rule vcdiff_decode'_noapp_no_source_di_nonok
+	                        [OF out_len_ok patch_ok len_gt5_word magic0_uint magic1_uint
+	                            magic2_uint magic3_uint hdr_ok32 app_clear32
+	                            target_clear32 mask_clear32 no_source32 dlen_ok
+	                            tgt_ok di_bad])
+	                  qed
+	                qed
+	              next
+	                case False
+	                show ?thesis
+                  sorry
+              qed
             qed
           qed
         qed
