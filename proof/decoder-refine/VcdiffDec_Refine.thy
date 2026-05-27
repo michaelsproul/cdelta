@@ -2,7 +2,7 @@
   Refinement of the AutoCorres-lifted C decoder against the pure spec
   in CdeltaSpecBase.Decoder_Spec + CdeltaSpecRoundtrip.Spec_Roundtrip.
 
-  Strategy (see planning/encoder-refinement-strategy.md § Step 2):
+  Strategy (see planning/encoder-refinement-strategy.md Section Step 2):
     1. Leaf helpers: read_byte', read_varint', decode_address' refine
        their pure counterparts (pop_byte, varint_decode, decode_address).
     2. Main loop: vcdiff_decode' refines decode_spec via a loop invariant
@@ -228,7 +228,7 @@ lemma read_byte'_spec:
 (*
   read_byte' is a total function (returns Some in both the live and
   trunc cases).  When buf_valid holds for the relevant prefix and
-  pos ≤ len, the live case (pos < len) has ptr_valid satisfied, so
+  pos \<le> len, the live case (pos < len) has ptr_valid satisfied, so
   we always have a concrete Some witness.
 *)
 lemma read_byte'_total:
@@ -250,8 +250,8 @@ next
 qed
 
 (*
-  Hoare triple for `gets_the (read_byte' …)` suitable for `[runs_to_vcg]`.
-  Under `buf_valid s buf (unat len)` and `pos ≤ len`, the gets_the always
+  Hoare triple for `gets_the (read_byte' ...)` suitable for `[runs_to_vcg]`.
+  Under `buf_valid s buf (unat len)` and `pos \<le> len`, the gets_the always
   succeeds with a Some witness, and the postcondition is the if-expression
   characterising the live/trunc branches.
 *)
@@ -284,8 +284,8 @@ qed
 (*
   Witness-discharge form of the gets_the residual.  The residual after
   runs_to_vcg on `gets_the (read_byte' buf len pos)` is
-    `∃v. read_byte' buf len pos s = Some v ∧ P v`.
-  Under buf_valid + pos ≤ len, the witness is the if-expression; this
+    `\<exists>v. read_byte' buf len pos s = Some v \<and> P v`.
+  Under buf_valid + pos \<le> len, the witness is the if-expression; this
   lemma reduces the residual to showing P holds of both branches.
 *)
 lemma read_byte'_gets_the_discharge:
@@ -433,7 +433,7 @@ lemma heap_w32_code_tbl_built_update[simp]:
     with measure R = "\<lambda>((cur, i, v), _). 5 - unat i".
 
   The varint_acc_step lemma (Varint.thy) bridges the unat-arithmetic
-  step `v ← (v << 7) | UCAST(b & 0x7F)` to `v * 128 + (b & 0x7F)`.
+  step `v <- (v << 7) | UCAST(b & 0x7F)` to `v * 128 + (b & 0x7F)`.
 
   Effort: several days for the whileLoop invariant plus two exit cases
   (continuation-bit-clear success and iteration-limit-reached failure).
@@ -474,23 +474,23 @@ lemma whileLoop_exn_preserves_partial:
   using body by simp
 
 (*
-  Use runs_to_whileLoop_exn (not runs_to_whileLoop3) — the loop body
+  Use runs_to_whileLoop_exn (not runs_to_whileLoop3) - the loop body
   contains throws, needing the exn variant. Subgoals after application:
 
     1. wf R (trivial for measure)
     2. I (Result initial) s (trivial for True invariant)
-    3. ¬ C → postcondition (normal exit)
-    4. I (Exn a) → postcondition on throw (throw handled by finally)
-    5. Body: B a \<bullet> s ⦃λr t. I r t ∧ measure decrease for Result⦄
+    3. not C -> postcondition (normal exit)
+    4. I (Exn a) -> postcondition on throw (throw handled by finally)
+    5. Body: B a \<bullet> s \<lbrace>\<lambda>r t. I r t \<and> measure decrease for Result\<rbrace>
 
   The non-trivial case is (5): under the invariant and loop condition
   (i < 5), the body either throws or returns with i incremented (so
   5 - unat i decreases).
 
   For functional correctness, the invariant I needs to include:
-    - pos ≤ cur ≤ len
+    - pos \<le> cur \<le> len
     - cur = pos + of_nat (unat i)
-    - i ≤ 5
+    - i \<le> 5
     - unat v < 2 ^ (7 * unat i)
     - Inv_varint: varint_decode_loop (5 - unat i) (unat v) (drop (unat cur) ...)
                 = varint_decode (drop (unat pos) ...)
@@ -498,7 +498,7 @@ lemma whileLoop_exn_preserves_partial:
   The bit-arithmetic step uses varint_acc_step from Varint.thy; the
   overflow-check step uses varint_overflow_check_nat.
 
-  Currently proved below: `read_varint'_no_modify` — state unchanged,
+  Currently proved below: `read_varint'_no_modify` - state unchanged,
   result is Result, no functional correctness. Bounded and full specs
   TODO.
 *)
@@ -779,13 +779,13 @@ qed
                          \<and> unat (pr_t_C.val_C v) = nv
     | None           \<Rightarrow> pr_t_C.err_C v \<noteq> VCD_OK
 
-  Body has 16 subgoals — 10 of them (bounds/IS_VALID/measure) are closed
+  Body has 16 subgoals - 10 of them (bounds/IS_VALID/measure) are closed
   using the same pattern as read_varint'_bounded. The remaining 6 are
   the substantive work: relating read_varint's per-iteration state to
   varint_decode_loop via varint_acc_step + varint_overflow_check_nat.
 *)
 
-(* Helper: heap_bytes drop relation — dropping unat cur from the buffer
+(* Helper: heap_bytes drop relation - dropping unat cur from the buffer
    is the same as dropping unat i elements from drop unat pos. *)
 lemma heap_bytes_drop_shift:
   assumes "unat pos + i \<le> unat len"
@@ -872,7 +872,7 @@ lemma read_varint'_spec:
     apply (simp add: Let_def split: prod.splits del: if_split)
     apply safe
     apply runs_to_vcg
-    \<comment> \<open>Goal 1: truncation-throw — varint_decode = None.\<close>
+    \<comment> \<open>Goal 1: truncation-throw - varint_decode = None.\<close>
     subgoal for cur i v
       apply (subgoal_tac "varint_decode_loop (5 - unat i) (unat v) [] = None")
        apply simp
@@ -890,7 +890,7 @@ lemma read_varint'_spec:
     subgoal for x1 x1a x2a by uint_arith
     \<comment> \<open>Goal 4: x1+1 \<le> len (overflow throw).\<close>
     subgoal for x1 x1a x2a by uint_arith
-    \<comment> \<open>Goal 5: overflow-throw — varint_decode = None.
+    \<comment> \<open>Goal 5: overflow-throw - varint_decode = None.
         varint_overflow_check_nat gives v \<ge> 2^25; varint_bound_forces_i_4
         gives i = 4; then 5 - i = 1; varint_decode_loop_fuel1_overflow
         gives None.\<close>
@@ -910,7 +910,7 @@ lemma read_varint'_spec:
     subgoal for x1 x1a x2a by uint_arith
     \<comment> \<open>Goal 7: x1+1 \<le> len (success path).\<close>
     subgoal for x1 x1a x2a by uint_arith
-    \<comment> \<open>Goal 8: success post — varint_decode = Some (val_C, rest).
+    \<comment> \<open>Goal 8: success post - varint_decode = Some (val_C, rest).
         Mirror of Goal 14: on continuation bit CLEAR, the loop returns
         Some(new_v, rest) via varint_decode_loop_step_success.\<close>
     subgoal premises prems for x1 x1a x2a
@@ -1158,7 +1158,7 @@ qed
 (* ---------- build_code_table refinement ---------- *)
 
 (*
-  build_code_table' has no failure branches — only guarded array writes.
+  build_code_table' has no failure branches - only guarded array writes.
   Under the simplest precondition (no precondition needed on state), it
   terminates with a Result () and modifies only the code_tbl and
   code_tbl_built fields. Full functional refinement (relating the
@@ -1320,7 +1320,7 @@ lemma read_varint'_none_nonok:
   AutoCorres lifts `near_arr` / `same_arr` as record fields of
   `lifted_globals`, of array type. They are indexed via `.[unat i]`
   (the Arrays.index abbreviation `arr.[n]`). No heap-pointer
-  validity is required — the arrays are part of the state record.
+  validity is required - the arrays are part of the state record.
 
   The pure spec models them as nat lists. cache_abs relates the two:
     - The `near_ptr` is the C record's `near_ptr_C` field value,
@@ -1615,7 +1615,7 @@ qed
     - unat mode < 9
 
   Postcondition (inverts Result/Exn because of `finally`):
-    - s unchanged? NO — near_arr/same_arr are modified on success path.
+    - s unchanged? NO - near_arr/same_arr are modified on success path.
       Only other fields are preserved.
     - If decode_address c (unat mode) (unat here) (drop (unat pos) bytes)
         = Some (addr, rest, c'), then the Exn result is
@@ -1719,14 +1719,14 @@ lemma decode_address'_spec:
            \<comment> \<open>9 subgoals: (1) contradict Some in the here<val path, (2) np_in<4,
                (3) val mod 0x300, (4) contradict None in the here\<ge>val path,
                (5) pos_C, (6) addr_C, (7) unat mod, (8) near_ptr, (9) cache_abs.\<close>
-        subgoal \<comment> \<open>(1) here < val_C v path, decode_address gave Some — contradiction.\<close>
+        subgoal \<comment> \<open>(1) here < val_C v path, decode_address gave Some - contradiction.\<close>
           by (clarsimp simp: decode_address_def word_less_nat_alt)
         subgoal \<comment> \<open>(2) guard np_in < 4.\<close>
           using cache_ok
           by (simp add: cache_abs_def s_near_def word_less_nat_alt)
         subgoal \<comment> \<open>(3) guard val mod 0x300.\<close>
           by (simp add: word_mod_less_divisor)
-        subgoal \<comment> \<open>(4) \<not>here<val path, decode_address gave None — contradiction.\<close>
+        subgoal \<comment> \<open>(4) \<not>here<val path, decode_address gave None - contradiction.\<close>
           by (clarsimp simp: decode_address_def Let_def word_less_nat_alt)
         subgoal for a aa ba \<comment> \<open>(5) pos_C.\<close>
           apply (clarsimp simp: decode_address_def Let_def
@@ -5456,6 +5456,110 @@ proof -
     done
 qed
 
+lemma parse_window_no_source_after_di_inr_cases:
+  assumes len_gt5: "5 < length bs"
+      and target_clear: "(bs ! 5) AND (0x02 :: 8 word) = 0"
+      and mask_clear: "(bs ! 5) AND (0xFA :: 8 word) = 0"
+      and no_source: "(bs ! 5) AND (0x01 :: 8 word) = 0"
+      and dlen_ok: "varint_decode (drop 6 bs) = Some (dlen, rest3)"
+      and tgt_ok: "varint_decode rest3 = Some (tgt_len, rest4)"
+      and di0: "rest4 = 0 # rest5"
+      and parse_inr: "parse_window (drop 5 bs) = Inr e"
+  shows "varint_decode rest5 = None \<or>
+         (\<exists>data_len rest6.
+            varint_decode rest5 = Some (data_len, rest6) \<and>
+            (varint_decode rest6 = None \<or>
+             (\<exists>inst_len rest7.
+                varint_decode rest6 = Some (inst_len, rest7) \<and>
+                (varint_decode rest7 = None \<or>
+                 (\<exists>addr_len rest8.
+                    varint_decode rest7 = Some (addr_len, rest8) \<and>
+                    (let adler_len =
+                       (if (bs ! 5) AND (0x04 :: 8 word) \<noteq> 0 then 4 else 0);
+                         consumed = length rest3 - length rest8;
+                         payload_len = adler_len + data_len + inst_len + addr_len
+                     in dlen < consumed \<or>
+                        dlen - consumed \<noteq> payload_len \<or>
+                        payload_len > length rest8))))))"
+proof -
+  have drop5: "drop 5 bs = bs ! 5 # drop 6 bs"
+  proof -
+    have nonempty: "drop 5 bs \<noteq> []"
+      using len_gt5 by simp
+    have tl_eq: "tl (drop 5 bs) = drop 6 bs"
+    proof -
+      have "tl (drop 5 bs) = drop 5 (tl bs)"
+        by (rule tl_drop)
+      also have "\<dots> = drop (Suc 5) bs"
+        by (rule sym, rule drop_Suc)
+      also have "\<dots> = drop 6 bs"
+        by simp
+      finally show ?thesis .
+    qed
+    have "drop 5 bs = hd (drop 5 bs) # tl (drop 5 bs)"
+      using nonempty by simp
+    also have "\<dots> = bs ! 5 # drop 6 bs"
+      using len_gt5 tl_eq by (simp add: hd_drop_conv_nth)
+    finally show ?thesis .
+  qed
+  show ?thesis
+  proof (cases "varint_decode rest5")
+    case None
+    thus ?thesis by simp
+  next
+    case (Some data_pair)
+    obtain data_len rest6 where data_ok:
+      "varint_decode rest5 = Some (data_len, rest6)"
+      using Some by (cases data_pair) auto
+    show ?thesis
+    proof (cases "varint_decode rest6")
+      case None
+      thus ?thesis using data_ok by blast
+    next
+      case (Some inst_pair)
+      obtain inst_len rest7 where inst_ok:
+        "varint_decode rest6 = Some (inst_len, rest7)"
+        using Some by (cases inst_pair) auto
+      show ?thesis
+      proof (cases "varint_decode rest7")
+        case None
+        thus ?thesis using data_ok inst_ok by blast
+      next
+        case (Some addr_pair)
+        obtain addr_len rest8 where addr_ok:
+          "varint_decode rest7 = Some (addr_len, rest8)"
+          using Some by (cases addr_pair) auto
+        let ?adler_len =
+          "if (bs ! 5) AND (0x04 :: 8 word) \<noteq> 0 then 4 else 0"
+        let ?consumed = "length rest3 - length rest8"
+        let ?payload_len = "?adler_len + data_len + inst_len + addr_len"
+        have bad:
+          "dlen < ?consumed \<or>
+           dlen - ?consumed \<noteq> ?payload_len \<or>
+           ?payload_len > length rest8"
+        proof (rule ccontr)
+          assume "\<not> (dlen < ?consumed \<or>
+                    dlen - ?consumed \<noteq> ?payload_len \<or>
+                    ?payload_len > length rest8)"
+          hence good:
+            "\<not> dlen < ?consumed"
+            "dlen - ?consumed = ?payload_len"
+            "\<not> ?payload_len > length rest8"
+            by auto
+          have "parse_window (drop 5 bs) \<noteq> Inr e"
+            using target_clear mask_clear no_source dlen_ok tgt_ok di0
+              data_ok inst_ok addr_ok good
+            unfolding parse_window_def pop_byte_def Let_def drop5
+            by simp
+          thus False using parse_inr by simp
+        qed
+        show ?thesis
+          using data_ok inst_ok addr_ok bad by (auto simp: Let_def)
+      qed
+    qed
+  qed
+qed
+
 lemma noapp_source_off_decode_some_heap:
   assumes parsed:
       "parse_window (drop 5 (heap_bytes s patch (unat patch_len))) =
@@ -6850,7 +6954,7 @@ lemma copy_loop_correct:
           by (auto simp: word_less_nat_alt word_unat.Rep_inverse)
       \<comment> \<open>7. src preservation (neq)\<close>
        subgoal by auto
-      \<comment> \<open>8. output correctness (eq ptr) — source branch\<close>
+      \<comment> \<open>8. output correctness (eq ptr) - source branch\<close>
       subgoal for k
         apply (subgoal_tac "k = unat j")
          prefer 2
@@ -7000,7 +7104,7 @@ lemma copy_loop_correct:
           by (auto simp: word_less_nat_alt word_unat.Rep_inverse)
       \<comment> \<open>7. src preservation (neq)\<close>
        subgoal by auto
-      \<comment> \<open>8. output correctness (eq ptr) — overlapping branch\<close>
+      \<comment> \<open>8. output correctness (eq ptr) - overlapping branch\<close>
       subgoal for k
         apply (subgoal_tac "k = unat j")
          prefer 2
@@ -7039,7 +7143,7 @@ lemma copy_loop_correct:
         apply (simp only:)
         \<comment> \<open>Case split: is the read address in prefix or loop-written region?\<close>
         apply (cases "unat addr + unat j - unat src_seg_len < unat tgt_pos")
-        \<comment> \<open>Case A: prefix region — use prefix invariant + tgt_pre\<close>
+        \<comment> \<open>Case A: prefix region - use prefix invariant + tgt_pre\<close>
          apply (subgoal_tac "copy_loop src_seg tgt_pre (unat addr) (unat j)
                   ! (unat addr + unat j - length src_seg) =
                 tgt_pre ! (unat addr + unat j - length src_seg)")
@@ -7066,7 +7170,7 @@ lemma copy_loop_correct:
           apply (simp add: unat_sub word_le_nat_alt)
          apply (simp only:)
          apply (simp only: uint_nat)
-        \<comment> \<open>Case B: loop-written region — use output invariant + ptr equality\<close>
+        \<comment> \<open>Case B: loop-written region - use output invariant + ptr equality\<close>
 	        apply (subgoal_tac "addr + j - src_seg_len =
 	               tgt_pos + word_of_nat (unat addr + unat j - unat src_seg_len - unat tgt_pos)")
 	         prefer 2
@@ -7466,19 +7570,19 @@ qed
   to the pure spec's dec_state after some number of iterations.
 
   Parameters:
-    s0      — initial state (before the loop; patch/src heap reference)
-    patch, patch_n — patch buffer base and size
-    src, src_n     — source buffer base and size
-    out            — output buffer base
-    src_seg_off, src_seg_len — source segment within src
-    tgt_len        — expected target length (nat, from the varint)
-    data_end, inst_end, addr_end — section end cursors (fixed)
-    src_seg — precomputed source segment bytes (from src)
+    s0      - initial state (before the loop; patch/src heap reference)
+    patch, patch_n - patch buffer base and size
+    src, src_n     - source buffer base and size
+    out            - output buffer base
+    src_seg_off, src_seg_len - source segment within src
+    tgt_len        - expected target length (nat, from the varint)
+    data_end, inst_end, addr_end - section end cursors (fixed)
+    src_seg - precomputed source segment bytes (from src)
 
   Loop variables (5-tuple carried by the whileLoop):
-    data_cursor, inst_cursor, addr_cursor — current read positions
-    tgt_pos    — bytes written to output so far
-    near_ptr   — cache rotation index
+    data_cursor, inst_cursor, addr_cursor - current read positions
+    tgt_pos    - bytes written to output so far
+    near_ptr   - cache rotation index
 
   The invariant says: there exists an abstract dec_state `dst` such that
   the remaining bytes in the patch (between cursor and end) equal the
@@ -7581,12 +7685,12 @@ lemma decode_loop_invD:
   the pure spec's `decode_loop` trace.
 
   `decode_loop_inv_plus` adds a progress conjunct:
-    ∃dst0 k. decode_loop k src_seg src_seg_len tgt_len dst0 = Inl dst ∧
+    \<exists>dst0 k. decode_loop k src_seg src_seg_len tgt_len dst0 = Inl dst \<and>
              dst is the same witness decode_loop_inv has.
 
-  At exit (inst_cursor = inst_end ⇒ ds_inst_rem dst = [] ⇒
-  decode_loop terminates at this dst ⇒ length (ds_tgt dst) = tgt_len
-  ⇒ heap_bytes t out (unat tgt_pos) = ds_tgt dst = target bytes),
+  At exit (inst_cursor = inst_end => ds_inst_rem dst = [] =>
+  decode_loop terminates at this dst => length (ds_tgt dst) = tgt_len
+  => heap_bytes t out (unat tgt_pos) = ds_tgt dst = target bytes),
   we can conclude the output-match claim.
 
   The progress parameter `dst0` represents the initial state at the
@@ -8325,7 +8429,7 @@ qed
 
   The progress conjunct updates naturally: from the old dst, fuel
   N = length (ds_inst_rem dst) gives Inl dst_final; from the new dst'
-  (= one decode_one step further), fuel N-k (for some k ≥ 1 consumed)
+  (= one decode_one step further), fuel N-k (for some k \<ge> 1 consumed)
   still gives the same dst_final because decode_loop is deterministic.
 *)
 (*
@@ -8360,7 +8464,7 @@ lemma decode_loop_from_apply_window:
   by (auto split: sum.splits if_splits)
 
 (*
-  Simple consequence: from inv_plus, inst_cursor ≤ inst_end.
+  Simple consequence: from inv_plus, inst_cursor \<le> inst_end.
   Avoids having to unfold definitions inside larger proofs.
 *)
 lemma decode_loop_inv_plus_ic_le:
@@ -8443,7 +8547,7 @@ proof -
     apply (rule runs_to_whileLoop_exn'
       [where I = ?I
          and R = "measure (\<lambda>((ac, dc, ic, np, tp), _). unat inst_end - unat ic)"])
-    \<comment> \<open>Body preserves I.  I = (Result conj) ∧ (Exn conj).\<close>
+    \<comment> \<open>Body preserves I.  I = (Result conj) \<and> (Exn conj).\<close>
     subgoal for a t
       apply clarsimp
       apply (rule runs_to_weaken[OF body_preserves])
@@ -8451,16 +8555,16 @@ proof -
        apply blast
       apply (elim conjE)
       apply (intro conjI allI impI)
-        \<comment> \<open>I r t' — Result conj.\<close>
+        \<comment> \<open>I r t' - Result conj.\<close>
         apply blast
-       \<comment> \<open>I r t' — Exn conj.\<close>
+       \<comment> \<open>I r t' - Exn conj.\<close>
        apply blast
       \<comment> \<open>Measure decrease.\<close>
       apply clarsimp
       apply (drule decode_loop_inv_plus_ic_le)
       apply (simp add: word_less_nat_alt word_le_nat_alt)
       done
-    \<comment> \<open>Exit (Result, guard false) ⇒ postcondition.\<close>
+    \<comment> \<open>Exit (Result, guard false) => postcondition.\<close>
     subgoal for a t
       apply (clarsimp simp: split_def)
       apply (frule decode_loop_inv_plus_ic_le)
@@ -8470,7 +8574,7 @@ proof -
       apply (drule decode_loop_inv_plus_exit[OF _ ie_le])
       apply auto
       done
-    \<comment> \<open>Exit (Exn e): carries e ≠ 0 from invariant.\<close>
+    \<comment> \<open>Exit (Exn e): carries e \<noteq> 0 from invariant.\<close>
     subgoal for a t by simp
     \<comment> \<open>wf.\<close>
     subgoal by simp
@@ -8556,7 +8660,7 @@ qed
 
 (*
   Fuel monotonicity: if decode_loop k dst = Inl f, then for any
-  k' ≥ k, decode_loop k' dst = Inl f.  Once the decoder reaches
+  k' \<ge> k, decode_loop k' dst = Inl f.  Once the decoder reaches
   ds_inst_rem = [], extra fuel is ignored.
 *)
 lemma decode_loop_fuel_mono:
@@ -8674,7 +8778,7 @@ proof -
       by (simp add: word_less_nat_alt)
     ultimately show ?thesis by simp
   qed
-  \<comment> \<open>k_prev must be ≥ 1 (decode_loop 0 on non-empty inst_rem returns Inr).\<close>
+  \<comment> \<open>k_prev must be \<ge> 1 (decode_loop 0 on non-empty inst_rem returns Inr).\<close>
   have k_prev_pos: "k_prev \<ge> 1"
   proof (rule ccontr)
     assume "\<not> k_prev \<ge> 1"
@@ -9191,7 +9295,7 @@ proof -
         rhs data_rem_nth data_byte patch_ptr_eq by simp
     qed
   qed
-  \<comment> \<open>cache_abs t' c np — arrays unchanged, so same as cache_abs t c np\<close>
+  \<comment> \<open>cache_abs t' c np - arrays unchanged, so same as cache_abs t c np\<close>
   have cache_abs': "cache_abs t' c np"
     using cache_ok cache_preserved
     by (simp add: cache_abs_def)
@@ -9200,7 +9304,7 @@ proof -
 	    using invD(13) code_tbl_preserved by (simp add: code_tbl_matches_def)
 	  have code_tbl_tags': "code_tbl_tags_valid t'"
 	    using invD(22) code_tbl_preserved by (simp add: code_tbl_tags_valid_def)
-  \<comment> \<open>buf_valid — depends only on heap_typing\<close>
+  \<comment> \<open>buf_valid - depends only on heap_typing\<close>
   have bv_patch: "buf_valid t' patch patch_n"
     using invD(3) typing_preserved by (simp add: buf_valid_def)
   have bv_src: "buf_valid t' src src_n"
@@ -22560,36 +22664,36 @@ qed
 
 (*
   ----------------------------------------------------------------------
-  Outer-loop residual obligations in vcdiff_decode'_spec.
+  Outer-loop residual obligations in vcdiff_decode'_spec_inl.
 
-  Each of the 4 top-level branches (code_tbl ∈ {0,1} × has-app-header
-  ∈ {0,1}) reaches the same outer whileLoop after its setup prefix.
+  Each of the 4 top-level branches (code_tbl \<in> {0,1} x has-app-header
+  \<in> {0,1}) reaches the same outer whileLoop after its setup prefix.
   Applying `runs_to_weaken[OF outer_whileLoop_correct_abstract]` at
   those 4 sites unifies cleanly and leaves 4 per-branch subgoals:
 
-    (a) inv_entry     — decode_loop_inv_plus at the entry state
+    (a) inv_entry     - decode_loop_inv_plus at the entry state
                         (data_cursor = data_pos, inst_cursor = inst_pos,
                         addr_cursor = addr_pos, tp = 0, np = 0).
                         Follows from decode_loop_inv_init +
                         decode_loop_inv_plus_entry, using the pure-spec
                         decode_loop_terminates fact.
-    (b) body_preserves — one outer-iteration VCG: reads the opcode,
-                        dispatches through the nested `which ∈ {0,1}`
+    (b) body_preserves - one outer-iteration VCG: reads the opcode,
+                        dispatches through the nested `which \<in> {0,1}`
                         whileLoop (add/run/copy bodies with inner byte-
                         copy whileLoops), and restores the invariant
                         with strict ic advancement.  Proof uses
                         decode_loop_inv_plus_advance after identifying
                         the abstract decode_one step.
-    (c) ie_le         — unat inst_end ≤ patch_n.  Follows from
+    (c) ie_le         - unat inst_end \<le> patch_n.  Follows from
                         the window prefix's cursor bounds.
-    (d) exit_weakening — after the whileLoop post gives
-                        ic = inst_end ∧ heap_bytes t' out (unat tp) = tgt
-                        ∧ unat tp = tgt_len, the trailing cursor-
+    (d) exit_weakening - after the whileLoop post gives
+                        ic = inst_end \<and> heap_bytes t' out (unat tp) = tgt
+                        \<and> unat tp = tgt_len, the trailing cursor-
                         consistency asserts and out_len write achieve
                         the overall postcondition; identical across all
                         4 branches.
 
-  The four branches share the same body_preserves shape — they differ
+  The four branches share the same body_preserves shape - they differ
   only in which captured values bind to `data_end, inst_end, addr_end,
   src_seg_off, src_seg_len, tgt_len, src_seg, tgt`.  Instantiating each
   against the concrete witness names (e.g. `pos_C vaaaab + ...`) is the
@@ -22606,12 +22710,13 @@ qed
 *)
 declare [[show_types]]
 
-lemma vcdiff_decode'_spec:
+lemma vcdiff_decode'_spec_inl:
   fixes patch :: "8 word ptr" and patch_len :: "32 word"
     and src   :: "8 word ptr" and src_len   :: "32 word"
     and out   :: "8 word ptr" and out_cap   :: "32 word"
     and out_len :: "32 word ptr"
     and s :: lifted_globals
+    and tgt :: "byte list"
   assumes out_len_ok: "ptr_valid (heap_typing s) out_len"
       and patch_ok: "buf_valid s patch (unat patch_len)"
       and src_ok:   "buf_valid s src   (unat src_len)"
@@ -22648,17 +22753,15 @@ lemma vcdiff_decode'_spec:
 	           parse_header (heap_bytes s patch (unat patch_len)) = Inl rest \<Longrightarrow>
 	           parse_window rest = Inl (win, tail) \<Longrightarrow>
 	           pw_src_seg_len win + pw_tgt_len win < 2 ^ 32"
+      and decode_ok:
+        "decode_spec (heap_bytes s patch (unat patch_len))
+                     (heap_bytes s src   (unat src_len)) = Inl tgt"
   shows "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s
-           \<lbrace> \<lambda>r t.
-             case decode_spec (heap_bytes s patch (unat patch_len))
-                              (heap_bytes s src   (unat src_len)) of
-               Inl tgt \<Rightarrow> r = Result (0 :: int) \<and>
-                          unat (heap_w32 t out_len) = length tgt \<and>
-                          heap_bytes t out (length tgt) = tgt
-             | Inr _   \<Rightarrow> (\<exists>e. r = Result (e :: int) \<and> e \<noteq> 0) \<rbrace>"
-proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
-                           (heap_bytes s src   (unat src_len))")
-  case (Inl tgt)
+           \<lbrace> \<lambda>r t. r = Result (0 :: int) \<and>
+                    unat (heap_w32 t out_len) = length tgt \<and>
+                    heap_bytes t out (length tgt) = tgt \<rbrace>"
+proof -
+  note Inl = decode_ok
   \<comment> \<open>Soundness: if the spec accepts the input, the C decoder produces
       the same target bytes and returns VCD_OK.
 
@@ -24369,7 +24472,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       subgoal using magic3_v by simp
       subgoal using patchi_ok[of 4] by simp
       subgoal premises prems
-        \<comment> \<open>Goal: UCAST(hi) AND 3 ≠ 0 ⟹ False.\<close>
+        \<comment> \<open>Goal: UCAST(hi) AND 3 \<noteq> 0 \<Longrightarrow> False.\<close>
       proof -
         have eq: "UCAST(8 \<rightarrow> 32) hi AND 3 = UCAST(8 \<rightarrow> 32) (hi AND 3)"
           by word_bitwise
@@ -24378,9 +24481,9 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 	      subgoal using patch_ok by simp
 	      subgoal using len_ge5_word by simp
 	      \<comment> \<open>Remaining: 8 subgoals.  Subgoals 1-4 are the app-header branch with
-	          varint-error path — contradiction from Inl (spec requires varint success).
+	          varint-error path - contradiction from Inl (spec requires varint success).
 	          Subgoals 5-8 are the main body with build_code_table'.\<close>
-      \<comment> \<open>Subgoals 1-4: contradiction from err ≠ 0 + Inl ⟹ varint succeeds.\<close>
+      \<comment> \<open>Subgoals 1-4: contradiction from err \<noteq> 0 + Inl \<Longrightarrow> varint succeeds.\<close>
       subgoal for va
         using parse_header_app[unfolded app_bit_def] ucast_and_4_equiv
               body_from_drop5 hi_v
@@ -24393,9 +24496,9 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
         using parse_header_app[unfolded app_bit_def] ucast_and_4_equiv
               body_from_drop5 hi_v
         by (auto split: option.splits)
-      \<comment> \<open>Subgoal 4: patch_len - pos < val_C ⟹ False.  Need: the spec
-          succeeded with rest = drop app_len rest', hence app_len ≤ length rest',
-          hence pos + app_len ≤ patch_len (i.e. val_C ≤ patch_len - pos).\<close>
+      \<comment> \<open>Subgoal 4: patch_len - pos < val_C \<Longrightarrow> False.  Need: the spec
+          succeeded with rest = drop app_len rest', hence app_len \<le> length rest',
+          hence pos + app_len \<le> patch_len (i.e. val_C \<le> patch_len - pos).\<close>
       subgoal for va
       proof -
         assume err0: "pr_t_C.err_C va = 0"
@@ -24448,13 +24551,13 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
       subgoal for va tb tc td
         unfolding parse_window_prefix'_def
         apply runs_to_vcg
-        \<comment> \<open>Establish word-level bound: pos_C va + val_C va ≤ patch_len.\<close>
+        \<comment> \<open>Establish word-level bound: pos_C va + val_C va \<le> patch_len.\<close>
         apply (subgoal_tac "pr_t_C.pos_C va + val_C va \<le> patch_len")
          prefer 2
          subgoal
-           \<comment> \<open>From the C's check: val_C va ≤ patch_len - pos_C va.  Thus
-               pos_C va + val_C va ≤ patch_len (word-level, no overflow
-               since pos_C va ≤ patch_len).\<close>
+           \<comment> \<open>From the C's check: val_C va \<le> patch_len - pos_C va.  Thus
+               pos_C va + val_C va \<le> patch_len (word-level, no overflow
+               since pos_C va \<le> patch_len).\<close>
            apply (subgoal_tac "val_C va \<le> patch_len - pr_t_C.pos_C va")
             prefer 2
             apply (simp add: word_le_not_less)
@@ -24465,7 +24568,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
            done
         \<comment> \<open>Derive buf_valid td patch (unat patch_len) from chain:
             heap_typing td = heap_typing s (via build_code_table'_preserves_typing
-            + init-loop preservations) ⟹ buf_valid td = buf_valid s.\<close>
+            + init-loop preservations) \<Longrightarrow> buf_valid td = buf_valid s.\<close>
         apply (subgoal_tac "buf_valid td patch (unat patch_len)")
          prefer 2
          using patch_ok apply (simp add: buf_valid_def)
@@ -24493,7 +24596,7 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
              * the outer instruction-dispatch whileLoop (the main work)
              * post-loop cursor consistency checks
              * final out_len write.
-             Deferred — see planning/refine-progress.md for the strengthened
+             Deferred - see planning/refine-progress.md for the strengthened
              decode_loop_inv approach.\<close>
            apply runs_to_vcg
            subgoal premises prems
@@ -52300,303 +52403,6 @@ proof (cases "decode_spec (heap_bytes s patch (unat patch_len))
 								  done
 								  qed
 						  thus ?thesis by (simp add: Inl)
-next
-  case (Inr e)
-  \<comment> \<open>Completeness on rejection: if the spec rejects the input, the C
-      decoder returns a nonzero error code.  Strategy: run the full
-      supply-runs_to_vcg and let the residual subgoals identify the
-      specific failure path in C corresponding to each spec failure.\<close>
-  note decode_reject = Inr
-  let ?Post = "\<lambda>r t. \<exists>e. r = Result (e :: int) \<and> e \<noteq> 0"
-  have "vcdiff_decode' patch patch_len src src_len out out_cap out_len \<bullet> s \<lbrace> ?Post \<rbrace>"
-  proof (cases "parse_header (heap_bytes s patch (unat patch_len))")
-    case (Inr pe)
-    show ?thesis
-      by (rule vcdiff_decode'_parse_header_inr_nonok[OF out_len_ok patch_ok Inr])
-  next
-    case (Inl rest)
-    note header_ok = Inl
-    show ?thesis
-    proof (cases "parse_window rest")
-      case (Inr we)
-      let ?bs = "heap_bytes s patch (unat patch_len)"
-      from header_ok obtain b0 b1 b2 b3 hi body where
-        bs_form: "?bs = b0 # b1 # b2 # b3 # hi # body" and
-        magic: "[b0, b1, b2, b3] = [0xD6, 0xC3, 0xC4, 0x00]" and
-        hdr3: "hi AND 0x03 = 0"
-        unfolding parse_header_def
-        by (auto split: list.splits if_splits)
-      from magic have b0_eq: "b0 = 0xD6" and b1_eq: "b1 = 0xC3"
-        and b2_eq: "b2 = 0xC4" and b3_eq: "b3 = 0x00" by auto
-      have body_from_drop5: "body = drop 5 ?bs"
-        using bs_form by simp
-      define app_bit where "app_bit = (hi AND 0x04 \<noteq> 0)"
-      have parse_header_noapp:
-        "\<not> app_bit \<Longrightarrow> rest = body"
-        using header_ok bs_form hdr3 unfolding parse_header_def app_bit_def
-        by (auto split: list.splits if_splits option.splits)
-      have ucast_and_4_equiv:
-        "(UCAST(8 \<rightarrow> 32) hi AND 4 \<noteq> 0) = (hi AND 4 \<noteq> 0)"
-        by word_bitwise
-      show ?thesis
-      proof (cases app_bit)
-        case True
-        show ?thesis
-          sorry
-      next
-        case no_app: False
-        have rest_body: "rest = body"
-          using parse_header_noapp no_app by simp
-        show ?thesis
-        proof (cases rest)
-          case Nil
-          have body_nil: "body = []"
-            using rest_body Nil by auto
-          have len_eq_nat: "unat patch_len = 5"
-          proof -
-            have "length ?bs = 5"
-              using bs_form body_nil by simp
-            thus ?thesis by simp
-          qed
-          have len_eq_word: "patch_len = (5 :: 32 word)"
-          proof -
-            have "unat patch_len = unat (5 :: 32 word)"
-              using len_eq_nat by simp
-            thus ?thesis using word_unat_eq_iff[of patch_len "5 :: 32 word"] by simp
-          qed
-          have nth_eq:
-            "\<And>i. i < 5 \<Longrightarrow>
-              heap_w8 s (patch +\<^sub>p int i) = ?bs ! i"
-            using len_eq_nat by (simp add: heap_bytes_nth)
-          have magic0_uint: "uint (heap_w8 s patch) = 214"
-            using nth_eq[of 0] bs_form b0_eq by simp
-          have magic1_uint: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
-            using nth_eq[of 1] bs_form b1_eq by simp
-          have magic2_uint: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
-            using nth_eq[of 2] bs_form b2_eq by simp
-          have magic3_uint: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
-            using nth_eq[of 3] bs_form b3_eq by simp
-          have hi_v: "heap_w8 s (patch +\<^sub>p 4) = hi"
-            using nth_eq[of 4] bs_form by simp
-          have hdr_ok32:
-            "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND (3 :: 32 word) = 0"
-          proof -
-            have "(UCAST(8 \<rightarrow> 32) hi AND (3 :: 32 word) = 0) =
-                  (hi AND (0x03 :: 8 word) = 0)"
-              by word_bitwise
-            thus ?thesis using hdr3 hi_v by simp
-          qed
-          have app_clear32:
-            "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND (4 :: 32 word) = 0"
-          proof -
-            have hi_app_clear: "hi AND (0x04 :: 8 word) = 0"
-              using no_app unfolding app_bit_def by simp
-            have "(UCAST(8 \<rightarrow> 32) hi AND (4 :: 32 word) = 0) =
-                  (hi AND (0x04 :: 8 word) = 0)"
-              by word_bitwise
-            thus ?thesis using hi_app_clear hi_v by simp
-          qed
-          show ?thesis
-            by (rule vcdiff_decode'_noapp_win_ind_at_end_nonok
-              [OF out_len_ok patch_ok len_eq_word magic0_uint magic1_uint
-                  magic2_uint magic3_uint hdr_ok32 app_clear32])
-        next
-          case (Cons win_ind rest1)
-          have body_eq: "body = win_ind # rest1"
-            using rest_body Cons by auto
-          have len_gt5_nat: "5 < unat patch_len"
-          proof -
-            have "6 \<le> length ?bs"
-              using bs_form body_eq by simp
-            thus ?thesis by simp
-          qed
-          have len_gt5_word: "(5 :: 32 word) < patch_len"
-            using len_gt5_nat by (simp add: word_less_nat_alt)
-          have nth_eq:
-            "\<And>i. i < 6 \<Longrightarrow>
-              heap_w8 s (patch +\<^sub>p int i) = ?bs ! i"
-            using len_gt5_nat by (simp add: heap_bytes_nth)
-          have magic0_uint: "uint (heap_w8 s patch) = 214"
-            using nth_eq[of 0] bs_form b0_eq by simp
-          have magic1_uint: "uint (heap_w8 s (patch +\<^sub>p 1)) = 195"
-            using nth_eq[of 1] bs_form b1_eq by simp
-          have magic2_uint: "uint (heap_w8 s (patch +\<^sub>p 2)) = 196"
-            using nth_eq[of 2] bs_form b2_eq by simp
-          have magic3_uint: "uint (heap_w8 s (patch +\<^sub>p 3)) = 0"
-            using nth_eq[of 3] bs_form b3_eq by simp
-          have hi_v: "heap_w8 s (patch +\<^sub>p 4) = hi"
-            using nth_eq[of 4] bs_form by simp
-          have hdr_ok32:
-            "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND (3 :: 32 word) = 0"
-          proof -
-            have "(UCAST(8 \<rightarrow> 32) hi AND (3 :: 32 word) = 0) =
-                  (hi AND (0x03 :: 8 word) = 0)"
-              by word_bitwise
-            thus ?thesis using hdr3 hi_v by simp
-          qed
-          have app_clear32:
-            "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 4)) AND (4 :: 32 word) = 0"
-          proof -
-            have hi_app_clear: "hi AND (0x04 :: 8 word) = 0"
-              using no_app unfolding app_bit_def by simp
-            have "(UCAST(8 \<rightarrow> 32) hi AND (4 :: 32 word) = 0) =
-                  (hi AND (0x04 :: 8 word) = 0)"
-              by word_bitwise
-            thus ?thesis using hi_app_clear hi_v by simp
-          qed
-          have win_v: "heap_w8 s (patch +\<^sub>p 5) = win_ind"
-            using nth_eq[of 5] bs_form body_eq by simp
-          show ?thesis
-          proof (cases "win_ind AND (0x02 :: 8 word) \<noteq> 0")
-            case target_bad: True
-            have win_bad32:
-              "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND (2 :: 32 word) \<noteq> 0"
-            proof -
-              have "(UCAST(8 \<rightarrow> 32) win_ind AND (2 :: 32 word) \<noteq> 0) =
-                    (win_ind AND (0x02 :: 8 word) \<noteq> 0)"
-                by word_bitwise
-              thus ?thesis using target_bad win_v by simp
-            qed
-            show ?thesis
-              by (rule vcdiff_decode'_noapp_win_target_bit_nonok
-                [OF out_len_ok patch_ok len_gt5_word magic0_uint magic1_uint
-                    magic2_uint magic3_uint hdr_ok32 app_clear32 win_bad32])
-          next
-            case target_ok: False
-            have target_clear32:
-              "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND (2 :: 32 word) = 0"
-            proof -
-              have win_target_clear: "win_ind AND (0x02 :: 8 word) = 0"
-                using target_ok by simp
-              have "(UCAST(8 \<rightarrow> 32) win_ind AND (2 :: 32 word) = 0) =
-                    (win_ind AND (0x02 :: 8 word) = 0)"
-                by word_bitwise
-              thus ?thesis using win_target_clear win_v by simp
-            qed
-            show ?thesis
-            proof (cases "win_ind AND (0xFA :: 8 word) \<noteq> 0")
-              case mask_bad: True
-              have mask_bad32:
-                "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND
-                  (0xFFFFFFFA :: 32 word) \<noteq> 0"
-              proof -
-                have "(UCAST(8 \<rightarrow> 32) win_ind AND
-                        (0xFFFFFFFA :: 32 word) \<noteq> 0) =
-                      (win_ind AND (0xFA :: 8 word) \<noteq> 0)"
-                  by word_bitwise
-                thus ?thesis using mask_bad win_v by simp
-              qed
-              show ?thesis
-                by (rule vcdiff_decode'_noapp_win_mask_nonok
-                  [OF out_len_ok patch_ok len_gt5_word magic0_uint magic1_uint
-                      magic2_uint magic3_uint hdr_ok32 app_clear32 target_clear32
-                      mask_bad32])
-            next
-              case mask_clear: False
-              have mask_clear32:
-                "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND
-                  (0xFFFFFFFA :: 32 word) = 0"
-              proof -
-                have win_mask_clear: "win_ind AND (0xFA :: 8 word) = 0"
-                  using mask_clear by simp
-                have "(UCAST(8 \<rightarrow> 32) win_ind AND
-                        (0xFFFFFFFA :: 32 word) = 0) =
-                      (win_ind AND (0xFA :: 8 word) = 0)"
-                  by word_bitwise
-	                thus ?thesis using win_mask_clear win_v by simp
-	              qed
-	              show ?thesis
-	              proof (cases "win_ind AND (0x01 :: 8 word) = 0 \<and>
-	                  (varint_decode (drop 6 ?bs) = None \<or>
-	                   (\<exists>dlen rest3.
-	                      varint_decode (drop 6 ?bs) = Some (dlen, rest3) \<and>
-	                      (varint_decode rest3 = None \<or>
-	                       (\<exists>tgt_len rest4.
-	                          varint_decode rest3 = Some (tgt_len, rest4) \<and>
-	                          (rest4 = [] \<or>
-	                           (\<exists>di rest5. rest4 = di # rest5 \<and> di \<noteq> 0))))))")
-	                case True
-	                have no_source8: "win_ind AND (0x01 :: 8 word) = 0"
-	                  using True by simp
-	                have no_source32:
-	                  "UCAST(8 \<rightarrow> 32) (heap_w8 s (patch +\<^sub>p 5)) AND
-	                    (1 :: 32 word) = 0"
-	                proof -
-                  have "(UCAST(8 \<rightarrow> 32) win_ind AND (1 :: 32 word) = 0) =
-                        (win_ind AND (0x01 :: 8 word) = 0)"
-	                    by word_bitwise
-	                  thus ?thesis using no_source8 win_v by simp
-	                qed
-	                show ?thesis
-	                proof (cases "varint_decode (drop 6 ?bs)")
-	                  case None
-	                  have dlen_none:
-	                    "varint_decode
-	                      (drop 6 (heap_bytes s patch (unat patch_len))) = None"
-	                    using None by simp
-	                  show ?thesis
-	                    by (rule vcdiff_decode'_noapp_no_source_dlen_none_nonok
-	                      [OF out_len_ok patch_ok len_gt5_word magic0_uint magic1_uint
-	                          magic2_uint magic3_uint hdr_ok32 app_clear32
-	                          target_clear32 mask_clear32 no_source32 dlen_none])
-	                next
-	                  case (Some dlen_rest)
-	                  obtain dlen rest3 where dlen_ok_bs:
-	                    "varint_decode (drop 6 ?bs) = Some (dlen, rest3)"
-	                    using Some by (cases dlen_rest) auto
-		                  have dlen_ok:
-		                    "varint_decode
-		                      (drop 6 (heap_bytes s patch (unat patch_len))) =
-		                     Some (dlen, rest3)"
-		                    using dlen_ok_bs by simp
-		                  show ?thesis
-	                  proof (cases "varint_decode rest3")
-	                    case None
-	                    show ?thesis
-	                      by (rule vcdiff_decode'_noapp_no_source_tgt_none_nonok
-	                        [OF out_len_ok patch_ok len_gt5_word magic0_uint magic1_uint
-	                            magic2_uint magic3_uint hdr_ok32 app_clear32
-	                            target_clear32 mask_clear32 no_source32 dlen_ok
-	                            None])
-	                  next
-	                    case (Some tgt_rest)
-	                    obtain tgt_len rest4 where tgt_ok:
-	                      "varint_decode rest3 = Some (tgt_len, rest4)"
-	                      using Some by (cases tgt_rest) auto
-	                    have di_bad:
-	                      "rest4 = [] \<or>
-	                       (\<exists>di rest5. rest4 = di # rest5 \<and> di \<noteq> 0)"
-	                      using True dlen_ok_bs tgt_ok by auto
-	                    show ?thesis
-	                      by (rule vcdiff_decode'_noapp_no_source_di_nonok
-	                        [OF out_len_ok patch_ok len_gt5_word magic0_uint magic1_uint
-	                            magic2_uint magic3_uint hdr_ok32 app_clear32
-	                            target_clear32 mask_clear32 no_source32 dlen_ok
-	                            tgt_ok di_bad])
-	                  qed
-	                qed
-	              next
-	                case False
-	                show ?thesis
-                  sorry
-              qed
-            qed
-          qed
-        qed
-      qed
-    next
-      case (Inl wintail)
-      obtain win tail where wintail_eq: "wintail = (win, tail)"
-        by (cases wintail) auto
-      have apply_inr:
-        "apply_window win (heap_bytes s src (unat src_len)) = Inr e"
-        using decode_reject header_ok Inl wintail_eq
-        unfolding decode_spec_def by simp
-      show ?thesis
-        sorry
-    qed
-  qed
-  thus ?thesis by (simp add: Inr)
 qed
 
 end

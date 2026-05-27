@@ -23,20 +23,26 @@ rejects. Align the pure spec with the C decoder first, then continue from the
 proved `decode_loop_inv_plus_exit`, `outer_whileLoop_correct_abstract`, and
 `decode_loop_inv_plus_advance` lemmas.
 
+Update 2026-05-27: the top-level theorem has been split to the success-only
+statement `vcdiff_decode'_spec_inl`.  It assumes
+`decode_spec ... = Inl tgt` and proves that the C decoder returns success,
+writes `length tgt` to `out_len`, and stores exactly `tgt` in the output
+buffer.  This is the decoder-side property needed for encoder roundtrip work;
+the `Inr` rejection refinement is now separate future work rather than an
+active hole in the success theorem.
+
 Validated facts:
 
-- `CdeltaRefine` builds under current `quick_and_dirty`.
-- The latest docs are stale in places: the three outer-loop API lemmas listed
-  as sorries are now proved.
-- Remaining active proof debt in `proof/decoder-refine/VcdiffDec_Refine.thy`
-  is now two localized `sorry`s:
-  - no-source/no-Adler success-tail weakening after the factored body proof,
-  - the Inr rejection case.
-  Older notes about `build_code_table'_preserves_typing` and
-  `vcdiff_decode'_prefix_correct` being active sorries are stale.
-- The main spec mismatch is broader than leftover data/address bytes:
-  `parse_window` also ignores `dlen` consistency and does not model Adler32
-  positioning the same way as the C parser.
+- `isabelle build -c -o system_log=true -v -d . CdeltaRefine` passes after the
+  theorem split.
+- `proof/decoder-refine/VcdiffDec_Refine.thy` has no active `sorry`/`oops`
+  commands by anchored scan.
+- The latest docs are stale in places: older notes about
+  `build_code_table'_preserves_typing`, `vcdiff_decode'_prefix_correct`, and
+  the old monolithic `vcdiff_decode'_spec` being active sorries are stale.
+- The main spec mismatch for a future full `Inr` refinement is broader than
+  leftover data/address bytes: `parse_window` also ignores `dlen` consistency
+  and does not model Adler32 positioning the same way as the C parser.
 
 ## Key Changes
 
@@ -91,8 +97,32 @@ Validated facts:
   cursor state (`addr_pos_C v`, `data_pos_C v`, `inst_pos_C v`).
 - Continue reusing `decode_inner_body_preserves_no_source` for no-source loop
   bodies; avoid reintroducing expanded inner-body proofs.
-- Finish the Inr case by contrapositive: if C returns `Result 0`, the tightened
-  `decode_spec` returns `Inl` with matching output.
+- The no-app/no-source/no-Adler success path is now part of
+  `vcdiff_decode'_spec_inl`.
+- If full decoder error refinement becomes necessary, state it as a separate
+  `Inr` theorem and prove it by contrapositive: if C returns `Result 0`, the
+  tightened `decode_spec` returns `Inl` with matching output.
+
+Update 2026-05-27: added and clean-build-checked
+`parse_window_no_source_after_di_inr_cases` in
+`proof/decoder-refine/VcdiffDec_Refine.thy`.  This factors the no-app /
+no-source parse-window `Inr` residual after dlen, target length, and
+delta-indicator have all succeeded into exactly the remaining pure failure
+modes:
+
+- `data_len` varint fails,
+- `inst_len` varint fails,
+- `addr_len` varint fails,
+- or the dlen/Adler/payload size equations fail.
+
+The attempted C-side wrapper for this fact exposed the next concrete proof
+obligation for any future `Inr` theorem and was backed out to keep the theory
+buildable: after the DI byte is proved zero, the C proof must stage
+`drop (unat (pos_C tgt_p + 1)) ... = rest5`, then chain the three subsequent
+`read_varint'` results back to `rest5`, `rest6`, `rest7`, and `rest8`.  Once
+those cursor equalities are available, the pure split above should discharge
+the final nonzero-error postcondition without unfolding `parse_window_def`
+inside the AutoCorres goal.
 
 ## Test Plan
 
@@ -100,13 +130,15 @@ Validated facts:
   `isabelle build -o system_log=true -v -d . CdeltaSpecBase CdeltaSpecRoundtrip`.
 - Run refinement builds with fresh verbose logs:
   `isabelle build -o system_log=true -v -d . CdeltaRefine`.
-- Before completion, `rg -n "sorry|oops" proof spec` should show no remaining
-  active proof holes.
+- Before completion, `rg -n "^\s*(sorry|oops)\b" proof/decoder-refine/VcdiffDec_Refine.thy`
+  should show no active proof holes in the touched refinement theory.
 
 ## Assumptions
 
-- Target contract is full decoder refinement against a C-aligned pure spec, not
-  encoder-only refinement.
+- Current target contract is success decoder refinement against a C-aligned pure
+  spec, which is enough for encoder roundtrip once the encoder is known to emit
+  patches with `decode_spec ... = Inl tgt`.  Full `Inr` error refinement is a
+  separate theorem if needed later.
 - Adler32 is parsed/skipped to match C, but checksum validation is not added
   because the C decoder does not validate it.
 - `out_cap_enough` remains for now; removing it is a later theorem-strengthening
