@@ -31,10 +31,16 @@ buffer.  This is the decoder-side property needed for encoder roundtrip work;
 the `Inr` rejection refinement is now separate future work rather than an
 active hole in the success theorem.
 
+Update 2026-05-28: the public `code_tbl_ready` / built-flag premise has been
+removed from `vcdiff_decode'_spec_inl`.  The proof now handles the initial
+optional `build_code_table'` call directly, sourcing `code_tbl_matches` and
+`code_tbl_tags_valid` either from the caller-provided ready table or from the
+build-table setup lemma.
+
 Validated facts:
 
-- `isabelle build -c -o system_log=true -v -d . CdeltaRefine` passes after the
-  theorem split.
+- `isabelle build -o system_log=true -v -d . CdeltaRefine` passes after removing
+  the ready-state premise.
 - `proof/decoder-refine/VcdiffDec_Refine.thy` has no active `sorry`/`oops`
   commands by anchored scan.
 - The latest docs are stale in places: older notes about
@@ -72,9 +78,9 @@ Validated facts:
 ## Proof Work
 
 - App-header/code-table-built no-source payload success loop is closed. The
-  next residual is the no-app `parse_window_prefix' ... 5` success path; the
-  stale build-code-table branch closes from `code_tbl_ready`, leaving the
-  already-built prefix obligation before the final cursor/write checks.
+  no-app success paths are also closed inside `vcdiff_decode'_spec_inl`,
+  including the cold-start branch where `build_code_table'` runs before parsing
+  the window.
 - Update 2026-05-25: the no-app prefix obligation is now split far enough that
   the stale sibling closes from the no-app header/drop-5 facts.  Expanding the
   remaining sibling exposes the source-window path first, so the next useful
@@ -123,6 +129,14 @@ buildable: after the DI byte is proved zero, the C proof must stage
 those cursor equalities are available, the pure split above should discharge
 the final nonzero-error postcondition without unfolding `parse_window_def`
 inside the AutoCorres goal.
+
+Update 2026-05-27 later, completed 2026-05-28:
+`build_code_table'_spec`, `build_code_table'_preserves_typing`, and
+`build_code_table'_setup` now also establish `code_tbl_tags_valid`.  The local
+construction invariant tracks tag-byte validity while each row is populated.
+`vcdiff_decode'_spec_inl` no longer assumes `code_tbl_built_'' s \<noteq> 0`; the
+main VCG now proves the cold-start table build path and reuses the caller's
+`code_tbl_matches` / `code_tbl_tags_valid` facts only on the already-built path.
 
 ## Test Plan
 
