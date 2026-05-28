@@ -22851,26 +22851,23 @@ lemma vcdiff_decode'_spec_inl:
       and patch_ok: "buf_valid s patch (unat patch_len)"
       and src_ok:   "buf_valid s src   (unat src_len)"
       and src_nonnull: "src \<noteq> NULL"
-	      and out_ok:   "buf_valid s out   (unat out_cap)"
-	      and code_tbl_matches_ready: "code_tbl_matches s"
-	      and code_tbl_tags_ready: "code_tbl_tags_valid s"
-	      and out_patch_disj:
-        "\<forall>i < unat out_cap. \<forall>j < unat patch_len.
+      and out_ok:   "buf_valid s out   (length tgt)"
+      and code_tbl_matches_ready: "code_tbl_matches s"
+      and code_tbl_tags_ready: "code_tbl_tags_valid s"
+      and out_patch_disj:
+        "\<forall>i < length tgt. \<forall>j < unat patch_len.
              out +\<^sub>p int i \<noteq> patch +\<^sub>p int j"
       and out_src_disj:
-        "\<forall>i < unat out_cap. \<forall>j < unat src_len.
+        "\<forall>i < length tgt. \<forall>j < unat src_len.
              out +\<^sub>p int i \<noteq> src +\<^sub>p int j"
       and out_inj:
-        "\<forall>i < unat out_cap. \<forall>j < unat out_cap.
+        "\<forall>i < length tgt. \<forall>j < length tgt.
              i \<noteq> j \<longrightarrow> out +\<^sub>p int i \<noteq> out +\<^sub>p int j"
-      \<comment> \<open>Precondition that the output buffer is large enough for whatever
-          target the spec produces.  Without this the theorem's Inl branch
+      \<comment> \<open>Precondition that the C out-capacity admits the successful
+          target produced by the spec.  Without this the theorem's Inl branch
           is false: a spec that produces a large tgt but a small out_cap
           causes C to return OVERRUN, not success.\<close>
-      and out_cap_enough:
-        "\<And>tgt. decode_spec (heap_bytes s patch (unat patch_len))
-                            (heap_bytes s src (unat src_len)) = Inl tgt \<Longrightarrow>
-               length tgt \<le> unat out_cap"
+      and out_cap_enough: "length tgt \<le> unat out_cap"
 	      and source_windows_in_bounds:
 	        "\<And>rest win tail.
 	           parse_header (heap_bytes s patch (unat patch_len)) = Inl rest \<Longrightarrow>
@@ -25460,7 +25457,7 @@ proof -
 				               using prems apply simp_all
 				               done
 				             have "length tgt \<le> unat out_cap"
-				               using out_cap_enough Inl by simp
+				               using out_cap_enough by simp
 				             hence "unat (val_C vaaaaa) \<le> unat out_cap"
 				               using tgt_val tgt_len_eq by simp
 				             hence "val_C vaaaaa \<le> out_cap"
@@ -26369,7 +26366,7 @@ proof -
 						                   have addr_bound: "unat ?addr_end \<le> unat patch_len"
 						                     using addr_end_unat sizes_ok rest8_le_patch by arith
 						                   have tgt_len_le_out: "length tgt \<le> unat out_cap"
-						                     using out_cap_enough Inl by simp
+						                     using out_cap_enough by simp
 						                   have out_valid_tgt: "buf_valid td out (length tgt)"
 						                     using out_ok tgt_len_le_out prems q
 						                     by (auto simp: buf_valid_def)
@@ -31961,7 +31958,7 @@ proof -
 			             have tgt_val: "unat (val_C vaaa) = pw_tgt_len win"
 			               using prems dec4_td by simp
 		             have "length tgt \<le> unat out_cap"
-		               using out_cap_enough Inl by simp
+		               using out_cap_enough by simp
 		             hence "unat (val_C vaaa) \<le> unat out_cap"
 		               using tgt_val tgt_len_eq by simp
 			             hence cap_ok: "val_C vaaa \<le> out_cap"
@@ -32121,7 +32118,7 @@ proof -
 					             have tgt_val: "unat (val_C vaaa) = pw_tgt_len win"
 					               using prems dec4_td by simp
 					             have "length tgt \<le> unat out_cap"
-					               using out_cap_enough Inl by simp
+					               using out_cap_enough by simp
 					             hence "unat (val_C vaaa) \<le> unat out_cap"
 					               using tgt_val tgt_len_eq by simp
 					             hence "val_C vaaa \<le> out_cap"
@@ -32974,7 +32971,7 @@ proof -
 					                     have src_valid_td: "buf_valid td src (unat src_len)"
 					                       using src_ok prems loop_prems by (simp add: buf_valid_def)
 					                     have tgt_len_le_out: "length tgt \<le> unat out_cap"
-					                       using out_cap_enough Inl by simp
+					                       using out_cap_enough by simp
 					                     have out_valid_tgt: "buf_valid td out (length tgt)"
 					                       using out_ok tgt_len_le_out prems loop_prems
 					                       by (auto simp: buf_valid_def)
@@ -33893,7 +33890,7 @@ proof -
 			            using prems adler_prems q apply simp_all
 			            done
 			          have "length tgt \<le> unat out_cap"
-			            using out_cap_enough Inl by simp
+			            using out_cap_enough by simp
 			          hence "unat (val_C vaaaa) \<le> unat out_cap"
 			            using tgt_val tgt_len_eq by simp
 			          hence "val_C vaaaa \<le> out_cap"
@@ -34548,7 +34545,7 @@ proof -
 						                   have addr_bound: "unat ?addr_end \<le> unat patch_len"
 						                     using addr_end_unat sizes_ok rest8_le_patch by arith
 						                   have tgt_len_le_out: "length tgt \<le> unat out_cap"
-						                     using out_cap_enough Inl by simp
+						                     using out_cap_enough by simp
 						                   have out_valid_tgt: "buf_valid ta out (length tgt)"
 						                     using out_ok tgt_len_le_out prems q
 						                     by (auto simp: buf_valid_def)
@@ -40200,7 +40197,7 @@ proof -
 			          have tgt_val: "unat (val_C vab) = pw_tgt_len win"
 			            using q dec4_td by simp
 			          have "length tgt \<le> unat out_cap"
-			            using out_cap_enough Inl by simp
+			            using out_cap_enough by simp
 			          hence "unat (val_C vab) \<le> unat out_cap"
 			            using tgt_val tgt_len_eq by simp
 			          hence cap_ok: "val_C vab \<le> out_cap"
@@ -41123,7 +41120,7 @@ proof -
 				                  have src_valid_ta: "buf_valid ta src (unat src_len)"
 				                    using src_ok prems q loop_prems by (simp add: buf_valid_def)
 				                  have tgt_len_le_out: "length tgt \<le> unat out_cap"
-				                    using out_cap_enough Inl by simp
+				                    using out_cap_enough by simp
 				                  have out_valid_tgt: "buf_valid ta out (length tgt)"
 				                    using out_ok tgt_len_le_out prems q loop_prems
 				                    by (auto simp: buf_valid_def)
@@ -41917,7 +41914,7 @@ proof -
 			            using prems adler_prems q apply simp_all
 			            done
 			          have "length tgt \<le> unat out_cap"
-			            using out_cap_enough Inl by simp
+			            using out_cap_enough by simp
 			          hence "unat (val_C vaaaa) \<le> unat out_cap"
 			            using tgt_val tgt_len_eq by simp
 			          hence "val_C vaaaa \<le> out_cap"
@@ -42557,7 +42554,7 @@ proof -
 				                  have addr_bound: "unat ?addr_end \<le> unat patch_len"
 				                    using addr_end_unat sizes_ok0 rest8_le_patch by arith
 				                  have tgt_len_le_out: "length tgt \<le> unat out_cap"
-				                    using out_cap_enough Inl by simp
+				                    using out_cap_enough by simp
 				                  have out_valid_tgt: "buf_valid ta out (length tgt)"
 				                    using out_ok tgt_len_le_out prems q
 				                    by (auto simp: buf_valid_def)
@@ -48137,7 +48134,7 @@ proof -
 				          have tgt_val: "unat (val_C vab) = pw_tgt_len win"
 				            using q dec4_td by simp
 				          have "length tgt \<le> unat out_cap"
-				            using out_cap_enough Inl by simp
+				            using out_cap_enough by simp
 				          hence "unat (val_C vab) \<le> unat out_cap"
 				            using tgt_val tgt_len_eq by simp
 				          hence cap_ok: "val_C vab \<le> out_cap"
@@ -49042,7 +49039,7 @@ proof -
 				                  have src_valid_ta: "buf_valid ta src (unat src_len)"
 				                    using src_ok prems q by (simp add: buf_valid_def)
 				                  have tgt_len_le_out: "length tgt \<le> unat out_cap"
-				                    using out_cap_enough Inl by simp
+				                    using out_cap_enough by simp
 				                  have out_valid_tgt: "buf_valid ta out (length tgt)"
 				                    using out_ok tgt_len_le_out prems q
 				                    by (auto simp: buf_valid_def)
@@ -50136,7 +50133,7 @@ proof -
 						              apply simp
 					              done
 					            have "length tgt \<le> unat out_cap"
-					              using out_cap_enough Inl by simp
+					              using out_cap_enough by simp
 					            hence "unat (val_C tgt_p) \<le> unat out_cap"
 					              using tgt_val tgt_len_eq by simp
 					            hence "val_C tgt_p \<le> out_cap"
@@ -51302,7 +51299,7 @@ proof -
 							                        using decode_loop_terminates vals tgt_len_eq dst0_eq
 							                        unfolding initial_dst_def by simp
 							                      have tgt_len_le_out: "length tgt \<le> unat out_cap"
-							                        using out_cap_enough Inl by simp
+							                        using out_cap_enough by simp
 							                      have out_disj_patch_tgt:
 							                        "\<forall>i < length tgt. \<forall>j < unat patch_len.
 							                           out +\<^sub>p int i \<noteq> patch +\<^sub>p int j"
@@ -52103,7 +52100,7 @@ proof -
 						              apply simp
 						              done
 						            have "length tgt \<le> unat out_cap"
-						              using out_cap_enough Inl by simp
+						              using out_cap_enough by simp
 						            hence "unat (val_C tgt_p) \<le> unat out_cap"
 						              using tgt_val tgt_len_eq by simp
 						            hence "val_C tgt_p \<le> out_cap"
@@ -53156,7 +53153,7 @@ proof -
 							                          dst0_eq pw_src_seg_nil
 							                        unfolding initial_dst_def by simp
 							                      have tgt_len_le_out: "length tgt \<le> unat out_cap"
-							                        using out_cap_enough Inl by simp
+							                        using out_cap_enough by simp
 							                      have out_disj_patch_tgt:
 							                        "\<forall>i < length tgt. \<forall>j < unat patch_len.
 							                           out +\<^sub>p int i \<noteq> patch +\<^sub>p int j"
@@ -54025,7 +54022,7 @@ proof -
 					              using r apply simp_all
 					              done
 					            have "length tgt \<le> unat out_cap"
-					              using out_cap_enough Inl by simp
+					              using out_cap_enough by simp
 					            hence "unat (val_C tgt_p) \<le> unat out_cap"
 					              using tgt_val tgt_len_eq by simp
 					            hence "val_C tgt_p \<le> out_cap"
@@ -54901,7 +54898,7 @@ proof -
 						                      have src_valid_ta: "buf_valid ta src (unat src_len)"
 						                        using src_ok prems r loop_prems by (simp add: buf_valid_def)
 						                      have tgt_len_le_out: "length tgt \<le> unat out_cap"
-						                        using out_cap_enough Inl by simp
+						                        using out_cap_enough by simp
 						                      have out_valid_tgt: "buf_valid ta out (length tgt)"
 						                        using out_ok tgt_len_le_out prems r loop_prems
 						                        by (auto simp: buf_valid_def)
@@ -55548,7 +55545,7 @@ proof -
 						              using r apply simp_all
 						              done
 						            have "length tgt \<le> unat out_cap"
-						              using out_cap_enough Inl by simp
+						              using out_cap_enough by simp
 						            hence "unat (val_C tgt_p) \<le> unat out_cap"
 						              using tgt_val tgt_len_eq by simp
 						            hence "val_C tgt_p \<le> out_cap"
@@ -56340,7 +56337,7 @@ proof -
 						                      have src_valid_ta: "buf_valid ta src (unat src_len)"
 						                        using src_ok prems r loop_prems by (simp add: buf_valid_def)
 						                      have tgt_len_le_out: "length tgt \<le> unat out_cap"
-						                        using out_cap_enough Inl by simp
+						                        using out_cap_enough by simp
 						                      have out_valid_tgt: "buf_valid ta out (length tgt)"
 						                        using out_ok tgt_len_le_out prems r loop_prems
 						                        by (auto simp: buf_valid_def)
