@@ -32,6 +32,14 @@ session CdeltaEncoder in "spec/cenc" = AutoCorres2 +
   theories
     VcdiffEnc
 
+session CdeltaEncoderCorrectness in "proof/encoder-correctness" = CdeltaSpecRoundtrip +
+  options [timeout = 1800, quick_and_dirty = false]
+  sessions
+    CdeltaEncoder
+  theories
+    "CdeltaEncoder.VcdiffEnc"
+    VcdiffEnc_Correct
+
 session TestAdd in "proof/test-add" = AutoCorres2 +
   options [timeout = 600]
   theories

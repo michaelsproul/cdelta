@@ -2313,6 +2313,39 @@ proof -
   qed
 qed
 
+lemma serialize_apply_window_roundtrip:
+  assumes "length src < 2 ^ 32"
+          "length tgt < 2 ^ 32 - 32"
+          "length data < 2 ^ 32"
+          "length inst < 2 ^ 32"
+          "length addr < 2 ^ 32"
+          "varint_size (length tgt) + 1 + varint_size (length data)
+           + varint_size (length inst) + varint_size (length addr)
+           + length data + length inst + length addr < 2 ^ 32"
+      and "apply_window
+             \<lparr> pw_src_seg_len = (if length src > 0 then length src else 0)
+             , pw_src_seg_off = 0
+             , pw_tgt_len = length tgt
+             , pw_data = data, pw_inst = inst, pw_addr = addr \<rparr>
+             src = Inl tgt"
+  shows "decode_spec (serialize src tgt data inst addr) src = Inl tgt"
+proof -
+  have parsed:
+    "decode_spec (serialize src tgt data inst addr) src
+       = (let src_seg_len = (if length src > 0 then length src else 0);
+              src_seg_off = 0;
+              src_seg = (if src_seg_len = 0 then []
+                         else take src_seg_len (drop src_seg_off src))
+          in apply_window
+               \<lparr> pw_src_seg_len = src_seg_len, pw_src_seg_off = src_seg_off
+               , pw_tgt_len = length tgt
+               , pw_data = data, pw_inst = inst, pw_addr = addr \<rparr>
+               src)"
+    by (rule serialize_parse_roundtrip[OF assms(1-6)])
+  show ?thesis
+    using parsed assms(7) by (simp add: Let_def)
+qed
+
 (* ---------- Top-level generic roundtrip theorem ---------- *)
 
 theorem roundtrip_generic:
