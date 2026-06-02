@@ -690,6 +690,30 @@ proof -
     by (simp add: varint_decode_def)
 qed
 
+lemma base128_mod_split:
+  fixes x n :: nat
+  shows "((x div 128 ^ n) mod 128) * 128 ^ n + x mod 128 ^ n =
+         x mod 128 ^ Suc n"
+  using mod_mult2_eq[of x "128 ^ n" 128]
+  by (simp add: ac_simps)
+
+lemma from_base128_acc_fixed_digits:
+  "from_base128_acc acc
+     (map (\<lambda>i. (x div 128 ^ (len - Suc i)) mod 128) [0 ..< len]) =
+   acc * 128 ^ len + x mod 128 ^ len"
+proof (induction len arbitrary: acc)
+  case 0
+  show ?case by simp
+next
+  case (Suc len)
+  have split:
+    "x mod 128 ^ len + 128 ^ len * (x div 128 ^ len mod 128) =
+     x mod (128 * 128 ^ len)"
+    using base128_mod_split[of x len] by (simp add: ac_simps)
+  show ?case
+    by (simp add: map_upt_Suc Suc.IH split algebra_simps del: upt_Suc)
+qed
+
 lemma write_varint_loop_preserves_typing:
   fixes len pos :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
