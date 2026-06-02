@@ -515,9 +515,36 @@ definition varint_byte32 :: "32 word \<Rightarrow> 32 word \<Rightarrow> 32 word
       then (ucast ((ucast b :: 32 word) || 0x80) :: 8 word)
       else b)"
 
+definition varint_digit32 :: "32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> nat" where
+  "varint_digit32 v len i =
+     unat ((v >> unat (7 * len - 7 - 7 * i)) && 0x7F :: 32 word)"
+
+definition varint_digits32 :: "32 word \<Rightarrow> 32 word \<Rightarrow> nat list" where
+  "varint_digits32 v len =
+     map (\<lambda>i. varint_digit32 v len (of_nat i)) [0 ..< unat len]"
+
 definition varint_bytes32 :: "32 word \<Rightarrow> 32 word \<Rightarrow> byte list" where
   "varint_bytes32 v len =
      map (\<lambda>i. varint_byte32 v len (of_nat i)) [0 ..< unat len]"
+
+lemma varint_digit32_bound[simp]:
+  "varint_digit32 v len i < 128"
+proof -
+  have "((v >> unat (7 * len - 7 - 7 * i)) && 0x7F :: 32 word) \<le> 0x7F"
+    by (simp add: word_and_le1)
+  hence "unat ((v >> unat (7 * len - 7 - 7 * i)) && 0x7F :: 32 word) \<le> 127"
+    by (simp add: word_le_nat_alt)
+  thus ?thesis
+    by (simp add: varint_digit32_def)
+qed
+
+lemma varint_digits32_length[simp]:
+  "length (varint_digits32 v len) = unat len"
+  by (simp add: varint_digits32_def)
+
+lemma varint_digits32_bound:
+  "\<forall>d \<in> set (varint_digits32 v len). d < 128"
+  by (simp add: varint_digits32_def)
 
 lemma write_varint_loop_preserves_typing:
   fixes len pos :: "32 word"
