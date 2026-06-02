@@ -1322,6 +1322,43 @@ next
     by (simp add: heap_bytes_nth)
 qed
 
+lemma heap_bytes_append_heap_bytes_word:
+  assumes no_overflow: "unat pos + unat len < 2 ^ 32"
+  shows "heap_bytes s buf (unat pos + unat len) =
+         heap_bytes s buf (unat pos) @ heap_bytes_word s buf pos len"
+proof (rule nth_equalityI)
+  show "length (heap_bytes s buf (unat pos + unat len)) =
+        length (heap_bytes s buf (unat pos) @ heap_bytes_word s buf pos len)"
+    by simp
+next
+  fix i
+  assume i_lt_len:
+    "i < length (heap_bytes s buf (unat pos + unat len))"
+  hence i_lt: "i < unat pos + unat len"
+    by simp
+  show "heap_bytes s buf (unat pos + unat len) ! i =
+        (heap_bytes s buf (unat pos) @ heap_bytes_word s buf pos len) ! i"
+  proof (cases "i < unat pos")
+    case True
+    show ?thesis
+      using True i_lt
+      by (simp add: heap_bytes_nth nth_append)
+  next
+    case False
+    let ?j = "i - unat pos"
+    have j_lt: "?j < unat len"
+      using False i_lt by simp
+    have i_eq: "i = unat pos + ?j"
+      using False by simp
+    have idx:
+      "unat (pos + of_nat ?j :: 32 word) = unat pos + ?j"
+      by (rule unat_add_of_nat_index[OF j_lt no_overflow])
+    show ?thesis
+      using False j_lt i_eq idx
+      by (simp add: heap_bytes_nth heap_bytes_word_nth nth_append uint_nat)
+  qed
+qed
+
 (* ---------- Buffer validity ---------- *)
 
 definition buf_valid :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> bool" where
