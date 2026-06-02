@@ -1740,6 +1740,86 @@ lemma heap_bytes_update_outside:
          heap_bytes s buf n"
   using assms by (simp add: heap_bytes_def fun_upd_apply)
 
+lemma write_varint_loop_preserves_heap_bytes_prefix:
+  fixes len pos :: "32 word"
+  assumes dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and shift_ok: "\<forall>i. i < len \<longrightarrow>
+           7 * len - 7 - 7 * i < (0x20 :: 32 word)"
+      and prefix_disj: "\<forall>k < prefix_n. \<forall>i.
+           i < len \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+  shows "(whileLoop (\<lambda>(i :: 32 word) st. i < len)
+           (\<lambda>i. do {
+              guard (\<lambda>st. 7 * len - 7 - 7 * i < (0x20 :: 32 word));
+              guard (\<lambda>st. ptr_valid (heap_typing st) (buf +\<^sub>p uint (pos + i)));
+              modify (heap_w8_update
+                (\<lambda>h. h(buf +\<^sub>p uint (pos + i) :=
+                  if i + 1 < len
+                  then (ucast
+                    ((ucast
+                      (ucast ((v >> unat (7 * len - 7 - 7 * i)) && 0x7F)
+                        :: 8 word) :: 32 word) || 0x80) :: 8 word)
+                  else (ucast ((v >> unat (7 * len - 7 - 7 * i)) && 0x7F)
+                        :: 8 word))));
+              return (i + 1)
+           }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result len \<and>
+            heap_bytes t buf prefix_n = heap_bytes s buf prefix_n \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((i :: 32 word), _). unat len - unat i)"
+      and I = "\<lambda>i st. unat i \<le> unat len
+             \<and> heap_bytes st buf prefix_n = heap_bytes s buf prefix_n
+             \<and> heap_typing st = heap_typing s"])
+     subgoal by simp
+     subgoal by unat_arith
+    subgoal premises prems for i st
+    proof -
+      have len_le: "unat len \<le> unat i"
+        using prems(1) by (simp add: word_less_nat_alt)
+      have i_eq: "i = len"
+        using prems(2) len_le by (metis antisym_conv word_unat.Rep_inject)
+      show ?thesis
+        using prems(2) i_eq by simp
+    qed
+  subgoal premises prems for i st
+  proof -
+    have i_word: "i < len"
+      using prems(1) by (simp add: word_less_nat_alt)
+    have i_lt: "unat i < unat len"
+      using i_word by (simp add: word_less_nat_alt)
+    have i_of_nat: "(of_nat (unat i) :: 32 word) = i"
+      by (simp add: word_unat.Rep_inverse)
+    have dst:
+      "ptr_valid (heap_typing st) (buf +\<^sub>p uint (pos + i))"
+      using dst_valid[rule_format, of "unat i"] i_lt prems(2)
+      by (simp add: i_of_nat)
+    have shift: "7 * len - 7 - 7 * i < (0x20 :: 32 word)"
+      using shift_ok[rule_format, OF i_word] .
+    have prefix_update:
+      "heap_bytes
+        (heap_w8_update
+          (\<lambda>h. h(buf +\<^sub>p uint (pos + i) :=
+            if i + 1 < len
+            then (ucast
+              ((ucast
+                (ucast ((v >> unat (7 * len - 7 - 7 * i)) && 0x7F)
+                  :: 8 word) :: 32 word) || 0x80) :: 8 word)
+            else (ucast ((v >> unat (7 * len - 7 - 7 * i)) && 0x7F)
+                  :: 8 word))) st)
+        buf prefix_n =
+       heap_bytes st buf prefix_n"
+      using prefix_disj i_word
+      by (auto simp: heap_bytes_def fun_upd_apply)
+    show ?thesis
+      using prems dst shift prefix_update i_word
+      by (auto simp: runs_to.rep_eq run_bind run_guard run_modify
+                     word_less_nat_alt word_unat.Rep_inverse
+               intro: unat_suc_le_of_word_less
+                      unat_measure_decrease_of_word_less)
+  qed
+  done
+
 lemma heap_bytes_update_at_distinct:
   assumes dist: "ptr_range_distinct buf n"
       and k_lt: "k < n"
