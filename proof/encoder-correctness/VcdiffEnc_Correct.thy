@@ -822,6 +822,45 @@ proof -
     by (simp add: div_eq_0_iff)
 qed
 
+lemma varint_digits32_value:
+  assumes size: "varint_size' v s = Some n"
+  shows "from_base128_acc 0 (varint_digits32 v n) = unat v"
+proof -
+  have n_le: "unat n \<le> 5"
+    by (rule varint_size'_le5[OF size])
+  have folded:
+    "from_base128_acc 0 (varint_digits32 v n) =
+     unat v mod 128 ^ unat n"
+    using varint_digits32_value_mod[OF n_le, of 0 v] by simp
+  have shift0: "v >> (7 * unat n) = 0"
+    by (rule varint_size'_shiftr_zero[OF size])
+  have pow_eq: "(2 :: nat) ^ (7 * unat n) = 128 ^ unat n"
+    by (simp add: power_mult)
+  have v_lt: "unat v < 128 ^ unat n"
+    using shiftr_zero_unat_lt_power[OF shift0] pow_eq by simp
+  show ?thesis
+    using folded v_lt by simp
+qed
+
+lemma varint_decode_varint_bytes32:
+  assumes size: "varint_size' v s = Some n"
+  shows "varint_decode (varint_bytes32 v n @ rest) =
+         Some (unat v, rest)"
+proof -
+  have n_pos: "0 < unat n"
+    using varint_size'_ge1[OF size] by simp
+  have n_le: "unat n \<le> 5"
+    by (rule varint_size'_le5[OF size])
+  have decoded_value: "from_base128_acc 0 (varint_digits32 v n) = unat v"
+    by (rule varint_digits32_value[OF size])
+  have value_bound: "from_base128_acc 0 (varint_digits32 v n) < 2 ^ 32"
+    using decoded_value unat_lt2p[of v] by simp
+  show ?thesis
+    using varint_decode_varint_bytes32_digits[OF n_pos n_le value_bound]
+          decoded_value
+    by simp
+qed
+
 lemma write_varint_loop_preserves_typing:
   fixes len pos :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
