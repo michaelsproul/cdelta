@@ -97,6 +97,59 @@ proof -
     using expr_unat by (simp add: word_less_nat_alt)
 qed
 
+lemma varint_size'_le5:
+  assumes size: "varint_size' v s = Some n"
+  shows "unat n \<le> 5"
+proof -
+  let ?C = "\<lambda>(n :: 32 word, x :: 32 word) s. x \<noteq> 0"
+  let ?B = "\<lambda>(n :: 32 word, x :: 32 word). oreturn (n + 1, x >> (7 :: nat))"
+  let ?I = "\<lambda>(n :: 32 word, x :: 32 word) s.
+       1 \<le> unat n \<and> unat n \<le> 5 \<and> x >> (7 * (5 - unat n)) = 0"
+  have loop_bound:
+    "case owhile ?C ?B (1, v >> (7 :: nat)) s of
+       None \<Rightarrow> True
+     | Some (n, x) \<Rightarrow> unat n \<le> 5"
+    apply (rule Reader_Monad.owhile_rule[
+      where I = ?I and M = "measure (\<lambda>(n :: 32 word, x :: 32 word). unat x)"])
+         apply (simp add: Word_Lemmas.shiftr_shiftr word32_shiftr_35_zero)
+        apply simp
+    subgoal for r r'
+      by (cases r; cases r')
+         (auto simp: Reader_Monad.oreturn_apply
+               intro: word32_shiftr7_decreases)
+    subgoal for r r'
+      apply (cases r; cases r')
+      apply (clarsimp simp: Reader_Monad.oreturn_apply)
+      subgoal for n x
+        apply (subgoal_tac "unat n < 5")
+         apply (subgoal_tac "unat (n + 1) = unat n + 1")
+          apply (subgoal_tac "7 + 7 * (5 - unat (n + 1)) = 7 * (5 - unat n)")
+           apply (simp add: Word_Lemmas.shiftr_shiftr)
+          apply arith
+         apply (simp add: Word.unat_arith_simps)
+        apply (rule ccontr)
+        apply simp
+        done
+      done
+    subgoal by simp
+    subgoal for r
+      by (cases r) simp
+    done
+  obtain x where "owhile ?C ?B (1, v >> (7 :: nat)) s = Some (n, x)"
+    using size unfolding varint_size'_def
+    by (auto simp: Reader_Monad.in_obind_eq Reader_Monad.in_oreturn
+             split: option.splits prod.splits)
+  thus ?thesis
+    using loop_bound by simp
+qed
+
+lemma varint_size'_shift_ok:
+  assumes size: "varint_size' v s = Some n"
+      and i_lt: "i < n"
+  shows "7 * n - 7 - 7 * i < (0x20 :: 32 word)"
+  using varint_size'_le5[OF size] i_lt
+  by (rule varint_shift_ok_of_unat_le5)
+
 lemma unat_less_suc_word_le_len:
   fixes i len :: "32 word"
   assumes "i < len"
