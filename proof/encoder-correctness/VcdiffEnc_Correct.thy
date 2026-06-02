@@ -239,6 +239,40 @@ proof -
   thus ?thesis by (simp only: uint_nat)
 qed
 
+lemma buf_valid_word_rangeD:
+  fixes base len :: "32 word"
+  assumes ok: "buf_valid s buf n"
+      and j_lt: "j < unat len"
+      and no_overflow: "unat base + unat len < 2 ^ 32"
+      and in_range: "unat base + unat len \<le> n"
+  shows "ptr_valid (heap_typing s) (buf +\<^sub>p uint (base + of_nat j :: 32 word))"
+proof -
+  have idx: "unat (base + of_nat j :: 32 word) = unat base + j"
+    by (rule unat_add_of_nat_index[OF j_lt no_overflow])
+  have "unat (base + of_nat j :: 32 word) < n"
+    using j_lt in_range idx by simp
+  thus ?thesis
+    by (rule buf_valid_uintD[OF ok])
+qed
+
+lemma write_bytes'_success_preserves_typing_buf_valid:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_ok: "buf_valid s buf dst_n"
+      and src_ok: "buf_valid s src src_n"
+      and dst_no_overflow: "unat pos + unat len < 2 ^ 32"
+      and src_no_overflow: "unat src_off + unat len < 2 ^ 32"
+      and dst_range: "unat pos + unat len \<le> dst_n"
+      and src_range: "unat src_off + unat len \<le> src_n"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_bytes'_success_preserves_typing[OF fits])
+  subgoal
+    using assms by (auto intro: buf_valid_word_rangeD)
+  subgoal
+    using assms by (auto intro: buf_valid_word_rangeD)
+  done
+
 lemma buf_valid_shift:
   assumes ok: "buf_valid s buf (off + n)"
   shows "buf_valid s (buf +\<^sub>p int off) n"
