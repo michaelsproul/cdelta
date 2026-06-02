@@ -1182,6 +1182,27 @@ lemma heap_bytes_word_nth:
    heap_w8 s (buf +\<^sub>p uint (pos + of_nat i))"
   by (simp add: heap_bytes_word_def)
 
+lemma heap_bytes_word_zero:
+  fixes len :: "32 word"
+  shows "heap_bytes_word s buf 0 len = heap_bytes s buf (unat len)"
+proof (rule nth_equalityI)
+  show "length (heap_bytes_word s buf 0 len) =
+        length (heap_bytes s buf (unat len))"
+    by simp
+next
+  fix i
+  assume i_lt_len: "i < length (heap_bytes_word s buf 0 len)"
+  hence i_lt: "i < unat len"
+    by simp
+  have i_lt32: "i < 2 ^ 32"
+    using i_lt unat_lt2p[of len] by simp
+  have i_unat: "unat (of_nat i :: 32 word) = i"
+    using i_lt32 by (simp add: unat_of_nat_eq)
+  show "heap_bytes_word s buf 0 len ! i =
+        heap_bytes s buf (unat len) ! i"
+    using i_lt i_unat by (simp add: heap_bytes_word_nth heap_bytes_nth uint_nat)
+qed
+
 lemma heap_bytes_eqI:
   assumes "\<And>i. i < n \<Longrightarrow> heap_w8 t (buf +\<^sub>p int i) = heap_w8 s (buf +\<^sub>p int i)"
   shows "heap_bytes t buf n = heap_bytes s buf n"
