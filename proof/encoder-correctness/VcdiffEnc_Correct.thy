@@ -33,6 +33,22 @@ lemma wr_resultD:
   shows "wr_t_C.pos_C r = pos" "wr_t_C.err_C r = err"
   using assms by (simp_all add: wr_result_def)
 
+definition sections_result ::
+  "sections_t_C \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> bool" where
+  "sections_result r data_pos inst_pos addr_pos err \<longleftrightarrow>
+     sections_t_C.data_pos_C r = data_pos \<and>
+     sections_t_C.inst_pos_C r = inst_pos \<and>
+     sections_t_C.addr_pos_C r = addr_pos \<and>
+     sections_t_C.err_C r = err"
+
+lemma sections_resultD:
+  assumes "sections_result r data_pos inst_pos addr_pos err"
+  shows "sections_t_C.data_pos_C r = data_pos"
+        "sections_t_C.inst_pos_C r = inst_pos"
+        "sections_t_C.addr_pos_C r = addr_pos"
+        "sections_t_C.err_C r = err"
+  using assms by (simp_all add: sections_result_def)
+
 lemma unat_add_of_nat_index:
   fixes base sz :: "32 word"
   assumes n_lt: "n < unat sz"
@@ -1180,6 +1196,21 @@ definition heap_bytes :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 
 definition heap_bytes_word :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> byte list" where
   "heap_bytes_word s buf pos len =
      map (\<lambda>i. heap_w8 s (buf +\<^sub>p uint (pos + of_nat i))) [0 ..< unat len]"
+
+definition emitted_sections ::
+  "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow>
+   sections_t_C \<Rightarrow> byte list \<Rightarrow> byte list \<Rightarrow> byte list \<Rightarrow> bool" where
+  "emitted_sections st data inst addr r data_bytes inst_bytes addr_bytes \<longleftrightarrow>
+     heap_bytes st data (unat (sections_t_C.data_pos_C r)) = data_bytes \<and>
+     heap_bytes st inst (unat (sections_t_C.inst_pos_C r)) = inst_bytes \<and>
+     heap_bytes st addr (unat (sections_t_C.addr_pos_C r)) = addr_bytes"
+
+lemma emitted_sectionsD:
+  assumes "emitted_sections st data inst addr r data_bytes inst_bytes addr_bytes"
+  shows "heap_bytes st data (unat (sections_t_C.data_pos_C r)) = data_bytes"
+        "heap_bytes st inst (unat (sections_t_C.inst_pos_C r)) = inst_bytes"
+        "heap_bytes st addr (unat (sections_t_C.addr_pos_C r)) = addr_bytes"
+  using assms by (simp_all add: emitted_sections_def)
 
 lemma heap_bytes_length[simp]:
   "length (heap_bytes s buf n) = n"
