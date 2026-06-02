@@ -2749,6 +2749,51 @@ lemma emit_address'_success_byte_heap_bytes_append:
   apply simp
   by (rule write_byte'_heap_bytes_append_next_typing[OF pos_lt ptr_ok dist])
 
+lemma single_add_opcode'_small:
+  assumes sz_ge: "(1 :: 32 word) \<le> sz"
+      and sz_le: "sz \<le> (17 :: 32 word)"
+  shows "op_t_C.op_C (single_add_opcode' sz) = 1 + sz \<and>
+         op_t_C.needs_size_C (single_add_opcode' sz) = 0"
+  unfolding single_add_opcode'_def
+  using sz_ge sz_le by simp
+
+lemma single_add_opcode'_large:
+  assumes sz_small: "\<not> ((1 :: 32 word) \<le> sz \<and> sz \<le> (17 :: 32 word))"
+  shows "op_t_C.op_C (single_add_opcode' sz) = 1 \<and>
+         op_t_C.needs_size_C (single_add_opcode' sz) = 1"
+  unfolding single_add_opcode'_def
+  using sz_small by simp
+
+lemma single_copy_opcode'_small:
+  assumes sz_ge: "(4 :: 32 word) \<le> sz"
+      and sz_le: "sz \<le> (18 :: 32 word)"
+  shows "op_t_C.op_C (single_copy_opcode' sz mode) =
+           19 + mode * 16 - 3 + sz \<and>
+         op_t_C.needs_size_C (single_copy_opcode' sz mode) = 0"
+  unfolding single_copy_opcode'_def
+  using sz_ge sz_le by simp
+
+lemma single_copy_opcode'_large:
+  assumes sz_large: "\<not> ((4 :: 32 word) \<le> sz \<and> sz \<le> (18 :: 32 word))"
+  shows "op_t_C.op_C (single_copy_opcode' sz mode) = 19 + mode * 16 \<and>
+         op_t_C.needs_size_C (single_copy_opcode' sz mode) = 1"
+proof (cases "(4 :: 32 word) \<le> sz \<and> sz \<le> (18 :: 32 word)")
+  case True
+  show ?thesis
+    using sz_large True by simp
+next
+  case False
+  have guard_false:
+    "\<not> ((4 :: 32 word) \<le> sz \<and> sz \<le> (0x12 :: 32 word))"
+    using False by simp
+  have guard_eq:
+    "((4 :: 32 word) \<le> sz \<and> sz \<le> (0x12 :: 32 word)) = False"
+    using guard_false by blast
+  show ?thesis
+    unfolding single_copy_opcode'_def Let_def
+    by (simp add: guard_eq)
+qed
+
 lemma buf_valid_near_arr_update[simp]:
   "buf_valid (near_arr_''_update f s) buf n = buf_valid s buf n"
   by (simp add: buf_valid_def)
