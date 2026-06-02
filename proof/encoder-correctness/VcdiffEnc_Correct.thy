@@ -770,6 +770,22 @@ proof -
     by (simp add: Word.unat_arith_simps i_unat)
 qed
 
+lemma varint_digit32_eq_div_mod:
+  assumes len_le: "unat len \<le> 5"
+      and i_lt: "i < unat len"
+  shows "varint_digit32 v len (of_nat i) =
+         (unat v div 128 ^ (unat len - Suc i)) mod 128"
+proof -
+  have shift:
+    "unat (7 * len - 7 - 7 * (of_nat i :: 32 word)) =
+     7 * (unat len - Suc i)"
+    by (rule varint_shift_unat_nat_index[OF len_le i_lt])
+  show ?thesis
+    unfolding varint_digit32_def
+    by (simp add: shift unat_and_0x7F_mod32
+                  Word_Lemmas.shiftr_div_2n' power_mult)
+qed
+
 lemma write_varint_loop_preserves_typing:
   fixes len pos :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
