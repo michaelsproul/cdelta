@@ -1893,6 +1893,49 @@ proof -
     by auto
 qed
 
+lemma write_varint'_success_heap_bytes_append_le5:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and n_le: "unat n \<le> 5"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat pos. \<forall>i.
+           i < n \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and no_overflow: "unat pos + unat n < 2 ^ 32"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes t buf (unat pos + unat n) =
+                   heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_varint'_success_heap_bytes_append
+    [OF size fits dst_valid _ dst_inj prefix_disj no_overflow])
+  using n_le by (auto intro: varint_shift_ok_of_unat_le5)
+
+lemma write_varint'_success_heap_bytes_append_bounded:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat pos. \<forall>i.
+           i < n \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and no_overflow: "unat pos + unat n < 2 ^ 32"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes t buf (unat pos + unat n) =
+                   heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_varint'_success_heap_bytes_append_le5
+    [OF size fits dst_valid _ dst_inj prefix_disj no_overflow])
+  using varint_size'_le5[OF size] .
+
 lemma heap_bytes_update_at_distinct:
   assumes dist: "ptr_range_distinct buf n"
       and k_lt: "k < n"
