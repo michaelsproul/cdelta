@@ -786,6 +786,42 @@ proof -
                   Word_Lemmas.shiftr_div_2n' power_mult)
 qed
 
+lemma varint_digits32_value_mod:
+  assumes len_le: "unat len \<le> 5"
+  shows "from_base128_acc acc (varint_digits32 v len) =
+         acc * 128 ^ unat len + unat v mod 128 ^ unat len"
+proof -
+  have digits_eq:
+    "varint_digits32 v len =
+     map (\<lambda>i. (unat v div 128 ^ (unat len - Suc i)) mod 128)
+       [0 ..< unat len]"
+    unfolding varint_digits32_def
+  proof (rule map_cong[OF refl])
+    fix i
+    assume "i \<in> set [0 ..< unat len]"
+    hence i_lt: "i < unat len"
+      by simp
+    show "varint_digit32 v len (of_nat i) =
+          (unat v div 128 ^ (unat len - Suc i)) mod 128"
+      by (rule varint_digit32_eq_div_mod[OF len_le i_lt])
+  qed
+  show ?thesis
+    by (simp add: digits_eq from_base128_acc_fixed_digits)
+qed
+
+lemma shiftr_zero_unat_lt_power:
+  fixes v :: "32 word"
+  assumes "v >> k = 0"
+  shows "unat v < 2 ^ k"
+proof -
+  have "unat (v >> k) = unat v div 2 ^ k"
+    by (simp add: Word_Lemmas.shiftr_div_2n')
+  hence "unat v div 2 ^ k = 0"
+    using assms by simp
+  thus ?thesis
+    by (simp add: div_eq_0_iff)
+qed
+
 lemma write_varint_loop_preserves_typing:
   fixes len pos :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
