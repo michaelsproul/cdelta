@@ -1954,6 +1954,21 @@ lemma write_varint'_success_preserves_heap_bytes:
       [OF dst_valid shift_ok disj]])
   by auto
 
+lemma write_varint'_success_preserves_heap_bytes_bounded:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and disj: "\<forall>k < out_n. \<forall>i.
+           i < n \<longrightarrow> out +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes t out out_n = heap_bytes s out out_n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_varint'_success_preserves_heap_bytes
+    [OF size fits dst_valid _ disj])
+  using varint_size'_shift_ok[OF size] by auto
+
 lemma write_bytes_loop_preserves_heap_bytes:
   fixes len pos src_off :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
@@ -2718,6 +2733,72 @@ lemma write_byte'_heap_bytes_append_next_typing:
     OF write_byte'_heap_bytes_append_current_typing
       [OF pos_lt ptr_ok dist]])
   using unat_word_suc_of_less[OF pos_lt] by simp
+
+lemma write_byte'_heap_bytes_append_next_typing_preserves2:
+  assumes pos_lt: "pos < cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+      and dist: "ptr_range_distinct buf (Suc (unat pos))"
+      and disj1: "\<forall>i < out1_n. out1 +\<^sub>p int i \<noteq> buf +\<^sub>p uint pos"
+      and disj2: "\<forall>i < out2_n. out2 +\<^sub>p int i \<noteq> buf +\<^sub>p uint pos"
+  shows "write_byte' buf cap pos b \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + 1)) =
+                   heap_bytes s buf (unat pos) @ [b] \<and>
+                   heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+                   heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have append:
+    "write_byte' buf cap pos b \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+               heap_bytes t buf (unat (pos + 1)) =
+               heap_bytes s buf (unat pos) @ [b] \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_byte'_heap_bytes_append_next_typing
+      [OF pos_lt ptr_ok dist])
+  have pres1:
+    "write_byte' buf cap pos b \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+               heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_byte'_success_preserves_heap_bytes
+      [OF pos_lt ptr_ok disj1])
+  have pres2:
+    "write_byte' buf cap pos b \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+               heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_byte'_success_preserves_heap_bytes
+      [OF pos_lt ptr_ok disj2])
+  have combined12:
+    "write_byte' buf cap pos b \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+           heap_bytes t buf (unat (pos + 1)) =
+           heap_bytes s buf (unat pos) @ [b] \<and>
+           heap_typing t = heap_typing s) \<and>
+          (r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+           heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+           heap_typing t = heap_typing s) \<rbrace>"
+    using append pres1 by (simp add: runs_to_conj)
+  have combined:
+    "write_byte' buf cap pos b \<bullet> s
+       \<lbrace> \<lambda>r t.
+          ((r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+            heap_bytes t buf (unat (pos + 1)) =
+            heap_bytes s buf (unat pos) @ [b] \<and>
+            heap_typing t = heap_typing s) \<and>
+           (r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+            heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+            heap_typing t = heap_typing s)) \<and>
+          (r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+           heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+           heap_typing t = heap_typing s) \<rbrace>"
+    using combined12 pres2 by (simp add: runs_to_conj)
+  show ?thesis
+    apply (rule runs_to_weaken[OF combined])
+    by auto
+qed
 
 lemma emit_address'_success_varint_heap_bytes_append:
   assumes mode_lt: "mode_t_C.mode_C m < (6 :: 32 word)"
