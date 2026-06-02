@@ -1820,6 +1820,79 @@ lemma write_varint_loop_preserves_heap_bytes_prefix:
   qed
   done
 
+lemma write_varint'_success_preserves_heap_bytes_prefix:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and shift_ok: "\<forall>i. i < n \<longrightarrow>
+           7 * n - 7 - 7 * i < (0x20 :: 32 word)"
+      and prefix_disj: "\<forall>k < prefix_n. \<forall>i.
+           i < n \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes t buf prefix_n = heap_bytes s buf prefix_n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  unfolding write_varint'_def
+  apply runs_to_vcg
+  using size fits
+  apply simp
+  apply runs_to_vcg
+  apply (rule runs_to_weaken[
+    OF write_varint_loop_preserves_heap_bytes_prefix
+      [OF dst_valid shift_ok prefix_disj]])
+  by auto
+
+lemma write_varint'_success_heap_bytes_append:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and shift_ok: "\<forall>i. i < n \<longrightarrow>
+           7 * n - 7 - 7 * i < (0x20 :: 32 word)"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat pos. \<forall>i.
+           i < n \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and no_overflow: "unat pos + unat n < 2 ^ 32"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes t buf (unat pos + unat n) =
+                   heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have writes:
+    "write_varint' buf cap pos v \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+               heap_bytes_word t buf pos n = varint_bytes32 v n \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_varint'_success_writes_heap_bytes_word
+      [OF size fits dst_valid dst_inj])
+  have prefix:
+    "write_varint' buf cap pos v \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+               heap_bytes t buf (unat pos) = heap_bytes s buf (unat pos) \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_varint'_success_preserves_heap_bytes_prefix
+      [OF size fits dst_valid shift_ok prefix_disj])
+  have combined:
+    "write_varint' buf cap pos v \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+           heap_bytes_word t buf pos n = varint_bytes32 v n \<and>
+           heap_typing t = heap_typing s) \<and>
+          (r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+           heap_bytes t buf (unat pos) = heap_bytes s buf (unat pos) \<and>
+           heap_typing t = heap_typing s) \<rbrace>"
+    using writes prefix by (simp add: runs_to_conj)
+  show ?thesis
+    apply (rule runs_to_weaken[OF combined])
+    using heap_bytes_append_heap_bytes_word[OF no_overflow, of _ buf]
+    by auto
+qed
+
 lemma heap_bytes_update_at_distinct:
   assumes dist: "ptr_range_distinct buf n"
       and k_lt: "k < n"
