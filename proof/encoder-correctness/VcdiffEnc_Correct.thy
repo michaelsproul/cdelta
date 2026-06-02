@@ -879,6 +879,29 @@ lemma write_varint'_success_writes_heap_bytes_word:
       [OF size fits dst_valid dst_inj]])
   by (auto simp: heap_bytes_word_def varint_bytes32_def)
 
+lemma write_bytes'_success_copies_heap_bytes_word:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))"
+      and dst_src_disj: "\<forall>i < unat len. \<forall>j < unat len.
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           src +\<^sub>p uint (src_off + of_nat j)"
+      and dst_inj: "\<forall>i < unat len. \<forall>j < unat len.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+                   heap_bytes_word t buf pos len =
+                   heap_bytes_word s src src_off len \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF write_bytes'_success_copies
+      [OF fits dst_valid src_valid dst_src_disj dst_inj]])
+  by (auto simp: heap_bytes_word_def)
+
 lemma heap_bytes_prefix:
   assumes "m \<le> n"
   shows "take m (heap_bytes s buf n) = heap_bytes s buf m"
@@ -1138,6 +1161,37 @@ lemma write_varint'_success_writes_heap_bytes_word_buf_valid:
   apply (rule write_varint'_success_writes_heap_bytes_word[OF size fits])
   subgoal
     using assms by (auto intro: buf_valid_word_rangeD)
+  subgoal
+    using dst_inj .
+  done
+
+lemma write_bytes'_success_copies_heap_bytes_word_buf_valid:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_ok: "buf_valid s buf dst_n"
+      and src_ok: "buf_valid s src src_n"
+      and dst_no_overflow: "unat pos + unat len < 2 ^ 32"
+      and src_no_overflow: "unat src_off + unat len < 2 ^ 32"
+      and dst_range: "unat pos + unat len \<le> dst_n"
+      and src_range: "unat src_off + unat len \<le> src_n"
+      and dst_src_disj: "\<forall>i < unat len. \<forall>j < unat len.
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           src +\<^sub>p uint (src_off + of_nat j)"
+      and dst_inj: "\<forall>i < unat len. \<forall>j < unat len.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+                   heap_bytes_word t buf pos len =
+                   heap_bytes_word s src src_off len \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_bytes'_success_copies_heap_bytes_word[OF fits])
+  subgoal
+    using assms by (auto intro: buf_valid_word_rangeD)
+  subgoal
+    using assms by (auto intro: buf_valid_word_rangeD)
+  subgoal
+    using dst_src_disj .
   subgoal
     using dst_inj .
   done
