@@ -623,6 +623,24 @@ lemma write_bytes'_success_copies_buf_valid:
     using dst_inj .
   done
 
+lemma write_varint'_success_preserves_typing_buf_valid:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_ok: "buf_valid s buf dst_n"
+      and dst_no_overflow: "unat pos + unat n < 2 ^ 32"
+      and dst_range: "unat pos + unat n \<le> dst_n"
+      and shift_ok: "\<forall>i. i < n \<longrightarrow>
+           7 * n - 7 - 7 * i < (0x20 :: 32 word)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_varint'_success_preserves_typing[OF size fits])
+  subgoal
+    using assms by (auto intro: buf_valid_word_rangeD)
+  subgoal
+    using shift_ok .
+  done
+
 lemma buf_valid_shift:
   assumes ok: "buf_valid s buf (off + n)"
   shows "buf_valid s (buf +\<^sub>p int off) n"
