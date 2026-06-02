@@ -119,16 +119,12 @@ proof -
     subgoal for r r'
       apply (cases r; cases r')
       apply (clarsimp simp: Reader_Monad.oreturn_apply)
-      subgoal for n x
-        apply (subgoal_tac "unat n < 5")
-         apply (subgoal_tac "unat (n + 1) = unat n + 1")
-          apply (subgoal_tac "7 + 7 * (5 - unat (n + 1)) = 7 * (5 - unat n)")
-           apply (simp add: Word_Lemmas.shiftr_shiftr)
-          apply arith
-         apply (simp add: Word.unat_arith_simps)
-        apply (rule ccontr)
-        apply simp
-        done
+      apply (subgoal_tac "unat a < 5")
+       apply (subgoal_tac "unat (a + 1) = unat a + 1")
+        apply (simp add: Word_Lemmas.shiftr_shiftr algebra_simps)
+       apply (simp add: Word.unat_arith_simps)
+      apply (rule ccontr)
+      apply simp
       done
     subgoal for r
       by (cases r) (simp add: Reader_Monad.oreturn_apply)
@@ -145,10 +141,63 @@ lemma varint_size'_some:
   shows "\<exists>n. varint_size' v s = Some n"
   using varint_size'_some_bounds[of v s] by auto
 
+lemma varint_size'_some_bounds_shift:
+  shows "\<exists>n. varint_size' v s = Some n \<and>
+             1 \<le> unat n \<and> unat n \<le> 5 \<and>
+             v >> (7 * unat n) = 0"
+proof -
+  let ?C = "\<lambda>(n :: 32 word, x :: 32 word) s. x \<noteq> 0"
+  let ?B = "\<lambda>(n :: 32 word, x :: 32 word). oreturn (n + 1, x >> (7 :: nat))"
+  let ?I = "\<lambda>(n :: 32 word, x :: 32 word) s.
+       1 \<le> unat n \<and> unat n \<le> 5 \<and>
+       x >> (7 * (5 - unat n)) = 0 \<and>
+       x = v >> (7 * unat n)"
+  have loop_result:
+    "case owhile ?C ?B (1, v >> (7 :: nat)) s of
+       None \<Rightarrow> False
+     | Some (n, x) \<Rightarrow>
+         1 \<le> unat n \<and> unat n \<le> 5 \<and>
+         v >> (7 * unat n) = 0"
+    apply (rule Reader_Monad.owhile_rule[
+      where I = ?I and M = "measure (\<lambda>(n :: 32 word, x :: 32 word). unat x)"])
+         apply (simp add: Word_Lemmas.shiftr_shiftr word32_shiftr_35_zero)
+        apply simp
+    subgoal for r r'
+      by (cases r; cases r')
+         (auto simp: Reader_Monad.oreturn_apply
+               intro: word32_shiftr7_decreases)
+    subgoal for r r'
+      apply (cases r; cases r')
+      apply (clarsimp simp: Reader_Monad.oreturn_apply)
+      apply (subgoal_tac "unat a < 5")
+       apply (subgoal_tac "unat (a + 1) = unat a + 1")
+        apply (subgoal_tac "7 + 7 * (5 - unat (a + 1)) = 7 * (5 - unat a)")
+         apply (simp add: Word_Lemmas.shiftr_shiftr algebra_simps)
+        apply arith
+       apply (simp add: Word.unat_arith_simps)
+      apply (rule ccontr)
+      apply (simp add: word32_shiftr_35_zero)
+      done
+    subgoal for r
+      by (cases r) (simp add: Reader_Monad.oreturn_apply)
+    subgoal for r
+      by (cases r) simp
+    done
+  show ?thesis
+    using loop_result unfolding varint_size'_def
+    by (auto simp: Reader_Monad.obind_def Reader_Monad.oreturn_apply
+             split: option.splits prod.splits)
+qed
+
 lemma varint_size'_bounds:
   assumes "varint_size' v s = Some n"
   shows "1 \<le> unat n \<and> unat n \<le> 5"
   using varint_size'_some_bounds[of v s] assms by auto
+
+lemma varint_size'_shiftr_zero:
+  assumes "varint_size' v s = Some n"
+  shows "v >> (7 * unat n) = 0"
+  using varint_size'_some_bounds_shift[of v s] assms by auto
 
 lemma varint_size'_ge1:
   assumes "varint_size' v s = Some n"
