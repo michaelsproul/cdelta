@@ -33,6 +33,22 @@ lemma wr_resultD:
   shows "wr_t_C.pos_C r = pos" "wr_t_C.err_C r = err"
   using assms by (simp_all add: wr_result_def)
 
+lemma unat_add_of_nat_index:
+  fixes base sz :: "32 word"
+  assumes n_lt: "n < unat sz"
+      and no_overflow: "unat base + unat sz < 2 ^ 32"
+  shows "unat (base + of_nat n :: 32 word) = unat base + n"
+proof -
+  have n_lt32: "n < 2 ^ 32"
+    using n_lt unat_lt2p[of sz] by simp
+  have ofn: "unat (of_nat n :: 32 word) = n"
+    using n_lt32 by (simp add: unat_of_nat_eq)
+  have sum_lt: "unat base + n < 2 ^ 32"
+    using n_lt no_overflow by simp
+  show ?thesis
+    using sum_lt ofn by (simp add: unat_word_ariths(1))
+qed
+
 lemma write_byte'_spec:
   assumes ptr_ok:
     "pos < cap \<Longrightarrow> ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
@@ -44,6 +60,28 @@ lemma write_byte'_spec:
   unfolding write_byte'_def
   apply runs_to_vcg
   using ptr_ok by auto
+
+lemma write_bytes'_overflow:
+  assumes overflow: "cap - pos < len"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and> r = Result (wr_t_C pos ENC_OVERFLOW) \<rbrace>"
+  unfolding write_bytes'_def
+  apply runs_to_vcg
+  using overflow by simp
+
+lemma write_bytes'_zero:
+  shows "write_bytes' buf cap pos src src_off 0 \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and> r = Result (wr_t_C pos ENC_OK) \<rbrace>"
+  unfolding write_bytes'_def
+  apply runs_to_vcg
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((i :: 32 word), _). unat (0 :: 32 word) - unat i)"
+      and I = "\<lambda>i t. i = 0 \<and> t = s"])
+     apply simp
+    apply simp
+   apply simp
+  apply runs_to_vcg
+  done
 
 (* ---------- Buffer-to-list conversion ---------- *)
 
