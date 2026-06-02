@@ -621,6 +621,26 @@ next
                   set_cont_bits_map_nth)
 qed
 
+lemma varint_decode_varint_bytes32_digits:
+  assumes len_pos: "0 < unat len"
+      and len_le: "unat len \<le> 5"
+      and value_bound: "from_base128_acc 0 (varint_digits32 v len) < 2 ^ 32"
+  shows "varint_decode (varint_bytes32 v len @ rest) =
+         Some (from_base128_acc 0 (varint_digits32 v len), rest)"
+proof -
+  have digits_nonempty: "varint_digits32 v len \<noteq> []"
+    using len_pos by (simp add: varint_digits32_def)
+  have digits_bound: "\<forall>d \<in> set (varint_digits32 v len). d < 128"
+    by (rule varint_digits32_bound)
+  have digits_len: "length (varint_digits32 v len) \<le> 5"
+    using len_le by simp
+  show ?thesis
+    using varint_decode_loop_on_encoded
+      [OF digits_nonempty digits_bound digits_len value_bound, of rest]
+          varint_bytes32_eq_set_cont_bits[OF len_le, of v]
+    by (simp add: varint_decode_def)
+qed
+
 lemma write_varint_loop_preserves_typing:
   fixes len pos :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
