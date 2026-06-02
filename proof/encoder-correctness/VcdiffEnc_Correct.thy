@@ -231,6 +231,102 @@ lemma write_bytes_loop_preserves_typing:
                     unat_measure_decrease_of_word_less)
   done
 
+lemma write_bytes_loop_copies:
+  fixes len pos src_off :: "32 word"
+  assumes dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))"
+      and dst_src_disj: "\<forall>i < unat len. \<forall>j < unat len.
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           src +\<^sub>p uint (src_off + of_nat j)"
+      and dst_inj: "\<forall>i < unat len. \<forall>j < unat len.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+  shows "(whileLoop (\<lambda>(i :: 32 word) st. i < len)
+           (\<lambda>i. do {
+              guard (\<lambda>st. ptr_valid (heap_typing st) (buf +\<^sub>p uint (pos + i)));
+              guard (\<lambda>st. ptr_valid (heap_typing st) (src +\<^sub>p uint (src_off + i)));
+              modify (heap_w8_update
+                (\<lambda>h. h(buf +\<^sub>p uint (pos + i) :=
+                         h (src +\<^sub>p uint (src_off + i)))));
+              return (i + 1)
+           }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result len \<and>
+            (\<forall>j < unat len.
+              heap_w8 t (src +\<^sub>p uint (src_off + of_nat j)) =
+              heap_w8 s (src +\<^sub>p uint (src_off + of_nat j))) \<and>
+            (\<forall>j < unat len.
+              heap_w8 t (buf +\<^sub>p uint (pos + of_nat j)) =
+              heap_w8 s (src +\<^sub>p uint (src_off + of_nat j))) \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((i :: 32 word), _). unat len - unat i)"
+      and I = "\<lambda>i st. unat i \<le> unat len
+             \<and> (\<forall>k < unat len.
+                 heap_w8 st (src +\<^sub>p uint (src_off + of_nat k)) =
+                 heap_w8 s (src +\<^sub>p uint (src_off + of_nat k)))
+             \<and> (\<forall>k < unat i.
+                 heap_w8 st (buf +\<^sub>p uint (pos + of_nat k)) =
+                 heap_w8 s (src +\<^sub>p uint (src_off + of_nat k)))
+             \<and> heap_typing st = heap_typing s"])
+     subgoal by simp
+     subgoal by unat_arith
+    subgoal premises prems for i st
+    proof -
+      have len_le: "unat len \<le> unat i"
+        using prems(1) by (simp add: word_less_nat_alt)
+      have i_eq: "i = len"
+        using prems(2) len_le by (metis antisym_conv word_unat.Rep_inject)
+      show ?thesis
+        using prems(2) i_eq by simp
+    qed
+  subgoal for i st
+    using dst_valid[rule_format, of "unat i"]
+          src_valid[rule_format, of "unat i"]
+    apply (auto simp: runs_to.rep_eq run_bind run_guard run_modify fun_upd_apply
+                      word_less_nat_alt word_unat.Rep_inverse
+                intro: unat_suc_le_of_word_less
+                       unat_measure_decrease_of_word_less)
+    subgoal premises prems for k
+    proof -
+      have i_word: "i < len"
+        using prems(1) by (simp add: word_less_nat_alt)
+      have contradiction: False
+        by (rule dst_src_disj_current_contradict
+          [OF dst_src_disj i_word prems(8) prems(7)])
+      show ?thesis
+        using contradiction by simp
+    qed
+    subgoal premises prems for k
+    proof -
+      have i_word: "i < len"
+        using prems(1) by (simp add: word_less_nat_alt)
+      have k_eq: "k = unat i"
+        by (rule word_index_ptr_eq_currentD
+          [OF dst_inj i_word prems(8) prems(7)])
+      have src_pres:
+        "heap_w8 st (src +\<^sub>p uint (src_off + i)) =
+         heap_w8 s (src +\<^sub>p uint (src_off + i))"
+        using prems(4)[rule_format, of "unat i"] prems(1)
+        by (simp add: word_unat.Rep_inverse)
+      show ?thesis
+        using k_eq src_pres by simp
+    qed
+    subgoal premises prems for k
+    proof -
+      have i_word: "i < len"
+        using prems(1) by (simp add: word_less_nat_alt)
+      have k_prev: "k < unat i"
+        by (rule word_index_ptr_ne_currentD
+          [OF i_word prems(8) prems(7)])
+      show ?thesis
+        using prems(5)[rule_format, OF k_prev] by simp
+    qed
+    done
+  done
+
 lemma write_bytes'_success_preserves_typing:
   assumes fits: "\<not> cap - pos < len"
       and dst_valid: "\<forall>j < unat len.
@@ -246,6 +342,37 @@ lemma write_bytes'_success_preserves_typing:
   apply simp
   apply (rule runs_to_weaken[
     OF write_bytes_loop_preserves_typing[OF dst_valid src_valid]])
+  by auto
+
+lemma write_bytes'_success_copies:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))"
+      and dst_src_disj: "\<forall>i < unat len. \<forall>j < unat len.
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           src +\<^sub>p uint (src_off + of_nat j)"
+      and dst_inj: "\<forall>i < unat len. \<forall>j < unat len.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+            (\<forall>j < unat len.
+              heap_w8 t (src +\<^sub>p uint (src_off + of_nat j)) =
+              heap_w8 s (src +\<^sub>p uint (src_off + of_nat j))) \<and>
+            (\<forall>j < unat len.
+              heap_w8 t (buf +\<^sub>p uint (pos + of_nat j)) =
+              heap_w8 s (src +\<^sub>p uint (src_off + of_nat j))) \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+  unfolding write_bytes'_def
+  apply runs_to_vcg
+  using fits
+  apply simp
+  apply (rule runs_to_weaken[
+    OF write_bytes_loop_copies
+      [OF dst_valid src_valid dst_src_disj dst_inj]])
   by auto
 
 lemma write_varint'_overflow:
