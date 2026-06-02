@@ -2578,6 +2578,82 @@ lemma write_varint'_success_heap_bytes_append_wordpos_decodes:
         no_overflow
   by (simp add: unat_word_add_no_overflow)
 
+lemma write_varint'_success_heap_bytes_append_wordpos_preserves2:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat pos. \<forall>i.
+           i < n \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and no_overflow: "unat pos + unat n < 2 ^ 32"
+      and disj1: "\<forall>k < out1_n. \<forall>i.
+           i < n \<longrightarrow> out1 +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and disj2: "\<forall>k < out2_n. \<forall>i.
+           i < n \<longrightarrow> out2 +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + n)) =
+                   heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+                   heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+                   heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have append:
+    "write_varint' buf cap pos v \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+               heap_bytes t buf (unat (pos + n)) =
+               heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_varint'_success_heap_bytes_append_wordpos
+      [OF size fits dst_valid dst_inj prefix_disj no_overflow])
+  have pres1:
+    "write_varint' buf cap pos v \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+               heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_varint'_success_preserves_heap_bytes_bounded
+      [OF size fits dst_valid disj1])
+  have pres2:
+    "write_varint' buf cap pos v \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+               heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_varint'_success_preserves_heap_bytes_bounded
+      [OF size fits dst_valid disj2])
+  have combined12:
+    "write_varint' buf cap pos v \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+           heap_bytes t buf (unat (pos + n)) =
+           heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+           heap_typing t = heap_typing s) \<and>
+          (r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+           heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+           heap_typing t = heap_typing s) \<rbrace>"
+    using append pres1 by (simp add: runs_to_conj)
+  have combined:
+    "write_varint' buf cap pos v \<bullet> s
+       \<lbrace> \<lambda>r t.
+          ((r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+            heap_bytes t buf (unat (pos + n)) =
+            heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+            heap_typing t = heap_typing s) \<and>
+           (r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+            heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+            heap_typing t = heap_typing s)) \<and>
+          (r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+           heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+           heap_typing t = heap_typing s) \<rbrace>"
+    using combined12 pres2 by (simp add: runs_to_conj)
+  show ?thesis
+    apply (rule runs_to_weaken[OF combined])
+    by auto
+qed
+
 lemma heap_bytes_update_at_distinct:
   assumes dist: "ptr_range_distinct buf n"
       and k_lt: "k < n"
