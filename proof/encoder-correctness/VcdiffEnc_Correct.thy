@@ -174,6 +174,17 @@ lemma varint_size'_some:
   shows "\<exists>n. varint_size' v s = Some n"
   using varint_size'_some_bounds[of v s] by auto
 
+lemma varint_size'_state_independent:
+  "varint_size' v t = varint_size' v s"
+  unfolding varint_size'_def
+  by (simp add: Reader_Monad.owhile_def Reader_Monad.obind_def
+                Reader_Monad.oreturn_def K_def split_beta case_prod_beta
+          split: prod.splits option.splits)
+
+lemma varint_size'_heap_w8_update[simp]:
+  "varint_size' v (heap_w8_update f s) = varint_size' v s"
+  by (rule varint_size'_state_independent)
+
 lemma varint_size'_some_bounds_shift:
   shows "\<exists>n. varint_size' v s = Some n \<and>
              1 \<le> unat n \<and> unat n \<le> 5 \<and>
