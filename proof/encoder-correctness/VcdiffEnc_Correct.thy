@@ -546,6 +546,18 @@ lemma varint_digits32_bound:
   "\<forall>d \<in> set (varint_digits32 v len). d < 128"
   by (simp add: varint_digits32_def)
 
+lemma byte_ucast32_or_80:
+  fixes b :: byte
+  shows "(ucast ((ucast b :: 32 word) || 0x80) :: byte) = b OR 0x80"
+  by (intro word_eqI) (auto simp: bit_simps word_size)
+
+lemma varint_byte32_digit:
+  "varint_byte32 v len i =
+     (let d = (word_of_nat (varint_digit32 v len i) :: byte) in
+      if i + 1 < len then d OR 0x80 else d)"
+  unfolding varint_byte32_def varint_digit32_def
+  by (simp add: Let_def word_unat.Rep_inverse byte_ucast32_or_80)
+
 lemma write_varint_loop_preserves_typing:
   fixes len pos :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
