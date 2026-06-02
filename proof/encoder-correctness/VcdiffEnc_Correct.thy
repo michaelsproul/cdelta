@@ -97,9 +97,8 @@ proof -
     using expr_unat by (simp add: word_less_nat_alt)
 qed
 
-lemma varint_size'_bounds:
-  assumes size: "varint_size' v s = Some n"
-  shows "1 \<le> unat n \<and> unat n \<le> 5"
+lemma varint_size'_some_bounds:
+  shows "\<exists>n. varint_size' v s = Some n \<and> 1 \<le> unat n \<and> unat n \<le> 5"
 proof -
   let ?C = "\<lambda>(n :: 32 word, x :: 32 word) s. x \<noteq> 0"
   let ?B = "\<lambda>(n :: 32 word, x :: 32 word). oreturn (n + 1, x >> (7 :: nat))"
@@ -107,7 +106,7 @@ proof -
        1 \<le> unat n \<and> unat n \<le> 5 \<and> x >> (7 * (5 - unat n)) = 0"
   have loop_bound:
     "case owhile ?C ?B (1, v >> (7 :: nat)) s of
-       None \<Rightarrow> True
+       None \<Rightarrow> False
      | Some (n, x) \<Rightarrow> 1 \<le> unat n \<and> unat n \<le> 5"
     apply (rule Reader_Monad.owhile_rule[
       where I = ?I and M = "measure (\<lambda>(n :: 32 word, x :: 32 word). unat x)"])
@@ -131,17 +130,25 @@ proof -
         apply simp
         done
       done
-    subgoal by simp
+    subgoal for r
+      by (cases r) (simp add: Reader_Monad.oreturn_apply)
     subgoal for r
       by (cases r) simp
     done
-  obtain x where "owhile ?C ?B (1, v >> (7 :: nat)) s = Some (n, x)"
-    using size unfolding varint_size'_def
-    by (auto simp: Reader_Monad.in_obind_eq Reader_Monad.in_oreturn
+  show ?thesis
+    using loop_bound unfolding varint_size'_def
+    by (auto simp: Reader_Monad.obind_def Reader_Monad.oreturn_apply
              split: option.splits prod.splits)
-  thus ?thesis
-    using loop_bound by simp
 qed
+
+lemma varint_size'_some:
+  shows "\<exists>n. varint_size' v s = Some n"
+  using varint_size'_some_bounds[of v s] by auto
+
+lemma varint_size'_bounds:
+  assumes "varint_size' v s = Some n"
+  shows "1 \<le> unat n \<and> unat n \<le> 5"
+  using varint_size'_some_bounds[of v s] assms by auto
 
 lemma varint_size'_ge1:
   assumes "varint_size' v s = Some n"
