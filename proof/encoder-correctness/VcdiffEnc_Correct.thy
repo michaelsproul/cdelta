@@ -97,9 +97,9 @@ proof -
     using expr_unat by (simp add: word_less_nat_alt)
 qed
 
-lemma varint_size'_le5:
+lemma varint_size'_bounds:
   assumes size: "varint_size' v s = Some n"
-  shows "unat n \<le> 5"
+  shows "1 \<le> unat n \<and> unat n \<le> 5"
 proof -
   let ?C = "\<lambda>(n :: 32 word, x :: 32 word) s. x \<noteq> 0"
   let ?B = "\<lambda>(n :: 32 word, x :: 32 word). oreturn (n + 1, x >> (7 :: nat))"
@@ -108,7 +108,7 @@ proof -
   have loop_bound:
     "case owhile ?C ?B (1, v >> (7 :: nat)) s of
        None \<Rightarrow> True
-     | Some (n, x) \<Rightarrow> unat n \<le> 5"
+     | Some (n, x) \<Rightarrow> 1 \<le> unat n \<and> unat n \<le> 5"
     apply (rule Reader_Monad.owhile_rule[
       where I = ?I and M = "measure (\<lambda>(n :: 32 word, x :: 32 word). unat x)"])
          apply (simp add: Word_Lemmas.shiftr_shiftr word32_shiftr_35_zero)
@@ -142,6 +142,16 @@ proof -
   thus ?thesis
     using loop_bound by simp
 qed
+
+lemma varint_size'_ge1:
+  assumes "varint_size' v s = Some n"
+  shows "1 \<le> unat n"
+  using varint_size'_bounds[OF assms] by simp
+
+lemma varint_size'_le5:
+  assumes "varint_size' v s = Some n"
+  shows "unat n \<le> 5"
+  using varint_size'_bounds[OF assms] by simp
 
 lemma varint_size'_shift_ok:
   assumes size: "varint_size' v s = Some n"
