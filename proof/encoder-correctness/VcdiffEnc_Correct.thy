@@ -33,6 +33,18 @@ lemma wr_resultD:
   shows "wr_t_C.pos_C r = pos" "wr_t_C.err_C r = err"
   using assms by (simp_all add: wr_result_def)
 
+lemma write_byte'_spec:
+  assumes ptr_ok:
+    "pos < cap \<Longrightarrow> ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+  shows "write_byte' buf cap pos b \<bullet> s
+           \<lbrace> \<lambda>r t. if cap \<le> pos
+                   then t = s \<and> r = Result (wr_t_C pos ENC_OVERFLOW)
+                   else t = heap_w8_update (\<lambda>h. h(buf +\<^sub>p uint pos := b)) s \<and>
+                        r = Result (wr_t_C (pos + 1) ENC_OK) \<rbrace>"
+  unfolding write_byte'_def
+  apply runs_to_vcg
+  using ptr_ok by auto
+
 (* ---------- Buffer-to-list conversion ---------- *)
 
 definition heap_bytes :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> byte list" where
@@ -288,6 +300,18 @@ lemma heap_bytes_extend_distinct:
          heap_bytes s buf n @ [v]"
   using assms ptr_range_distinct_lastD
   by (intro heap_bytes_extend) blast
+
+lemma write_byte'_heap_bytes_append:
+  assumes pos_nat: "unat pos = n"
+      and pos_lt: "pos < cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+      and dist: "ptr_range_distinct buf (Suc n)"
+  shows "write_byte' buf cap pos b \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+                   heap_bytes t buf (Suc n) = heap_bytes s buf n @ [b] \<rbrace>"
+  apply (rule runs_to_weaken[OF write_byte'_spec])
+  using assms heap_bytes_extend_distinct[OF dist, of b s]
+  by (auto simp: word_not_le uint_nat)
 
 lemma buf_valid_near_arr_update[simp]:
   "buf_valid (near_arr_''_update f s) buf n = buf_valid s buf n"
