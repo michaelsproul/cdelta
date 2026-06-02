@@ -2805,6 +2805,63 @@ next
     by (simp add: guard_eq)
 qed
 
+lemma emit_run'_success_preserves_typing:
+  assumes size: "varint_size' sz s = Some n"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_varint_fits:
+        "\<not> inst_cap - (sections_t_C.inst_pos_C sec + 1) < n"
+      and inst_varint_valid: "\<forall>j < unat n.
+        ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j))"
+      and data_byte_fits: "sections_t_C.data_pos_C sec < data_cap"
+      and data_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec))"
+  shows "emit_run' sec data data_cap inst inst_cap fill sz \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                sections_result sec'
+                  (sections_t_C.data_pos_C sec + 1)
+                  (sections_t_C.inst_pos_C sec + 1 + n)
+                  (sections_t_C.addr_pos_C sec)
+                  ENC_OK) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+  unfolding emit_run'_def
+  apply runs_to_vcg
+      apply (rule runs_to_weaken[
+        OF write_byte'_success_heap_bytes_word_single
+          [OF inst_byte_fits inst_byte_ptr]])
+     apply auto[1]
+     apply runs_to_vcg
+     apply (rule runs_to_weaken)
+      apply (rule write_varint'_success_preserves_typing_bounded[where n = n])
+        subgoal for t
+          using size varint_size'_state_independent[of sz t s] by simp
+       apply (rule inst_varint_fits)
+      apply (intro allI impI)
+      subgoal premises prems for t j
+      proof -
+        have ptr:
+          "ptr_valid (heap_typing s)
+            (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j))"
+          using inst_varint_valid prems by auto
+        show ?thesis
+          using ptr prems by simp
+      qed
+    apply clarsimp
+    apply runs_to_vcg
+    apply (rule runs_to_weaken[OF write_byte'_success_heap_bytes_word_single])
+      apply (rule data_byte_fits)
+     apply (simp add: data_byte_ptr)
+    apply auto[1]
+   apply (simp add: sections_result_def sec_ok)
+  done
+
 lemma buf_valid_near_arr_update[simp]:
   "buf_valid (near_arr_''_update f s) buf n = buf_valid s buf n"
   by (simp add: buf_valid_def)
