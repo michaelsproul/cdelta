@@ -716,6 +716,18 @@ lemma write_varint'_success_preserves_typing_le5:
   apply (rule write_varint'_success_preserves_typing[OF size fits dst_valid])
   using n_le by (auto intro: varint_shift_ok_of_unat_le5)
 
+lemma write_varint'_success_preserves_typing_bounded:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_varint'_success_preserves_typing_le5
+    [OF size fits dst_valid])
+  using varint_size'_le5[OF size] .
+
 lemma write_varint'_success_writes:
   assumes size: "varint_size' v s = Some n"
       and fits: "\<not> cap - pos < n"
@@ -760,6 +772,25 @@ lemma write_varint'_success_writes_le5:
             heap_typing t = heap_typing s \<rbrace>"
   apply (rule write_varint'_success_writes[OF size fits dst_valid _ dst_inj])
   using n_le by (auto intro: varint_shift_ok_of_unat_le5)
+
+lemma write_varint'_success_writes_bounded:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+            (\<forall>j < unat n.
+              heap_w8 t (buf +\<^sub>p uint (pos + of_nat j)) =
+              varint_byte32 v n (of_nat j)) \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_varint'_success_writes_le5
+    [OF size fits dst_valid _ dst_inj])
+  using varint_size'_le5[OF size] .
 
 (* ---------- Buffer-to-list conversion ---------- *)
 
@@ -949,6 +980,19 @@ lemma write_varint'_success_preserves_typing_buf_valid_le5:
     [OF size fits dst_ok dst_no_overflow dst_range])
   using n_le by (auto intro: varint_shift_ok_of_unat_le5)
 
+lemma write_varint'_success_preserves_typing_buf_valid_bounded:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_ok: "buf_valid s buf dst_n"
+      and dst_no_overflow: "unat pos + unat n < 2 ^ 32"
+      and dst_range: "unat pos + unat n \<le> dst_n"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_varint'_success_preserves_typing_buf_valid_le5
+    [OF size fits dst_ok dst_no_overflow dst_range])
+  using varint_size'_le5[OF size] .
+
 lemma write_varint'_success_writes_buf_valid:
   assumes size: "varint_size' v s = Some n"
       and fits: "\<not> cap - pos < n"
@@ -996,6 +1040,26 @@ lemma write_varint'_success_writes_buf_valid_le5:
   apply (rule write_varint'_success_writes_buf_valid
     [OF size fits dst_ok dst_no_overflow dst_range _ dst_inj])
   using n_le by (auto intro: varint_shift_ok_of_unat_le5)
+
+lemma write_varint'_success_writes_buf_valid_bounded:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_ok: "buf_valid s buf dst_n"
+      and dst_no_overflow: "unat pos + unat n < 2 ^ 32"
+      and dst_range: "unat pos + unat n \<le> dst_n"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+            (\<forall>j < unat n.
+              heap_w8 t (buf +\<^sub>p uint (pos + of_nat j)) =
+              varint_byte32 v n (of_nat j)) \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_varint'_success_writes_buf_valid_le5
+    [OF size fits dst_ok dst_no_overflow dst_range _ dst_inj])
+  using varint_size'_le5[OF size] .
 
 lemma buf_valid_shift:
   assumes ok: "buf_valid s buf (off + n)"
