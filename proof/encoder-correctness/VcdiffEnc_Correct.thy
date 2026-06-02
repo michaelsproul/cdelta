@@ -2003,6 +2003,51 @@ proof -
     by auto
 qed
 
+lemma write_bytes'_success_heap_bytes_append_src0:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and dst_src_disj: "\<forall>i < unat len. \<forall>j < unat len.
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           src +\<^sub>p uint ((0 :: 32 word) + of_nat j)"
+      and dst_inj: "\<forall>i < unat len. \<forall>j < unat len.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat pos. \<forall>i.
+           i < len \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and no_overflow: "unat pos + unat len < 2 ^ 32"
+  shows "write_bytes' buf cap pos src (0 :: 32 word) len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+                   heap_bytes t buf (unat pos + unat len) =
+                   heap_bytes s buf (unat pos) @
+                   heap_bytes s src (unat len) \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have append:
+    "write_bytes' buf cap pos src (0 :: 32 word) len \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+               heap_bytes t buf (unat pos + unat len) =
+               heap_bytes s buf (unat pos) @
+               heap_bytes_word s src (0 :: 32 word) len \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    apply (rule write_bytes'_success_heap_bytes_append
+      [of cap pos len s buf src "(0 :: 32 word)"])
+          apply (fact fits)
+         apply (fact dst_valid)
+        apply (fact src_valid)
+       apply (fact dst_src_disj)
+      apply (fact dst_inj)
+     apply (fact prefix_disj)
+    apply (fact no_overflow)
+    done
+  show ?thesis
+    apply (rule runs_to_weaken[OF append])
+    by (simp add: heap_bytes_word_zero)
+qed
+
 lemma write_varint'_success_preserves_heap_bytes_prefix:
   assumes size: "varint_size' v s = Some n"
       and fits: "\<not> cap - pos < n"
