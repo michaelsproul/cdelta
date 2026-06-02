@@ -2230,6 +2230,43 @@ proof -
       [OF pos_nat pos_lt ptr_ok dist])
 qed
 
+lemma write_byte'_heap_bytes_append_current_typing:
+  assumes pos_lt: "pos < cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+      and dist: "ptr_range_distinct buf (Suc (unat pos))"
+  shows "write_byte' buf cap pos b \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+                   heap_bytes t buf (Suc (unat pos)) =
+                   heap_bytes s buf (unat pos) @ [b] \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have append:
+    "write_byte' buf cap pos b \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+               heap_bytes t buf (Suc (unat pos)) =
+               heap_bytes s buf (unat pos) @ [b] \<rbrace>"
+    by (rule write_byte'_heap_bytes_append_current[OF pos_lt ptr_ok dist])
+  have typing:
+    "write_byte' buf cap pos b \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+               heap_bytes_word t buf pos 1 = [b] \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_byte'_success_heap_bytes_word_single[OF pos_lt ptr_ok])
+  have combined:
+    "write_byte' buf cap pos b \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+           heap_bytes t buf (Suc (unat pos)) =
+           heap_bytes s buf (unat pos) @ [b]) \<and>
+          (r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+           heap_bytes_word t buf pos 1 = [b] \<and>
+           heap_typing t = heap_typing s) \<rbrace>"
+    using append typing by (simp add: runs_to_conj)
+  show ?thesis
+    apply (rule runs_to_weaken[OF combined])
+    by auto
+qed
+
 lemma buf_valid_near_arr_update[simp]:
   "buf_valid (near_arr_''_update f s) buf n = buf_valid s buf n"
   by (simp add: buf_valid_def)
