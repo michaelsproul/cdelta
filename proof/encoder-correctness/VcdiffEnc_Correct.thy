@@ -49,6 +49,18 @@ proof -
     using sum_lt ofn by (simp add: unat_word_ariths(1))
 qed
 
+lemma unat_suc_le_of_word_less:
+  fixes i len :: "32 word"
+  assumes "i < len"
+  shows "unat (i + 1) \<le> unat len"
+  using assms by unat_arith
+
+lemma unat_measure_decrease_of_word_less:
+  fixes i len :: "32 word"
+  assumes "i < len"
+  shows "unat len - unat (i + 1) < unat len - unat i"
+  using assms by unat_arith
+
 lemma write_byte'_spec:
   assumes ptr_ok:
     "pos < cap \<Longrightarrow> ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
@@ -82,6 +94,72 @@ lemma write_bytes'_zero:
    apply simp
   apply runs_to_vcg
   done
+
+lemma write_bytes_loop_preserves_typing:
+  fixes len pos src_off :: "32 word"
+  assumes dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))"
+  shows "(whileLoop (\<lambda>(i :: 32 word) st. i < len)
+           (\<lambda>i. do {
+              guard (\<lambda>st. ptr_valid (heap_typing st) (buf +\<^sub>p uint (pos + i)));
+              guard (\<lambda>st. ptr_valid (heap_typing st) (src +\<^sub>p uint (src_off + i)));
+              modify (heap_w8_update
+                (\<lambda>h. h(buf +\<^sub>p uint (pos + i) :=
+                         h (src +\<^sub>p uint (src_off + i)))));
+              return (i + 1)
+           }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result len \<and> heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((i :: 32 word), _). unat len - unat i)"
+      and I = "\<lambda>i st. unat i \<le> unat len \<and>
+             heap_typing st = heap_typing s"])
+     subgoal by simp
+     subgoal by unat_arith
+    subgoal premises prems for i st
+    proof -
+      have len_le: "unat len \<le> unat i"
+        using prems(1) by (simp add: word_less_nat_alt)
+      have i_eq: "i = len"
+        using prems(2) len_le by (metis antisym_conv word_unat.Rep_inject)
+      show ?thesis
+        using prems(2) i_eq by simp
+    qed
+  subgoal for i st
+    using dst_valid[rule_format, of "unat i"]
+          src_valid[rule_format, of "unat i"]
+    by (auto simp: runs_to.rep_eq run_bind run_guard run_modify
+                   word_less_nat_alt word_unat.Rep_inverse
+             intro: unat_suc_le_of_word_less
+                    unat_measure_decrease_of_word_less)
+  done
+
+lemma write_bytes'_success_preserves_typing:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  unfolding write_bytes'_def
+  apply runs_to_vcg
+  using fits
+  apply simp
+  apply (rule runs_to_weaken[
+    OF write_bytes_loop_preserves_typing[OF dst_valid src_valid]])
+  by auto
+
+lemma write_varint'_overflow:
+  assumes size: "varint_size' v s = Some n"
+      and overflow: "cap - pos < n"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and> r = Result (wr_t_C pos ENC_OVERFLOW) \<rbrace>"
+  unfolding write_varint'_def
+  apply runs_to_vcg
+  using size overflow by auto
 
 (* ---------- Buffer-to-list conversion ---------- *)
 
