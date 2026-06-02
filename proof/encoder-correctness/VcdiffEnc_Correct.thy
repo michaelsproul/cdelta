@@ -852,6 +852,20 @@ lemma heap_bytes_word_eqI:
   shows "heap_bytes_word t buf pos len = heap_bytes_word s buf pos len"
   using assms by (auto simp: heap_bytes_word_def)
 
+lemma write_byte'_success_heap_bytes_word_single:
+  assumes fits: "pos < cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+  shows "write_byte' buf cap pos b \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+                   heap_bytes_word t buf pos 1 = [b] \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[OF write_byte'_spec])
+  subgoal
+    using ptr_ok .
+  subgoal
+    using fits by (auto simp: heap_bytes_word_def)
+  done
+
 lemma write_varint'_overflow_preserves_heap_bytes:
   assumes size: "varint_size' v s = Some n"
       and overflow: "cap - pos < n"
