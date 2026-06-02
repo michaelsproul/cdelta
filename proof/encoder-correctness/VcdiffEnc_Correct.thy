@@ -515,6 +515,10 @@ definition varint_byte32 :: "32 word \<Rightarrow> 32 word \<Rightarrow> 32 word
       then (ucast ((ucast b :: 32 word) || 0x80) :: 8 word)
       else b)"
 
+definition varint_bytes32 :: "32 word \<Rightarrow> 32 word \<Rightarrow> byte list" where
+  "varint_bytes32 v len =
+     map (\<lambda>i. varint_byte32 v len (of_nat i)) [0 ..< unat len]"
+
 lemma write_varint_loop_preserves_typing:
   fixes len pos :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
@@ -814,18 +818,39 @@ lemma write_varint'_success_writes_bounded:
 definition heap_bytes :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> byte list" where
   "heap_bytes s buf n = map (\<lambda>i. heap_w8 s (buf +\<^sub>p int i)) [0 ..< n]"
 
+definition heap_bytes_word :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> byte list" where
+  "heap_bytes_word s buf pos len =
+     map (\<lambda>i. heap_w8 s (buf +\<^sub>p uint (pos + of_nat i))) [0 ..< unat len]"
+
 lemma heap_bytes_length[simp]:
   "length (heap_bytes s buf n) = n"
   by (simp add: heap_bytes_def)
+
+lemma heap_bytes_word_length[simp]:
+  "length (heap_bytes_word s buf pos len) = unat len"
+  by (simp add: heap_bytes_word_def)
 
 lemma heap_bytes_nth:
   "i < n \<Longrightarrow> heap_bytes s buf n ! i = heap_w8 s (buf +\<^sub>p int i)"
   by (simp add: heap_bytes_def)
 
+lemma heap_bytes_word_nth:
+  "i < unat len \<Longrightarrow>
+   heap_bytes_word s buf pos len ! i =
+   heap_w8 s (buf +\<^sub>p uint (pos + of_nat i))"
+  by (simp add: heap_bytes_word_def)
+
 lemma heap_bytes_eqI:
   assumes "\<And>i. i < n \<Longrightarrow> heap_w8 t (buf +\<^sub>p int i) = heap_w8 s (buf +\<^sub>p int i)"
   shows "heap_bytes t buf n = heap_bytes s buf n"
   using assms by (auto simp: heap_bytes_def)
+
+lemma heap_bytes_word_eqI:
+  assumes "\<And>i. i < unat len \<Longrightarrow>
+           heap_w8 t (buf +\<^sub>p uint (pos + of_nat i)) =
+           heap_w8 s (buf +\<^sub>p uint (pos + of_nat i))"
+  shows "heap_bytes_word t buf pos len = heap_bytes_word s buf pos len"
+  using assms by (auto simp: heap_bytes_word_def)
 
 lemma write_varint'_overflow_preserves_heap_bytes:
   assumes size: "varint_size' v s = Some n"
@@ -835,6 +860,24 @@ lemma write_varint'_overflow_preserves_heap_bytes:
                    heap_bytes t out out_n = heap_bytes s out out_n \<rbrace>"
   apply (rule runs_to_weaken[OF write_varint'_overflow[OF size overflow]])
   by auto
+
+lemma write_varint'_success_writes_heap_bytes_word:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes_word t buf pos n = varint_bytes32 v n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF write_varint'_success_writes_bounded
+      [OF size fits dst_valid dst_inj]])
+  by (auto simp: heap_bytes_word_def varint_bytes32_def)
 
 lemma heap_bytes_prefix:
   assumes "m \<le> n"
@@ -1077,6 +1120,27 @@ lemma write_varint'_success_writes_buf_valid_bounded:
   apply (rule write_varint'_success_writes_buf_valid_le5
     [OF size fits dst_ok dst_no_overflow dst_range _ dst_inj])
   using varint_size'_le5[OF size] .
+
+lemma write_varint'_success_writes_heap_bytes_word_buf_valid:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_ok: "buf_valid s buf dst_n"
+      and dst_no_overflow: "unat pos + unat n < 2 ^ 32"
+      and dst_range: "unat pos + unat n \<le> dst_n"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes_word t buf pos n = varint_bytes32 v n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_varint'_success_writes_heap_bytes_word[OF size fits])
+  subgoal
+    using assms by (auto intro: buf_valid_word_rangeD)
+  subgoal
+    using dst_inj .
+  done
 
 lemma buf_valid_shift:
   assumes ok: "buf_valid s buf (off + n)"
