@@ -2052,6 +2052,22 @@ lemma write_byte'_heap_bytes_append:
   using assms heap_bytes_extend_distinct[OF dist, of b s]
   by (auto simp: word_not_le uint_nat)
 
+lemma write_byte'_heap_bytes_append_current:
+  assumes pos_lt: "pos < cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+      and dist: "ptr_range_distinct buf (Suc (unat pos))"
+  shows "write_byte' buf cap pos b \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+                   heap_bytes t buf (Suc (unat pos)) =
+                   heap_bytes s buf (unat pos) @ [b] \<rbrace>"
+proof -
+  have pos_nat: "unat pos = unat pos"
+    by simp
+  show ?thesis
+    by (rule write_byte'_heap_bytes_append
+      [OF pos_nat pos_lt ptr_ok dist])
+qed
+
 lemma buf_valid_near_arr_update[simp]:
   "buf_valid (near_arr_''_update f s) buf n = buf_valid s buf n"
   by (simp add: buf_valid_def)
