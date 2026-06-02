@@ -1235,6 +1235,34 @@ lemma write_varint'_success_writes_heap_bytes_word:
       [OF size fits dst_valid dst_inj]])
   by (auto simp: heap_bytes_word_def varint_bytes32_def)
 
+lemma heap_bytes_word_varint_decode:
+  assumes size: "varint_size' v s = Some n"
+      and bytes: "heap_bytes_word t buf pos n = varint_bytes32 v n"
+  shows "varint_decode (heap_bytes_word t buf pos n @ rest) =
+         Some (unat v, rest)"
+  using bytes varint_decode_varint_bytes32[OF size, of rest] by simp
+
+lemma write_varint'_success_decodes_heap_bytes_word:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes_word t buf pos n = varint_bytes32 v n \<and>
+                   varint_decode (heap_bytes_word t buf pos n @ rest) =
+                     Some (unat v, rest) \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF write_varint'_success_writes_heap_bytes_word
+      [OF size fits dst_valid dst_inj]])
+  using heap_bytes_word_varint_decode[OF size, of _ buf pos rest]
+  by auto
+
 lemma write_bytes'_success_copies_heap_bytes_word:
   assumes fits: "\<not> cap - pos < len"
       and dst_valid: "\<forall>j < unat len.
@@ -1520,6 +1548,28 @@ lemma write_varint'_success_writes_heap_bytes_word_buf_valid:
   subgoal
     using dst_inj .
   done
+
+lemma write_varint'_success_decodes_heap_bytes_word_buf_valid:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_ok: "buf_valid s buf dst_n"
+      and dst_no_overflow: "unat pos + unat n < 2 ^ 32"
+      and dst_range: "unat pos + unat n \<le> dst_n"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes_word t buf pos n = varint_bytes32 v n \<and>
+                   varint_decode (heap_bytes_word t buf pos n @ rest) =
+                     Some (unat v, rest) \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF write_varint'_success_writes_heap_bytes_word_buf_valid
+      [OF size fits dst_ok dst_no_overflow dst_range dst_inj]])
+  using heap_bytes_word_varint_decode[OF size, of _ buf pos rest]
+  by auto
 
 lemma write_bytes'_success_copies_heap_bytes_word_buf_valid:
   assumes fits: "\<not> cap - pos < len"
