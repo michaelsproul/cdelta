@@ -558,6 +558,69 @@ lemma varint_byte32_digit:
   unfolding varint_byte32_def varint_digit32_def
   by (simp add: Let_def word_unat.Rep_inverse byte_ucast32_or_80)
 
+lemma set_cont_bits_map_nth:
+  assumes i_lt: "i < length ds"
+  shows "set_cont_bits (map (\<lambda>d. word_of_nat d :: byte) ds) ! i =
+         (if Suc i < length ds
+          then (word_of_nat (ds ! i) :: byte) OR 0x80
+          else word_of_nat (ds ! i))"
+  using i_lt
+proof (induction ds arbitrary: i)
+  case Nil
+  then show ?case by simp
+next
+  case (Cons d ds)
+  show ?case
+  proof (cases i)
+    case 0
+    show ?thesis
+      using 0 by (cases ds) simp_all
+  next
+    case (Suc i')
+    have i'_lt: "i' < length ds"
+      using Cons.prems Suc by simp
+    show ?thesis
+      using Cons.IH[OF i'_lt] Suc Cons.prems
+      by (cases ds) simp_all
+  qed
+qed
+
+lemma varint_bytes32_eq_set_cont_bits:
+  assumes len_le: "unat len \<le> 5"
+  shows "varint_bytes32 v len =
+         set_cont_bits (map (\<lambda>d. word_of_nat d :: byte)
+           (varint_digits32 v len))"
+proof (rule nth_equalityI)
+  show "length (varint_bytes32 v len) =
+        length (set_cont_bits (map (\<lambda>d. word_of_nat d :: byte)
+          (varint_digits32 v len)))"
+    by (simp add: varint_bytes32_def)
+next
+  fix i
+  assume i_lt_len:
+    "i < length (varint_bytes32 v len)"
+  hence i_lt: "i < unat len"
+    by (simp add: varint_bytes32_def)
+  have i_word_lt32: "i < 2 ^ 32"
+    using i_lt unat_lt2p[of len] by simp
+  have suc_unat:
+    "unat ((of_nat i :: 32 word) + 1) = Suc i"
+    using i_lt len_le
+    by (simp add: Word.unat_arith_simps unat_of_nat_eq)
+  have branch:
+    "((of_nat i :: 32 word) + 1 < len) \<longleftrightarrow> Suc i < unat len"
+    using suc_unat by (simp add: word_less_nat_alt)
+  have digit_nth:
+    "varint_digits32 v len ! i = varint_digit32 v len (of_nat i)"
+    using i_lt by (simp add: varint_digits32_def)
+  show "varint_bytes32 v len ! i =
+        set_cont_bits (map (\<lambda>d. word_of_nat d :: byte)
+          (varint_digits32 v len)) ! i"
+    using i_lt digit_nth branch
+    by (simp add: varint_bytes32_def varint_byte32_digit
+                  set_cont_bits_map_nth)
+qed
+
 lemma write_varint_loop_preserves_typing:
   fixes len pos :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
