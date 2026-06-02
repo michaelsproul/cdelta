@@ -18,6 +18,21 @@ begin
 
 context vcdiff_enc_global_addresses begin
 
+abbreviation ENC_OK :: "32 word" where
+  "ENC_OK \<equiv> 0"
+
+abbreviation ENC_OVERFLOW :: "32 word" where
+  "ENC_OVERFLOW \<equiv> 1"
+
+definition wr_result :: "wr_t_C \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> bool" where
+  "wr_result r pos err \<longleftrightarrow>
+     wr_t_C.pos_C r = pos \<and> wr_t_C.err_C r = err"
+
+lemma wr_resultD:
+  assumes "wr_result r pos err"
+  shows "wr_t_C.pos_C r = pos" "wr_t_C.err_C r = err"
+  using assms by (simp_all add: wr_result_def)
+
 (* ---------- Buffer-to-list conversion ---------- *)
 
 definition heap_bytes :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> byte list" where
@@ -82,6 +97,10 @@ lemma buf_validD:
   "\<lbrakk> buf_valid s buf n; i < n \<rbrakk> \<Longrightarrow> ptr_valid (heap_typing s) (buf +\<^sub>p int i)"
   by (simp add: buf_valid_def)
 
+lemma buf_valid_mono:
+  "\<lbrakk> buf_valid s buf n; m \<le> n \<rbrakk> \<Longrightarrow> buf_valid s buf m"
+  by (auto simp: buf_valid_def)
+
 lemma buf_valid_uintD:
   assumes ok: "buf_valid s buf n"
       and i_lt: "unat i < n"
@@ -90,6 +109,20 @@ proof -
   have "ptr_valid (heap_typing s) (buf +\<^sub>p int (unat i))"
     using buf_validD[OF ok i_lt] .
   thus ?thesis by (simp only: uint_nat)
+qed
+
+lemma buf_valid_shift:
+  assumes ok: "buf_valid s buf (off + n)"
+  shows "buf_valid s (buf +\<^sub>p int off) n"
+proof (unfold buf_valid_def, intro allI impI)
+  fix i
+  assume i_lt: "i < n"
+  have off_i_lt: "off + i < off + n"
+    using i_lt by simp
+  have ptr_eq: "buf +\<^sub>p int (off + i) = buf +\<^sub>p int off +\<^sub>p int i"
+    by (simp add: ptr_add_def)
+  show "ptr_valid (heap_typing s) (buf +\<^sub>p int off +\<^sub>p int i)"
+    using buf_validD[OF ok off_i_lt] ptr_eq by simp
 qed
 
 (* ---------- State-update preservation ---------- *)
@@ -101,6 +134,48 @@ definition bufs_disjoint :: "8 word ptr \<Rightarrow> nat \<Rightarrow> 8 word p
 lemma bufs_disjoint_sym:
   "bufs_disjoint p pn q qn = bufs_disjoint q qn p pn"
   unfolding bufs_disjoint_def by (auto simp: eq_commute)
+
+lemma bufs_disjoint_mono:
+  assumes "bufs_disjoint p pn q qn"
+      and "pm \<le> pn"
+      and "qm \<le> qn"
+  shows "bufs_disjoint p pm q qm"
+  using assms by (auto simp: bufs_disjoint_def)
+
+definition ptr_range_distinct :: "8 word ptr \<Rightarrow> nat \<Rightarrow> bool" where
+  "ptr_range_distinct buf n \<longleftrightarrow>
+     distinct (map (\<lambda>i. buf +\<^sub>p int i) [0 ..< n])"
+
+lemma ptr_range_distinct_eqD:
+  assumes dist: "ptr_range_distinct buf n"
+      and i_lt: "i < n"
+      and j_lt: "j < n"
+      and eq: "buf +\<^sub>p int i = buf +\<^sub>p int j"
+  shows "i = j"
+proof -
+  let ?xs = "map (\<lambda>k. buf +\<^sub>p int k) [0..<n]"
+  have dist_xs: "distinct ?xs"
+    using dist by (simp add: ptr_range_distinct_def)
+  have nth_unique:
+    "\<And>a b. \<lbrakk> a < length ?xs; b < length ?xs; ?xs ! a = ?xs ! b \<rbrakk>
+      \<Longrightarrow> a = b"
+    using dist_xs by (simp add: distinct_conv_nth)
+  have "?xs ! i = ?xs ! j"
+    using i_lt j_lt eq by simp
+  thus ?thesis
+    using nth_unique[of i j] i_lt j_lt by simp
+qed
+
+lemma ptr_range_distinct_lastD:
+  assumes dist: "ptr_range_distinct buf (Suc n)"
+      and i_lt: "i < n"
+  shows "buf +\<^sub>p int i \<noteq> buf +\<^sub>p int n"
+proof
+  assume eq: "buf +\<^sub>p int i = buf +\<^sub>p int n"
+  have "i = n"
+    using ptr_range_distinct_eqD[OF dist, of i n] i_lt eq by simp
+  thus False using i_lt by simp
+qed
 
 lemma heap_bytes_update_disjoint:
   assumes disj: "bufs_disjoint buf n (Ptr (ptr_val ptr)) 1"
@@ -124,6 +199,40 @@ lemma heap_bytes_update_outside:
   shows "heap_bytes (heap_w8_update (\<lambda>h. h(ptr := v)) s) buf n =
          heap_bytes s buf n"
   using assms by (simp add: heap_bytes_def fun_upd_apply)
+
+lemma heap_bytes_update_at_distinct:
+  assumes dist: "ptr_range_distinct buf n"
+      and k_lt: "k < n"
+  shows "heap_bytes (heap_w8_update (\<lambda>h. h(buf +\<^sub>p int k := v)) s) buf n =
+         (heap_bytes s buf n)[k := v]"
+proof (rule nth_equalityI)
+  show "length (heap_bytes (heap_w8_update (\<lambda>h. h(buf +\<^sub>p int k := v)) s) buf n) =
+        length ((heap_bytes s buf n)[k := v])"
+    by simp
+next
+  fix i
+  assume i_lt_len:
+    "i < length (heap_bytes (heap_w8_update (\<lambda>h. h(buf +\<^sub>p int k := v)) s) buf n)"
+  hence i_lt: "i < n" by simp
+  show "heap_bytes (heap_w8_update (\<lambda>h. h(buf +\<^sub>p int k := v)) s) buf n ! i =
+        (heap_bytes s buf n)[k := v] ! i"
+  proof (cases "i = k")
+    case True
+    thus ?thesis using i_lt k_lt
+      by (simp add: heap_bytes_nth fun_upd_apply)
+  next
+    case False
+    have ptr_ne: "buf +\<^sub>p int i \<noteq> buf +\<^sub>p int k"
+    proof
+      assume eq: "buf +\<^sub>p int i = buf +\<^sub>p int k"
+      hence "i = k"
+        using ptr_range_distinct_eqD[OF dist i_lt k_lt] by simp
+      thus False using False by simp
+    qed
+    show ?thesis using i_lt k_lt False ptr_ne
+      by (simp add: heap_bytes_nth fun_upd_apply)
+  qed
+qed
 
 lemma buf_valid_heap_w8_update[simp]:
   "buf_valid (heap_w8_update f s) buf n = buf_valid s buf n"
@@ -160,6 +269,13 @@ next
       by (simp add: heap_bytes_def nth_append fun_upd_apply)
   qed
 qed
+
+lemma heap_bytes_extend_distinct:
+  assumes "ptr_range_distinct buf (Suc n)"
+  shows "heap_bytes (heap_w8_update (\<lambda>h. h(buf +\<^sub>p int n := v)) s) buf (Suc n) =
+         heap_bytes s buf n @ [v]"
+  using assms ptr_range_distinct_lastD
+  by (intro heap_bytes_extend) blast
 
 lemma buf_valid_head_arr_update[simp]:
   "buf_valid (head_arr_''_update f s) buf n = buf_valid s buf n"
