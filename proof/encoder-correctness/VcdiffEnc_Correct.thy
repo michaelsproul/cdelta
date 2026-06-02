@@ -2499,6 +2499,47 @@ lemma write_byte'_heap_bytes_append_next_typing:
       [OF pos_lt ptr_ok dist]])
   using unat_word_suc_of_less[OF pos_lt] by simp
 
+lemma emit_address'_success_varint_heap_bytes_append:
+  assumes mode_lt: "mode_t_C.mode_C m < (6 :: 32 word)"
+      and size: "varint_size' (mode_t_C.arg_C m) s = Some n"
+      and fits: "\<not> addr_cap - addr_pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (addr_buf +\<^sub>p uint (addr_pos + of_nat j))"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           addr_buf +\<^sub>p uint (addr_pos + of_nat i) \<noteq>
+           addr_buf +\<^sub>p uint (addr_pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat addr_pos. \<forall>i.
+           i < n \<longrightarrow> addr_buf +\<^sub>p int k \<noteq> addr_buf +\<^sub>p uint (addr_pos + i)"
+      and no_overflow: "unat addr_pos + unat n < 2 ^ 32"
+  shows "emit_address' addr_buf addr_cap addr_pos m \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (addr_pos + n) ENC_OK) \<and>
+                   heap_bytes t addr_buf (unat (addr_pos + n)) =
+                   heap_bytes s addr_buf (unat addr_pos) @
+                   varint_bytes32 (mode_t_C.arg_C m) n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  unfolding emit_address'_def
+  using mode_lt
+  apply simp
+  by (rule write_varint'_success_heap_bytes_append_wordpos
+      [OF size fits dst_valid dst_inj prefix_disj no_overflow])
+
+lemma emit_address'_success_byte_heap_bytes_append:
+  assumes mode_ge: "\<not> mode_t_C.mode_C m < (6 :: 32 word)"
+      and pos_lt: "addr_pos < addr_cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (addr_buf +\<^sub>p uint addr_pos)"
+      and dist: "ptr_range_distinct addr_buf (Suc (unat addr_pos))"
+  shows "emit_address' addr_buf addr_cap addr_pos m \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (addr_pos + 1) ENC_OK) \<and>
+                   heap_bytes t addr_buf (unat (addr_pos + 1)) =
+                   heap_bytes s addr_buf (unat addr_pos) @
+                   [ucast (mode_t_C.arg_C m)] \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  unfolding emit_address'_def
+  using mode_ge
+  apply simp
+  by (rule write_byte'_heap_bytes_append_next_typing[OF pos_lt ptr_ok dist])
+
 lemma buf_valid_near_arr_update[simp]:
   "buf_valid (near_arr_''_update f s) buf n = buf_valid s buf n"
   by (simp add: buf_valid_def)
