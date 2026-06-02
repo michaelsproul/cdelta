@@ -61,6 +61,102 @@ lemma unat_measure_decrease_of_word_less:
   shows "unat len - unat (i + 1) < unat len - unat i"
   using assms by unat_arith
 
+lemma unat_less_suc_word_le_len:
+  fixes i len :: "32 word"
+  assumes "i < len"
+      and "k < unat (i + 1)"
+  shows "k < unat len"
+  using assms by unat_arith
+
+lemma unat_less_suc_word_prevD:
+  fixes i len :: "32 word"
+  assumes "i < len"
+      and "k < unat (i + 1)"
+      and "k \<noteq> unat i"
+  shows "k < unat i"
+  using assms by unat_arith
+
+lemma word_index_ptr_eq_currentD:
+  fixes len pos i :: "32 word"
+  assumes dst_inj: "\<forall>a < unat len. \<forall>b < unat len.
+           a \<noteq> b \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat a) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat b)"
+      and i_lt: "i < len"
+      and k_lt: "k < unat (i + 1)"
+      and ptr_eq:
+        "buf +\<^sub>p uint (pos + of_nat k) =
+         buf +\<^sub>p uint (pos + i)"
+  shows "k = unat i"
+proof (rule ccontr)
+  assume k_ne: "k \<noteq> unat i"
+  have k_len: "k < unat len"
+    using i_lt k_lt by (rule unat_less_suc_word_le_len)
+  have i_len: "unat i < unat len"
+    using i_lt by (simp add: word_less_nat_alt)
+  have ptr_ne0:
+    "buf +\<^sub>p uint (pos + of_nat k) \<noteq>
+     buf +\<^sub>p uint (pos + of_nat (unat i))"
+    using dst_inj[rule_format, of k "unat i"] k_ne k_len i_len
+    by simp
+  have ptr_ne:
+    "buf +\<^sub>p uint (pos + of_nat k) \<noteq>
+     buf +\<^sub>p uint (pos + i)"
+    using ptr_ne0
+    by (simp add: word_unat.Rep_inverse)
+  show False
+    using ptr_ne ptr_eq by simp
+qed
+
+lemma word_index_ptr_ne_currentD:
+  fixes len pos i :: "32 word"
+  assumes i_lt: "i < len"
+      and k_lt: "k < unat (i + 1)"
+      and ptr_ne:
+        "buf +\<^sub>p uint (pos + of_nat k) \<noteq>
+         buf +\<^sub>p uint (pos + i)"
+  shows "k < unat i"
+proof (cases "k = unat i")
+  case True
+  have "buf +\<^sub>p uint (pos + of_nat k) =
+        buf +\<^sub>p uint (pos + i)"
+    using True by (simp add: word_unat.Rep_inverse)
+  thus ?thesis
+    using ptr_ne by simp
+next
+  case False
+  show ?thesis
+    using i_lt k_lt False by (rule unat_less_suc_word_prevD)
+qed
+
+lemma dst_src_disj_current_contradict:
+  fixes len pos src_off i :: "32 word"
+  assumes dst_src_disj: "\<forall>a < unat len. \<forall>b < unat len.
+           buf +\<^sub>p uint (pos + of_nat a) \<noteq>
+           src +\<^sub>p uint (src_off + of_nat b)"
+      and i_lt: "i < len"
+      and k_lt: "k < unat len"
+      and ptr_eq:
+        "src +\<^sub>p uint (src_off + of_nat k) =
+         buf +\<^sub>p uint (pos + i)"
+  shows False
+proof -
+  have i_len: "unat i < unat len"
+    using i_lt by (simp add: word_less_nat_alt)
+  have ptr_ne0:
+    "buf +\<^sub>p uint (pos + of_nat (unat i)) \<noteq>
+     src +\<^sub>p uint (src_off + of_nat k)"
+    using dst_src_disj[rule_format, of "unat i" k] i_len k_lt
+    by simp
+  have ptr_ne:
+    "buf +\<^sub>p uint (pos + i) \<noteq>
+     src +\<^sub>p uint (src_off + of_nat k)"
+    using ptr_ne0
+    by (simp add: word_unat.Rep_inverse)
+  show False
+    using ptr_ne ptr_eq by simp
+qed
+
 lemma write_byte'_spec:
   assumes ptr_ok:
     "pos < cap \<Longrightarrow> ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
