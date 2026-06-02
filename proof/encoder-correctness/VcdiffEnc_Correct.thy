@@ -1359,6 +1359,22 @@ next
   qed
 qed
 
+lemma heap_bytes_take_word_prefix:
+  fixes pos len :: "32 word"
+  assumes no_overflow: "unat pos + unat len < 2 ^ 32"
+  shows "take (unat pos) (heap_bytes s buf (unat pos + unat len)) =
+         heap_bytes s buf (unat pos)"
+  using heap_bytes_append_heap_bytes_word[OF no_overflow, of s buf]
+  by simp
+
+lemma heap_bytes_drop_word_prefix:
+  fixes pos len :: "32 word"
+  assumes no_overflow: "unat pos + unat len < 2 ^ 32"
+  shows "drop (unat pos) (heap_bytes s buf (unat pos + unat len)) =
+         heap_bytes_word s buf pos len"
+  using heap_bytes_append_heap_bytes_word[OF no_overflow, of s buf]
+  by simp
+
 (* ---------- Buffer validity ---------- *)
 
 definition buf_valid :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> bool" where
