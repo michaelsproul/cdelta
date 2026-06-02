@@ -49,6 +49,23 @@ proof -
     using sum_lt ofn by (simp add: unat_word_ariths(1))
 qed
 
+lemma unat_word_add_no_overflow:
+  fixes a b :: "32 word"
+  assumes no_overflow: "unat a + unat b < 2 ^ 32"
+  shows "unat (a + b) = unat a + unat b"
+  using no_overflow by (simp add: unat_word_ariths(1))
+
+lemma unat_word_suc_of_less:
+  fixes pos cap :: "32 word"
+  assumes pos_lt: "pos < cap"
+  shows "unat (pos + 1) = Suc (unat pos)"
+proof -
+  have "unat pos + unat (1 :: 32 word) < 2 ^ 32"
+    using pos_lt unat_lt2p[of cap] by (simp add: word_less_nat_alt)
+  thus ?thesis
+    using unat_word_add_no_overflow[of pos 1] by simp
+qed
+
 lemma unat_suc_le_of_word_less:
   fixes i len :: "32 word"
   assumes "i < len"
@@ -2048,6 +2065,60 @@ proof -
     by (simp add: heap_bytes_word_zero)
 qed
 
+lemma write_bytes'_success_heap_bytes_append_wordpos:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))"
+      and dst_src_disj: "\<forall>i < unat len. \<forall>j < unat len.
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           src +\<^sub>p uint (src_off + of_nat j)"
+      and dst_inj: "\<forall>i < unat len. \<forall>j < unat len.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat pos. \<forall>i.
+           i < len \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and no_overflow: "unat pos + unat len < 2 ^ 32"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + len)) =
+                   heap_bytes s buf (unat pos) @
+                   heap_bytes_word s src src_off len \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF write_bytes'_success_heap_bytes_append
+      [OF fits dst_valid src_valid dst_src_disj dst_inj prefix_disj no_overflow]])
+  using no_overflow by (simp add: unat_word_add_no_overflow)
+
+lemma write_bytes'_success_heap_bytes_append_src0_wordpos:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and dst_src_disj: "\<forall>i < unat len. \<forall>j < unat len.
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           src +\<^sub>p uint ((0 :: 32 word) + of_nat j)"
+      and dst_inj: "\<forall>i < unat len. \<forall>j < unat len.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat pos. \<forall>i.
+           i < len \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and no_overflow: "unat pos + unat len < 2 ^ 32"
+  shows "write_bytes' buf cap pos src (0 :: 32 word) len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + len)) =
+                   heap_bytes s buf (unat pos) @
+                   heap_bytes s src (unat len) \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF write_bytes'_success_heap_bytes_append_src0
+      [OF fits dst_valid src_valid dst_src_disj dst_inj prefix_disj no_overflow]])
+  using no_overflow by (simp add: unat_word_add_no_overflow)
+
 lemma write_varint'_success_preserves_heap_bytes_prefix:
   assumes size: "varint_size' v s = Some n"
       and fits: "\<not> cap - pos < n"
@@ -2191,6 +2262,56 @@ lemma write_varint'_success_heap_bytes_append_decodes:
   using varint_decode_varint_bytes32[OF size, of rest]
   by auto
 
+lemma write_varint'_success_heap_bytes_append_wordpos:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat pos. \<forall>i.
+           i < n \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and no_overflow: "unat pos + unat n < 2 ^ 32"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + n)) =
+                   heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF write_varint'_success_heap_bytes_append_bounded
+      [OF size fits dst_valid dst_inj prefix_disj no_overflow]])
+  using no_overflow by (simp add: unat_word_add_no_overflow)
+
+lemma write_varint'_success_heap_bytes_append_wordpos_decodes:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat pos. \<forall>i.
+           i < n \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and no_overflow: "unat pos + unat n < 2 ^ 32"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + n)) =
+                   heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+                   varint_decode
+                    (drop (unat pos)
+                      (heap_bytes t buf (unat (pos + n))) @ rest) =
+                   Some (unat v, rest) \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF write_varint'_success_heap_bytes_append_wordpos
+      [OF size fits dst_valid dst_inj prefix_disj no_overflow]])
+  using varint_decode_varint_bytes32[OF size, of rest]
+        no_overflow
+  by (simp add: unat_word_add_no_overflow)
+
 lemma heap_bytes_update_at_distinct:
   assumes dist: "ptr_range_distinct buf n"
       and k_lt: "k < n"
@@ -2332,6 +2453,20 @@ proof -
     apply (rule runs_to_weaken[OF combined])
     by auto
 qed
+
+lemma write_byte'_heap_bytes_append_next_typing:
+  assumes pos_lt: "pos < cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+      and dist: "ptr_range_distinct buf (Suc (unat pos))"
+  shows "write_byte' buf cap pos b \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + 1)) =
+                   heap_bytes s buf (unat pos) @ [b] \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF write_byte'_heap_bytes_append_current_typing
+      [OF pos_lt ptr_ok dist]])
+  using unat_word_suc_of_less[OF pos_lt] by simp
 
 lemma buf_valid_near_arr_update[simp]:
   "buf_valid (near_arr_''_update f s) buf n = buf_valid s buf n"
