@@ -61,6 +61,42 @@ lemma unat_measure_decrease_of_word_less:
   shows "unat len - unat (i + 1) < unat len - unat i"
   using assms by unat_arith
 
+lemma word32_shiftr7_decreases:
+  fixes x :: "32 word"
+  assumes "x \<noteq> 0"
+  shows "unat (x >> (7 :: nat)) < unat x"
+  using assms
+  by (simp add: Word_Lemmas.shiftr_div_2n' word_neq_0_conv
+                word_less_nat_alt Euclidean_Rings.div_less_dividend)
+
+lemma word32_shiftr_35_zero:
+  fixes x :: "32 word"
+  shows "x >> (35 :: nat) = 0"
+  by (rule Word_Lemmas.shiftr_eq_0) simp
+
+lemma varint_shift_ok_of_unat_le5:
+  fixes len i :: "32 word"
+  assumes len_le: "unat len \<le> 5"
+      and i_lt: "i < len"
+  shows "7 * len - 7 - 7 * i < (0x20 :: 32 word)"
+proof -
+  have i_nat_lt: "unat i < unat len"
+    using i_lt by (simp add: word_less_nat_alt)
+  have len_mult: "unat (7 * len :: 32 word) = 7 * unat len"
+    using len_le by (simp add: Word.unat_word_ariths)
+  have i_mult: "unat (7 * i :: 32 word) = 7 * unat i"
+    using len_le i_nat_lt by (simp add: Word.unat_word_ariths)
+  have expr_unat:
+    "unat (7 * len - 7 - 7 * i :: 32 word) =
+     7 * unat len - 7 - 7 * unat i"
+    using len_le i_nat_lt len_mult i_mult
+    by (simp add: Word.unat_arith_simps)
+  have "7 * unat len - 7 - 7 * unat i < 32"
+    using len_le i_nat_lt by arith
+  thus ?thesis
+    using expr_unat by (simp add: word_less_nat_alt)
+qed
+
 lemma unat_less_suc_word_le_len:
   fixes i len :: "32 word"
   assumes "i < len"
