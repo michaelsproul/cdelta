@@ -496,6 +496,41 @@ lemma write_bytes'_success_preserves_typing_buf_valid:
     using assms by (auto intro: buf_valid_word_rangeD)
   done
 
+lemma write_bytes'_success_copies_buf_valid:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_ok: "buf_valid s buf dst_n"
+      and src_ok: "buf_valid s src src_n"
+      and dst_no_overflow: "unat pos + unat len < 2 ^ 32"
+      and src_no_overflow: "unat src_off + unat len < 2 ^ 32"
+      and dst_range: "unat pos + unat len \<le> dst_n"
+      and src_range: "unat src_off + unat len \<le> src_n"
+      and dst_src_disj: "\<forall>i < unat len. \<forall>j < unat len.
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           src +\<^sub>p uint (src_off + of_nat j)"
+      and dst_inj: "\<forall>i < unat len. \<forall>j < unat len.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+            (\<forall>j < unat len.
+              heap_w8 t (src +\<^sub>p uint (src_off + of_nat j)) =
+              heap_w8 s (src +\<^sub>p uint (src_off + of_nat j))) \<and>
+            (\<forall>j < unat len.
+              heap_w8 t (buf +\<^sub>p uint (pos + of_nat j)) =
+              heap_w8 s (src +\<^sub>p uint (src_off + of_nat j))) \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_bytes'_success_copies[OF fits])
+  subgoal
+    using assms by (auto intro: buf_valid_word_rangeD)
+  subgoal
+    using assms by (auto intro: buf_valid_word_rangeD)
+  subgoal
+    using dst_src_disj .
+  subgoal
+    using dst_inj .
+  done
+
 lemma buf_valid_shift:
   assumes ok: "buf_valid s buf (off + n)"
   shows "buf_valid s (buf +\<^sub>p int off) n"
