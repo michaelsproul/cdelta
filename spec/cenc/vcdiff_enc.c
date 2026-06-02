@@ -35,11 +35,6 @@
 
 /* ---------- File-scope state (AutoCorres friendly) ---------- */
 
-/* Hash index over the source. Caller sizes `head` to HASH_SIZE and
- * `next_arr` to >= src_len. We keep them file-scope so callers can pass
- * them as plain pointers; sizing is enforced by the caller. */
-static unsigned int head_arr[HASH_SIZE];
-
 /* Address cache (mirrors the decoder's state). */
 static unsigned int near_arr[NEAR_SZ];
 static unsigned int near_ptr;
@@ -143,11 +138,12 @@ static unsigned int hash4(unsigned char *buf, unsigned int pos)
 }
 
 static void build_index(unsigned char *src, unsigned int src_len,
+                        unsigned int *head,
                         unsigned int *next_arr)
 {
     unsigned int i;
     for (i = 0U; i < HASH_SIZE; i = i + 1U) {
-        head_arr[i] = NO_ENTRY;
+        head[i] = NO_ENTRY;
     }
     if (src_len < MIN_MATCH) return;
     /* Walk source in reverse so the chain ends up in increasing position
@@ -157,8 +153,8 @@ static void build_index(unsigned char *src, unsigned int src_len,
     while (i > 0U) {
         unsigned int p = i - 1U;
         unsigned int h = hash4(src, p) & HASH_MASK;
-        next_arr[p] = head_arr[h];
-        head_arr[h] = p;
+        next_arr[p] = head[h];
+        head[h] = p;
         i = i - 1U;
     }
 }
@@ -178,7 +174,8 @@ static unsigned int common_prefix(unsigned char *a, unsigned int a_pos, unsigned
 
 static struct match_t find_best_match(unsigned char *src, unsigned int src_len,
                                       unsigned char *tgt, unsigned int tgt_len,
-                                      unsigned int tp, unsigned int *next_arr)
+                                      unsigned int tp, unsigned int *head,
+                                      unsigned int *next_arr)
 {
     struct match_t best;
     unsigned int cand;
@@ -190,7 +187,7 @@ static struct match_t find_best_match(unsigned char *src, unsigned int src_len,
     if (src_len < MIN_MATCH) return best;
     if (tgt_len - tp < MIN_MATCH) return best;
 
-    cand = head_arr[hash4(tgt, tp) & HASH_MASK];
+    cand = head[hash4(tgt, tp) & HASH_MASK];
     while (cand != NO_ENTRY && checked < MAX_CHAIN) {
         if (cand + MIN_MATCH <= src_len) {
             unsigned int l = common_prefix(src, cand, src_len,
@@ -523,6 +520,7 @@ static struct fused_t try_emit_add_copy(struct sections_t s,
 
 static struct sections_t encode_window(unsigned char *src, unsigned int src_len,
                                        unsigned char *tgt, unsigned int tgt_len,
+                                       unsigned int *head,
                                        unsigned int *next_arr,
                                        unsigned char *data, unsigned int data_cap,
                                        unsigned char *inst, unsigned int inst_cap,
@@ -542,7 +540,7 @@ static struct sections_t encode_window(unsigned char *src, unsigned int src_len,
 
     while (tp < tgt_len) {
         struct match_t m = find_best_match(src, src_len, tgt, tgt_len, tp,
-                                           next_arr);
+                                           head, next_arr);
         if (m.len < MIN_MATCH) {
             if (pend_len >= pending_cap) { s.err = ENC_OVERFLOW; return s; }
             pending[pend_len] = tgt[tp];
@@ -658,6 +656,7 @@ static unsigned int serialize(unsigned char *out, unsigned int out_cap,
 /* Public entrypoint.
  *
  * Caller-provided scratch buffer sizes:
+ *   head     : HASH_SIZE words
  *   next_arr : >= src_len (or >= 1 if src_len == 0; pass any non-null ptr)
  *   pending  : >= tgt_len  (+1 for the tail byte of a degenerate case)
  *   data_sec, inst_sec, addr_sec : each tgt_len + 64 bytes is enough.
@@ -667,6 +666,7 @@ static unsigned int serialize(unsigned char *out, unsigned int out_cap,
 unsigned int vcdiff_encode(unsigned char *out, unsigned int out_cap,
                            unsigned char *src, unsigned int src_len,
                            unsigned char *tgt, unsigned int tgt_len,
+                           unsigned int *head,
                            unsigned int *next_arr,
                            unsigned char *pending, unsigned int pending_cap,
                            unsigned char *data_sec, unsigned int data_cap,
@@ -677,9 +677,9 @@ unsigned int vcdiff_encode(unsigned char *out, unsigned int out_cap,
 
     if (pending_cap < tgt_len) return 0U;
 
-    build_index(src, src_len, next_arr);
+    build_index(src, src_len, head, next_arr);
 
-    s = encode_window(src, src_len, tgt, tgt_len, next_arr,
+    s = encode_window(src, src_len, tgt, tgt_len, head, next_arr,
                       data_sec, data_cap,
                       inst_sec, inst_cap,
                       addr_sec, addr_cap,
@@ -690,31 +690,4 @@ unsigned int vcdiff_encode(unsigned char *out, unsigned int out_cap,
                      data_sec, s.data_pos,
                      inst_sec, s.inst_pos,
                      addr_sec, s.addr_pos);
-}
-
-/* ---------- Backwards-compat shim ---------- */
-/* The old harness + Rust wrapper may still reference `vcdiff_encode_add`.
- * Keep a thin wrapper so the existing round-trip tests compile. It
- * degenerates to an encode with src_len=0. Callers must provide the
- * same scratch recipe. */
-unsigned int vcdiff_encode_add(unsigned char *out, unsigned int out_cap,
-                               unsigned char *target, unsigned int target_len)
-{
-    /* The old API had no scratch. For use from the legacy harness only:
-     * allocate static scratch sized to a modest bound. If target_len
-     * exceeds it, the caller should switch to vcdiff_encode. */
-    static unsigned int s_next[4];
-    static unsigned char s_pending[65536];
-    static unsigned char s_data[65536 + 64];
-    static unsigned char s_inst[65536 + 64];
-    static unsigned char s_addr[65536 + 64];
-    if (target_len > 65536U) return 0U;
-    return vcdiff_encode(out, out_cap,
-                         (unsigned char *)0, 0U,
-                         target, target_len,
-                         s_next,
-                         s_pending, 65536U,
-                         s_data, 65536U + 64U,
-                         s_inst, 65536U + 64U,
-                         s_addr, 65536U + 64U);
 }

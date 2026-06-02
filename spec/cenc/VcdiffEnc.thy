@@ -9,7 +9,6 @@ autocorres "vcdiff_enc.c"
 context vcdiff_enc_global_addresses begin
 
 thm vcdiff_encode'_def
-thm vcdiff_encode_add'_def
 
 end
 

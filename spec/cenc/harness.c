@@ -1,5 +1,5 @@
 /*
- * Host-side harness: runs vcdiff_encode_add on a set of target buffers,
+ * Host-side harness: runs vcdiff_encode on a set of target buffers,
  * writes the resulting VCDIFF to disk, and spawns `xdelta3 -d` to verify
  * the decoded output matches the original target.
  *
@@ -13,9 +13,15 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 
-extern unsigned int vcdiff_encode_add(unsigned char *out, unsigned int out_cap,
-                                      unsigned char *target,
-                                      unsigned int target_len);
+extern unsigned int vcdiff_encode(unsigned char *out, unsigned int out_cap,
+                                  unsigned char *src, unsigned int src_len,
+                                  unsigned char *tgt, unsigned int tgt_len,
+                                  unsigned int *head,
+                                  unsigned int *next_arr,
+                                  unsigned char *pending, unsigned int pending_cap,
+                                  unsigned char *data_sec, unsigned int data_cap,
+                                  unsigned char *inst_sec, unsigned int inst_cap,
+                                  unsigned char *addr_sec, unsigned int addr_cap);
 
 static int write_file(const char *path, const unsigned char *data, size_t len)
 {
@@ -64,9 +70,26 @@ static int round_trip(const char *name,
                       const unsigned char *target, size_t target_len)
 {
     unsigned char out[65536];
-    unsigned int out_len = vcdiff_encode_add(out, sizeof(out),
-                                             (unsigned char *)target,
-                                             (unsigned int)target_len);
+    unsigned int head[65536];
+    unsigned int next_arr[1];
+    unsigned char pending[65536];
+    unsigned char data[65536 + 64];
+    unsigned char inst[65536 + 64];
+    unsigned char addr[65536 + 64];
+    unsigned int out_len;
+    if (target_len > 65536U) {
+        fprintf(stderr, "[%s] target too large for harness scratch\n", name);
+        return 1;
+    }
+    out_len = vcdiff_encode(out, sizeof(out),
+                            (unsigned char *)0, 0U,
+                            (unsigned char *)target, (unsigned int)target_len,
+                            head,
+                            next_arr,
+                            pending, 65536U,
+                            data, 65536U + 64U,
+                            inst, 65536U + 64U,
+                            addr, 65536U + 64U);
     if (out_len == 0) {
         fprintf(stderr, "[%s] encode failed (buffer full)\n", name);
         return 1;

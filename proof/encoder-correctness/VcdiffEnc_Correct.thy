@@ -159,7 +159,19 @@ proof -
   have nth_unique:
     "\<And>a b. \<lbrakk> a < length ?xs; b < length ?xs; ?xs ! a = ?xs ! b \<rbrakk>
       \<Longrightarrow> a = b"
-    using dist_xs by (simp add: distinct_conv_nth)
+  proof -
+    fix a b
+    assume a_lt: "a < length ?xs"
+       and b_lt: "b < length ?xs"
+       and same: "?xs ! a = ?xs ! b"
+    show "a = b"
+    proof (rule ccontr)
+      assume "a \<noteq> b"
+      hence "?xs ! a \<noteq> ?xs ! b"
+        using dist_xs a_lt b_lt by (simp add: distinct_conv_nth)
+      thus False using same by simp
+    qed
+  qed
   have "?xs ! i = ?xs ! j"
     using i_lt j_lt eq by simp
   thus ?thesis
@@ -277,10 +289,6 @@ lemma heap_bytes_extend_distinct:
   using assms ptr_range_distinct_lastD
   by (intro heap_bytes_extend) blast
 
-lemma buf_valid_head_arr_update[simp]:
-  "buf_valid (head_arr_''_update f s) buf n = buf_valid s buf n"
-  by (simp add: buf_valid_def)
-
 lemma buf_valid_near_arr_update[simp]:
   "buf_valid (near_arr_''_update f s) buf n = buf_valid s buf n"
   by (simp add: buf_valid_def)
@@ -292,10 +300,6 @@ lemma buf_valid_near_ptr_update[simp]:
 lemma buf_valid_same_arr_update[simp]:
   "buf_valid (same_arr_''_update f s) buf n = buf_valid s buf n"
   by (simp add: buf_valid_def)
-
-lemma heap_bytes_head_arr_update[simp]:
-  "heap_bytes (head_arr_''_update f s) buf n = heap_bytes s buf n"
-  by (simp add: heap_bytes_def)
 
 lemma heap_bytes_near_arr_update[simp]:
   "heap_bytes (near_arr_''_update f s) buf n = heap_bytes s buf n"

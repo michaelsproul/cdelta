@@ -73,6 +73,7 @@ pub mod cdelta {
             let margin: usize = 64;
             let section_cap = target.len() + margin;
             let out_cap = target.len() + source.len() / 8 + 1024;
+            let mut head = vec![0u32; 1usize << 16];
             let mut next_arr = vec![0u32; source.len().max(4)];
             let mut pending = vec![0u8; target.len().max(1)];
             let mut data_sec = vec![0u8; section_cap];
@@ -87,6 +88,7 @@ pub mod cdelta {
                     source.len() as u32,
                     target.as_ptr() as *mut u8,
                     target.len() as u32,
+                    head.as_mut_ptr(),
                     next_arr.as_mut_ptr(),
                     pending.as_mut_ptr(), pending.len() as u32,
                     data_sec.as_mut_ptr(), section_cap as u32,
@@ -134,6 +136,7 @@ pub mod cdelta {
                 out: *mut u8, out_cap: u32,
                 src: *mut u8, src_len: u32,
                 tgt: *mut u8, tgt_len: u32,
+                head: *mut u32,
                 next_arr: *mut u32,
                 pending: *mut u8, pending_cap: u32,
                 data_sec: *mut u8, data_cap: u32,
