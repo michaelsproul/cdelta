@@ -714,6 +714,38 @@ next
     by (simp add: map_upt_Suc Suc.IH split algebra_simps del: upt_Suc)
 qed
 
+lemma unat_and_0x7F_mod32:
+  fixes w :: "32 word"
+  shows "unat (w AND 0x7F) = unat w mod 128"
+  apply transfer
+  subgoal for w
+  proof -
+    have and_eq: "w AND 127 = w mod 128"
+    proof -
+      have mask_eq: "(127 :: int) = mask 7"
+        by (simp add: mask_eq_exp_minus_1)
+      have "w AND 127 = w AND mask 7"
+        by (simp add: mask_eq)
+      also have "\<dots> = take_bit 7 w"
+        by (simp add: take_bit_eq_mask)
+      also have "\<dots> = w mod 128"
+        by (simp add: take_bit_eq_mod)
+      finally show ?thesis .
+    qed
+    have mod_eq: "(w mod 4294967296) mod 128 = w mod 128"
+      by (simp add: mod_mod_cancel)
+    have nat_mod:
+      "nat (w mod 4294967296) mod 128 =
+       nat ((w mod 4294967296) mod 128)"
+      using nat_mod_distrib[of "w mod 4294967296" 128] by simp
+    have low32: "(w mod 128) mod 4294967296 = w mod 128"
+      by (simp add: mod_pos_pos_trivial)
+    show ?thesis
+      using and_eq mod_eq nat_mod low32
+      by (simp add: take_bit_eq_mod)
+  qed
+  done
+
 lemma write_varint_loop_preserves_typing:
   fixes len pos :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
