@@ -384,6 +384,24 @@ lemma write_varint'_overflow:
   apply runs_to_vcg
   using size overflow by auto
 
+lemma gets_the_varint_size'_result:
+  assumes "varint_size' v s = Some n"
+  shows "gets_the (varint_size' v) \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and> r = Result n \<rbrace>"
+  unfolding gets_the_def
+  apply runs_to_vcg
+  using assms by simp
+
+lemma write_varint'_overflow_preserves_typing:
+  assumes size: "varint_size' v s = Some n"
+      and overflow: "cap - pos < n"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and>
+                   r = Result (wr_t_C pos ENC_OVERFLOW) \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[OF write_varint'_overflow[OF size overflow]])
+  by auto
+
 (* ---------- Buffer-to-list conversion ---------- *)
 
 definition heap_bytes :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> byte list" where
@@ -401,6 +419,15 @@ lemma heap_bytes_eqI:
   assumes "\<And>i. i < n \<Longrightarrow> heap_w8 t (buf +\<^sub>p int i) = heap_w8 s (buf +\<^sub>p int i)"
   shows "heap_bytes t buf n = heap_bytes s buf n"
   using assms by (auto simp: heap_bytes_def)
+
+lemma write_varint'_overflow_preserves_heap_bytes:
+  assumes size: "varint_size' v s = Some n"
+      and overflow: "cap - pos < n"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C pos ENC_OVERFLOW) \<and>
+                   heap_bytes t out out_n = heap_bytes s out out_n \<rbrace>"
+  apply (rule runs_to_weaken[OF write_varint'_overflow[OF size overflow]])
+  by auto
 
 lemma heap_bytes_prefix:
   assumes "m \<le> n"
