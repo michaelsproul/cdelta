@@ -746,6 +746,30 @@ lemma unat_and_0x7F_mod32:
   qed
   done
 
+lemma varint_shift_unat_nat_index:
+  fixes len :: "32 word"
+  assumes len_le: "unat len \<le> 5"
+      and i_lt: "i < unat len"
+  shows "unat (7 * len - 7 - 7 * (of_nat i :: 32 word)) =
+         7 * (unat len - Suc i)"
+proof -
+  have i_unat: "unat (of_nat i :: 32 word) = i"
+    using i_lt unat_lt2p[of len] by (simp add: unat_of_nat_eq)
+  have i_word_lt: "unat (of_nat i :: 32 word) < unat len"
+    using i_lt i_unat by simp
+  have len_mult: "unat (7 * len :: 32 word) = 7 * unat len"
+    using len_le by (simp add: Word.unat_word_ariths)
+  have i_mult:
+    "unat (7 * (of_nat i :: 32 word) :: 32 word) = 7 * i"
+    using len_le i_lt by (simp add: Word.unat_word_ariths i_unat)
+  have arith_eq:
+    "7 * unat len - (7 + 7 * i) = 7 * (unat len - Suc i)"
+    using i_lt by arith
+  show ?thesis
+    using len_le i_lt i_word_lt len_mult i_mult arith_eq
+    by (simp add: Word.unat_arith_simps i_unat)
+qed
+
 lemma write_varint_loop_preserves_typing:
   fixes len pos :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
