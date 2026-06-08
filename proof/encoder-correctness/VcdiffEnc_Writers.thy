@@ -1790,6 +1790,74 @@ proof -
     using nth_unique[of i j] i_lt j_lt by simp
 qed
 
+lemma ptr_range_distinct_mono:
+  assumes dist: "ptr_range_distinct buf n"
+      and le: "m \<le> n"
+  shows "ptr_range_distinct buf m"
+  using assms
+  unfolding ptr_range_distinct_def distinct_conv_nth
+  by auto
+
+lemma ptr_range_distinct_word_range_inj:
+  fixes pos len :: "32 word"
+    and total :: nat
+  assumes dist: "ptr_range_distinct buf total"
+      and no_overflow: "unat pos + unat len < 2 ^ 32"
+      and in_range: "unat pos + unat len \<le> total"
+      and i_lt: "i < unat len"
+      and j_lt: "j < unat len"
+      and ptr_eq:
+        "buf +\<^sub>p uint (pos + of_nat i) =
+         buf +\<^sub>p uint (pos + of_nat j)"
+  shows "i = j"
+proof -
+  have idx_i: "unat (pos + of_nat i :: 32 word) = unat pos + i"
+    by (rule unat_add_of_nat_index[OF i_lt no_overflow])
+  have idx_j: "unat (pos + of_nat j :: 32 word) = unat pos + j"
+    by (rule unat_add_of_nat_index[OF j_lt no_overflow])
+  have i_total: "unat pos + i < total"
+    using i_lt in_range by simp
+  have j_total: "unat pos + j < total"
+    using j_lt in_range by simp
+  have ptr_eq_nat:
+    "buf +\<^sub>p int (unat pos + i) =
+     buf +\<^sub>p int (unat pos + j)"
+    using ptr_eq idx_i idx_j by (simp only: uint_nat)
+  have "unat pos + i = unat pos + j"
+    by (rule ptr_range_distinct_eqD[OF dist i_total j_total ptr_eq_nat])
+  thus ?thesis by simp
+qed
+
+lemma ptr_range_distinct_word_prefix_disj:
+  fixes pos len :: "32 word"
+    and total :: nat
+  assumes dist: "ptr_range_distinct buf total"
+      and no_overflow: "unat pos + unat len < 2 ^ 32"
+      and in_range: "unat pos + unat len \<le> total"
+      and k_lt: "k < unat pos"
+      and i_lt: "i < len"
+  shows "buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+proof
+  assume eq: "buf +\<^sub>p int k = buf +\<^sub>p uint (pos + i)"
+  have i_nat_lt: "unat i < unat len"
+    using i_lt by (simp add: word_less_nat_alt)
+  have idx_i: "unat (pos + of_nat (unat i) :: 32 word) = unat pos + unat i"
+    by (rule unat_add_of_nat_index[OF i_nat_lt no_overflow])
+  have i_total: "unat pos + unat i < total"
+    using i_nat_lt in_range by simp
+  have k_total: "k < total"
+    using k_lt in_range by simp
+  have pos_i: "pos + of_nat (unat i) = pos + i"
+    by (simp add: word_unat.Rep_inverse)
+  have eq_nat:
+    "buf +\<^sub>p int k = buf +\<^sub>p int (unat pos + unat i)"
+    using eq idx_i pos_i by (simp only: uint_nat)
+  have k_eq: "k = unat pos + unat i"
+    by (rule ptr_range_distinct_eqD[OF dist k_total i_total eq_nat])
+  then show False
+    using k_lt by simp
+qed
+
 lemma ptr_range_distinct_lastD:
   assumes dist: "ptr_range_distinct buf (Suc n)"
       and i_lt: "i < n"
