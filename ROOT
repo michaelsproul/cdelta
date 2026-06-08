@@ -37,6 +37,13 @@ session CdeltaEncoderCorrectness in "proof/encoder-correctness" = CdeltaEncoder 
   sessions
     CdeltaSpecRoundtrip
   theories
+    VcdiffEnc_Writers
+    VcdiffEnc_Wire
+    VcdiffEnc_Cache_Opcode
+    VcdiffEnc_Match
+    VcdiffEnc_Emit
+    VcdiffEnc_Window
+    VcdiffEnc_Serialize
     VcdiffEnc_Correct
 
 session TestAdd in "proof/test-add" = AutoCorres2 +
