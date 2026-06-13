@@ -29,12 +29,23 @@
   serialization proof style.
 - `best_mode'_encode_address_correct` connects the C address cache choice to
   the pure decoder cache predicate used by `section_decodes_append_copy`.
+- Cache abstraction preservation is now proved for successful byte writes and
+  byte-form `emit_address'`.
+- The small COPY / one-byte-address branch has a combined
+  `enc_sections_inv` + `enc_cache_abs` + `enc_cache_wf` success wrapper:
+  `emit_copy'_small_addr_byte_success_enc_sections_cache_inv`.
+  Its near-pointer bound is derived from `enc_cache_abs`.
 
 Remaining proof debt before `try_emit_add_copy`/window integration:
 
 - Discharge or centralize the C-varint byte-equality assumptions.
-- Carry `enc_cache_abs` and `enc_cache_wf` through COPY emission alongside
-  `enc_sections_inv`, so later COPYs can reuse the updated pure cache.
+- Carry `enc_cache_abs` and `enc_cache_wf` through the remaining COPY branches
+  alongside `enc_sections_inv`, so later COPYs can reuse the updated pure
+  cache.  The non-byte-only branches need a reusable, proof-efficient
+  varint-write cache frame lemma; direct `whileLoop` invariants for this have
+  proved too slow, so prefer factoring a small writer-level frame theorem or
+  combining existing writer preservation facts without reopening varint byte
+  content proofs.
 - Prove `flush_pending` and fused ADD+COPY preservation over the same
   section/cache invariant shape.
 - Lift these helper facts into the `encode_window` loop invariant.
@@ -72,8 +83,9 @@ Then compose that fact with `vcdiff_decode'_spec_inl`.
 3. Prove emitted-section correctness for encoder helpers.
    - `emit_add`, `emit_run`, and `emit_copy` now preserve the invariant that
      emitted sections decode to the target prefix already covered.
-   - Next, track the C address cache against the pure cache used by
-     `decode_address` through COPY-emitting helpers.
+   - The small COPY / one-byte-address branch now tracks the C address cache
+     against the pure cache used by `decode_address`; extend this to branches
+     that write varints after adding a cheap varint-write cache frame.
    - Account for fused ADD+COPY by proving the corresponding default-code-table
      opcode decodes as the two intended half-instructions.
 
