@@ -1910,6 +1910,81 @@ proof -
     by auto
 qed
 
+lemma emit_copy'_small_addr_varint_success_enc_cache_abs:
+  assumes abs: "enc_cache_abs s c_out"
+      and cache_wf: "enc_cache_wf c_out"
+      and bm: "best_mode' copy_addr here s = Some m"
+      and sz_ge: "(4 :: 32 word) \<le> copy_len"
+      and sz_le: "copy_len \<le> (18 :: 32 word)"
+      and mode_lt: "mode_t_C.mode_C m < (6 :: 32 word)"
+      and addr_size: "varint_size' (mode_t_C.arg_C m) s = Some an"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and addr_varint_fits:
+        "\<not> addr_cap - sections_t_C.addr_pos_C sec < an"
+      and addr_varint_valid: "\<forall>j < unat an.
+        ptr_valid (heap_typing s)
+          (addr_buf +\<^sub>p uint (sections_t_C.addr_pos_C sec + of_nat j))"
+  shows "emit_copy' sec inst inst_cap addr_buf addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                enc_cache_abs t (cache_update c_out (unat copy_addr)) \<and>
+                enc_cache_wf (cache_update c_out (unat copy_addr))) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have op:
+    "op_t_C.needs_size_C
+      (single_copy_opcode' copy_len (mode_t_C.mode_C m)) = 0"
+    using single_copy_opcode'_small[OF sz_ge sz_le] by auto
+  note gets_the_best_mode'_result[runs_to_vcg]
+  show ?thesis
+    unfolding emit_copy'_def
+    using bm op
+    apply runs_to_vcg
+    apply (rule exI[where x = m])
+    apply (simp add: bm op)
+    apply runs_to_vcg
+      apply (rule runs_to_weaken[
+        OF write_byte'_success_preserves_enc_cache_abs])
+         apply (rule abs)
+        apply (rule inst_byte_fits)
+       apply (rule inst_byte_ptr)
+     apply clarsimp
+     apply runs_to_vcg
+     apply (rule runs_to_weaken)
+      apply (rule emit_address'_success_varint_preserves_enc_cache_abs
+        [where n = an])
+           apply assumption
+         apply (rule mode_lt)
+         subgoal for t
+           using addr_size
+                 varint_size'_state_independent
+                   [of "mode_t_C.arg_C m" t s]
+           by simp
+        apply (rule addr_varint_fits)
+       apply (intro allI impI)
+       subgoal premises prems for t j
+       proof -
+         have ptr:
+           "ptr_valid (heap_typing s)
+             (addr_buf +\<^sub>p uint (sections_t_C.addr_pos_C sec + of_nat j))"
+           using addr_varint_valid prems by auto
+         show ?thesis
+           using ptr prems by simp
+       qed
+    apply clarsimp
+    apply runs_to_vcg
+    apply (rule runs_to_weaken[
+      OF cache_update'_enc_cache_abs_wf[where buf = inst and n = 0]])
+      apply assumption
+     apply (rule cache_wf)
+    apply clarsimp
+    done
+qed
+
 lemma emit_copy'_small_addr_varint_success_enc_sections_inv:
   assumes inv:
         "enc_sections_inv s data inst addr_buf sec src_seg tgt_len
