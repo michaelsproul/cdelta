@@ -48,17 +48,17 @@ The final encoder theorem should avoid byte equality with
   RUN, and all COPY branches.  COPY varint branches currently expose explicit
   assumptions equating C `varint_bytes32` output with pure `varint_encode`
   bytes.
-- Byte writes, byte-sequence writes, and byte-form `emit_address'` now have
-  cache-frame lemmas.
-- The small ADD branch and the small COPY / one-byte-address branch now have
-  combined `enc_sections_inv` + `enc_cache_abs` + `enc_cache_wf` success
-  wrappers.  The pending-length-zero `try_emit_add_copy'` path has a no-op
-  combined wrapper as well.
-- The next shared interface should extend that combined shape to the remaining
-  COPY branches, then use it for `flush_pending`, fused ADD+COPY, and the
-  window loop.  Avoid broad direct `write_varint'` loop cache-invariant proofs:
-  they are semantically straightforward but too slow in this session.  Prefer
-  a small writer-level frame theorem or a composition of existing varint writer
+- Byte writes, byte-sequence writes, varint writes, and both forms of
+  `emit_address'` now have cache-frame lemmas.
+- ADD, RUN, and all four COPY branches now have combined `enc_sections_inv` +
+  `enc_cache_abs` + `enc_cache_wf` success wrappers.  The
+  pending-length-zero `try_emit_add_copy'` path and zero-length
+  `flush_pending'` path have no-op combined wrappers as well.
+- The next shared interface should use that combined shape for non-empty
+  `flush_pending`, fused ADD+COPY, and the window loop.  Avoid broad direct
+  `write_varint'` loop cache-invariant proofs: they are semantically
+  straightforward but too slow in this session.  Prefer the existing
+  writer-level cache-field frame theorem or composition of existing writer
   preservation facts.
 - The remaining arithmetic bridge is a reusable theorem of the form
   `varint_size' v s = Some n ==> varint_bytes32 v n = varint_encode (unat v)`.

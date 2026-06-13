@@ -30,14 +30,19 @@
 - `best_mode'_encode_address_correct` connects the C address cache choice to
   the pure decoder cache predicate used by `section_decodes_append_copy`.
 - Cache abstraction preservation is now proved for successful byte writes,
-  byte-sequence writes, and byte-form `emit_address'`.
-- The small ADD branch has a combined
-  `enc_sections_inv` + `enc_cache_abs` + `enc_cache_wf` success wrapper:
-  `emit_add'_small_success_enc_sections_cache_inv`.
-- The small COPY / one-byte-address branch has a combined
-  `enc_sections_inv` + `enc_cache_abs` + `enc_cache_wf` success wrapper:
-  `emit_copy'_small_addr_byte_success_enc_sections_cache_inv`.
-  Its near-pointer bound is derived from `enc_cache_abs`.
+  byte-sequence writes, varint writes, and both byte-form and varint-form
+  `emit_address'`.
+- ADD and RUN now have combined
+  `enc_sections_inv` + `enc_cache_abs` + `enc_cache_wf` success wrappers:
+  `emit_add'_small_success_enc_sections_cache_inv`,
+  `emit_add'_large_success_enc_sections_cache_inv`, and
+  `emit_run'_success_enc_sections_cache_inv`.
+- COPY now has combined
+  `enc_sections_inv` + `enc_cache_abs` + `enc_cache_wf` success wrappers for
+  all four size/address branches.  Their near-pointer bounds are derived from
+  `enc_cache_abs`.
+- The zero-length `flush_pending'` path has a no-op combined wrapper:
+  `flush_pending'_len_zero_enc_sections_cache_inv`.
 - The `try_emit_add_copy'` pending-length-zero path has a no-op combined
   invariant wrapper:
   `try_emit_add_copy'_pend_len_zero_enc_sections_cache_inv`.
@@ -45,13 +50,6 @@
 Remaining proof debt before `try_emit_add_copy`/window integration:
 
 - Discharge or centralize the C-varint byte-equality assumptions.
-- Carry `enc_cache_abs` and `enc_cache_wf` through the remaining COPY branches
-  alongside `enc_sections_inv`, so later COPYs can reuse the updated pure
-  cache.  The non-byte-only branches need a reusable, proof-efficient
-  varint-write cache frame lemma; direct `whileLoop` invariants for this have
-  proved too slow, so prefer factoring a small writer-level frame theorem or
-  combining existing writer preservation facts without reopening varint byte
-  content proofs.
 - Prove `flush_pending` and fused ADD+COPY preservation over the same
   section/cache invariant shape.
 - Lift these helper facts into the `encode_window` loop invariant.
