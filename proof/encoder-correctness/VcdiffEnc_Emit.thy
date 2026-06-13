@@ -714,6 +714,187 @@ proof -
   using decodes_post by (auto simp: enc_sections_inv_def)
 qed
 
+lemma emit_add'_small_success_enc_cache_abs:
+  assumes abs: "enc_cache_abs s c_out"
+      and cache_wf: "enc_cache_wf c_out"
+      and sz_ge: "(1 :: 32 word) \<le> sz"
+      and sz_le: "sz \<le> (17 :: 32 word)"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and data_fits:
+        "\<not> data_cap - sections_t_C.data_pos_C sec < sz"
+      and data_valid: "\<forall>j < unat sz.
+        ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j))"
+      and pending_valid: "\<forall>j < unat sz.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint (off + of_nat j))"
+  shows "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                enc_cache_abs t c_out \<and>
+                enc_cache_wf c_out) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have op:
+    "op_t_C.needs_size_C (single_add_opcode' sz) = 0"
+    using single_add_opcode'_small[OF sz_ge sz_le] by auto
+  show ?thesis
+    unfolding emit_add'_def
+    using op
+    apply simp
+    apply runs_to_vcg
+     apply (rule runs_to_weaken[
+       OF write_byte'_success_preserves_enc_cache_abs])
+        apply (rule abs)
+       apply (rule inst_byte_fits)
+      apply (rule inst_byte_ptr)
+    apply clarsimp
+    apply runs_to_vcg
+    apply (rule runs_to_weaken[
+      OF write_bytes'_success_preserves_enc_cache_abs])
+       apply assumption
+      apply (rule data_fits)
+     apply (clarsimp)
+     using data_valid apply blast
+    apply (clarsimp)
+    using pending_valid apply blast
+    apply clarsimp
+    apply runs_to_vcg
+    using cache_wf by auto
+qed
+
+lemma emit_add'_small_success_enc_sections_cache_inv:
+  assumes inv:
+        "enc_sections_inv s data inst addr sec src_seg tgt_len
+          data_bytes inst_bytes addr_bytes target c_out"
+      and abs: "enc_cache_abs s c_out"
+      and cache_wf: "enc_cache_wf c_out"
+      and sz_ge: "(1 :: 32 word) \<le> sz"
+      and sz_le: "sz \<le> (17 :: 32 word)"
+      and target_room:
+        "length target + unat sz \<le> tgt_len"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_byte_dist:
+        "ptr_range_distinct inst (Suc (unat (sections_t_C.inst_pos_C sec)))"
+      and inst_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_pending_disj:
+        "\<forall>i < unat sz.
+           pending +\<^sub>p uint (off + of_nat i) \<noteq>
+           inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and data_fits:
+        "\<not> data_cap - sections_t_C.data_pos_C sec < sz"
+      and data_valid: "\<forall>j < unat sz.
+        ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j))"
+      and pending_valid: "\<forall>j < unat sz.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint (off + of_nat j))"
+      and data_pending_disj: "\<forall>i < unat sz. \<forall>j < unat sz.
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        pending +\<^sub>p uint (off + of_nat j)"
+      and data_inj: "\<forall>i < unat sz. \<forall>j < unat sz.
+        i \<noteq> j \<longrightarrow>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j)"
+      and data_prefix_disj: "\<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+        i < sz \<longrightarrow>
+        data +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_no_overflow:
+        "unat (sections_t_C.data_pos_C sec) + unat sz < 2 ^ 32"
+      and data_inst_disj: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+        i < sz \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+        i < sz \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+  shows "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                sections_result sec'
+                  (sections_t_C.data_pos_C sec + sz)
+                  (sections_t_C.inst_pos_C sec + 1)
+                  (sections_t_C.addr_pos_C sec)
+                  ENC_OK \<and>
+                enc_sections_inv t data inst addr sec' src_seg tgt_len
+                  (data_bytes @ heap_bytes_word s pending off sz)
+                  (inst_bytes @ [ucast (1 + sz)])
+                  addr_bytes (target @ heap_bytes_word s pending off sz) c_out \<and>
+                enc_cache_abs t c_out \<and>
+                enc_cache_wf c_out) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have sections:
+    "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            sections_result sec'
+              (sections_t_C.data_pos_C sec + sz)
+              (sections_t_C.inst_pos_C sec + 1)
+              (sections_t_C.addr_pos_C sec)
+              ENC_OK \<and>
+            enc_sections_inv t data inst addr sec' src_seg tgt_len
+              (data_bytes @ heap_bytes_word s pending off sz)
+              (inst_bytes @ [ucast (1 + sz)])
+              addr_bytes (target @ heap_bytes_word s pending off sz) c_out) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+    by (rule emit_add'_small_success_enc_sections_inv
+      [OF inv sz_ge sz_le target_room sec_ok inst_byte_fits inst_byte_ptr
+          inst_byte_dist inst_byte_data_disj inst_byte_addr_disj
+          inst_byte_pending_disj data_fits data_valid pending_valid
+          data_pending_disj data_inj data_prefix_disj data_no_overflow
+          data_inst_disj data_addr_disj])
+  have cache:
+    "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            enc_cache_abs t c_out \<and>
+            enc_cache_wf c_out) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+    by (rule emit_add'_small_success_enc_cache_abs
+      [OF abs cache_wf sz_ge sz_le inst_byte_fits inst_byte_ptr
+          data_fits data_valid pending_valid])
+  have combined:
+    "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+       \<lbrace> \<lambda>r t.
+          ((\<exists>sec'.
+            r = Result sec' \<and>
+            sections_result sec'
+              (sections_t_C.data_pos_C sec + sz)
+              (sections_t_C.inst_pos_C sec + 1)
+              (sections_t_C.addr_pos_C sec)
+              ENC_OK \<and>
+            enc_sections_inv t data inst addr sec' src_seg tgt_len
+              (data_bytes @ heap_bytes_word s pending off sz)
+              (inst_bytes @ [ucast (1 + sz)])
+              addr_bytes (target @ heap_bytes_word s pending off sz) c_out) \<and>
+          heap_typing t = heap_typing s) \<and>
+          ((\<exists>sec'.
+            r = Result sec' \<and>
+            enc_cache_abs t c_out \<and>
+            enc_cache_wf c_out) \<and>
+          heap_typing t = heap_typing s) \<rbrace>"
+    using sections cache by (simp add: runs_to_conj)
+  show ?thesis
+    apply (rule runs_to_weaken[OF combined])
+    by auto
+qed
+
 lemma emit_add'_large_success_enc_sections_inv:
   assumes inv:
         "enc_sections_inv s data inst addr sec src_seg tgt_len
