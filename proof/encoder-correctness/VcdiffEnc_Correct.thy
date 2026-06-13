@@ -120,8 +120,9 @@ lemma encode_window'_after_cache_reset_success_enc_sections_cache_inv:
                   data_bytes inst_bytes addr_bytes tgt_bytes c_out \<and>
                 enc_cache_abs t c_out \<and>
                 enc_cache_wf c_out) \<rbrace>"
+  supply reset_entry[runs_to_vcg]
   unfolding encode_window'_def
-  using reset_entry
+  apply runs_to_vcg
   sorry
 
 lemma encode_window'_success_enc_sections_cache_inv:

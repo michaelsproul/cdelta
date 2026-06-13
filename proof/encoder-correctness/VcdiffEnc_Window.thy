@@ -461,6 +461,16 @@ lemma encode_window_buffers_ok_heap_w8_update[simp]:
      pending pending_cap"
   by (simp add: encode_window_buffers_ok_def)
 
+lemma encode_window_buffers_ok_heap_typing_eq:
+  assumes "heap_typing t = heap_typing s"
+      and "encode_window_buffers_ok s
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+  shows "encode_window_buffers_ok t
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+  using assms by (simp add: encode_window_buffers_ok_def buf_valid_def)
+
 lemma encode_window_buffers_ok_pending_dist:
   assumes ok: "encode_window_buffers_ok st
      src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap

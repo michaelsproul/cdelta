@@ -72,8 +72,9 @@
   entry are now proved by
   `cache_reset'_encode_window_c_loop_cache_inv_entry`, and
   `encode_window'_success_enc_sections_cache_inv` is proved from that entry.
-  The remaining window hole is the named post-reset control-flow lemma
-  `encode_window'_after_cache_reset_success_enc_sections_cache_inv`.
+  `encode_window'_after_cache_reset_success_enc_sections_cache_inv` now also
+  consumes `cache_reset'` through `runs_to_vcg`; its remaining `sorry` is the
+  generated while-loop/final-flush body.
 - The pending-byte branch now has a concrete invariant step:
   `encode_window_c_loop_cache_inv_pending_byte_step`.  It advances `tp` and
   `pend_len`, appends the target byte to the pending bytes, and preserves the
