@@ -388,6 +388,43 @@ lemma encode_window_c_loop_inv_prefix_eq:
   using encode_window_c_loop_invD(12)[OF inv]
   by (rule encoder_loop_inv_prefix_eq)
 
+definition encode_window_c_loop_cache_inv ::
+  "lifted_globals \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   sections_t_C \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   byte list \<Rightarrow> byte list \<Rightarrow> byte list \<Rightarrow> byte list \<Rightarrow> byte list \<Rightarrow>
+   byte list \<Rightarrow> byte list \<Rightarrow> cache \<Rightarrow> bool" where
+  "encode_window_c_loop_cache_inv st
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out \<longleftrightarrow>
+     encode_window_c_loop_inv st
+       src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+       pending pending_cap sec tp pend_len
+       src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+       flushed pending_bytes c_out \<and>
+     enc_cache_abs st c_out \<and>
+     enc_cache_wf c_out"
+
+lemma encode_window_c_loop_cache_invD:
+  assumes inv: "encode_window_c_loop_cache_inv st
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out"
+  shows "encode_window_c_loop_inv st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out"
+    and "enc_cache_abs st c_out"
+    and "enc_cache_wf c_out"
+  using inv by (simp_all add: encode_window_c_loop_cache_inv_def)
+
 lemma encode_window_c_loop_inv_entry:
   assumes sec: "sections_result sec 0 0 0 ENC_OK"
       and src_len: "length src_seg = unat src_len"
@@ -410,6 +447,22 @@ proof -
           enc_sections_inv_empty[of sec st data inst addr src_seg "length tgt_bytes"]
     by (simp add: encode_window_c_loop_inv_def heap_bytes_def)
 qed
+
+lemma encode_window_c_loop_cache_inv_entry:
+  assumes sec: "sections_result sec 0 0 0 ENC_OK"
+      and src_len: "length src_seg = unat src_len"
+      and tgt_len: "length tgt_bytes = unat tgt_len"
+      and src_heap: "heap_bytes st src (length src_seg) = src_seg"
+      and tgt_heap: "heap_bytes st tgt (length tgt_bytes) = tgt_bytes"
+      and cache_abs: "enc_cache_abs st cache_init"
+      and cache_wf: "enc_cache_wf cache_init"
+  shows "encode_window_c_loop_cache_inv st
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec 0 0
+     src_seg tgt_bytes [] [] [] [] [] cache_init"
+  using encode_window_c_loop_inv_entry[OF sec src_len tgt_len src_heap tgt_heap]
+        cache_abs cache_wf
+  by (simp add: encode_window_c_loop_cache_inv_def)
 
 end
 

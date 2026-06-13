@@ -46,13 +46,30 @@
 - The `try_emit_add_copy'` pending-length-zero path has a no-op combined
   invariant wrapper:
   `try_emit_add_copy'_pend_len_zero_enc_sections_cache_inv`.
+- `VcdiffEnc_Window.thy` now has a strengthened checked loop invariant,
+  `encode_window_c_loop_cache_inv`, which extends the existing window invariant
+  with `enc_cache_abs` and `enc_cache_wf`.  Its entry lemma is proved modulo the
+  cache facts established by `cache_reset`.
+- `VcdiffEnc_Correct.thy` now proves the pure top-level composition path:
+  `section_decodes_apply_window`, `enc_sections_inv_apply_window`, and
+  `encoder_sections_serialize_decode`.  Thus a proved window postcondition of
+  `enc_sections_inv ... tgt ...` plus the existing serialize bridge is enough
+  to conclude `decode_spec (serialize src tgt data inst addr) src = Inl tgt`.
+- `VcdiffEnc_Correct.thy` also contains two checked `oops` targets, because the
+  normal session rejects `sorry`: `encode_window'_success_enc_sections_cache_inv`
+  and `vcdiff_encode'_success_decode_spec`.  These typecheck the proposed C
+  decomposition without installing fake theorems.
 
 Remaining proof debt before `try_emit_add_copy`/window integration:
 
 - Discharge or centralize the C-varint byte-equality assumptions.
 - Prove `flush_pending` and fused ADD+COPY preservation over the same
   section/cache invariant shape.
-- Lift these helper facts into the `encode_window` loop invariant.
+- Prove the `encode_window'_success_enc_sections_cache_inv` target using
+  `encode_window_c_loop_cache_inv`.
+- Compose `encode_window'_success_enc_sections_cache_inv`,
+  `serialize'_writes_serialize`, and `encoder_sections_serialize_decode` into
+  the public `vcdiff_encode'_success_decode_spec` target.
 
 ## Main proof shape
 
@@ -95,15 +112,27 @@ Then compose that fact with `vcdiff_decode'_spec_inl`.
      opcode decodes as the two intended half-instructions.
 
 4. Prove `encode_window` success correctness.
-   - Invariant: `tp` and `pend_len` partition the target prefix; emitted
-     sections decode to the flushed prefix; pending bytes equal the unflushed
-     suffix; every COPY match points to equal source bytes.
+   - Invariant: `encode_window_c_loop_cache_inv`.
+   - It bundles the old heap/capacity/prefix facts, `enc_sections_inv` for the
+     flushed prefix, and the cache abstraction/well-formedness facts needed by
+     COPY emission.
+   - Branch slots:
+     pending-byte branch uses `encoder_loop_inv_pending_step_word` plus a
+     pending-buffer write frame; no section/cache change.
+     no-fusion branch uses non-empty `flush_pending'` preservation, then the
+     appropriate `emit_copy'` section/cache wrapper.
+     fused branch uses fused `try_emit_add_copy'` preservation, then an
+     optional remainder `emit_copy'` wrapper.
+     final flush uses non-empty `flush_pending'` preservation and
+     `encoder_loop_inv_doneD`.
    - On success, emitted sections decode to the full target.
 
 5. Prove top-level encoder success theorem.
    - `serialize'` writes bytes equal to pure `serialize src tgt data inst addr`.
-   - `vcdiff_encode'` returning nonzero implies the produced patch satisfies
-     `decode_spec patch src = Inl tgt`.
+   - `encoder_sections_serialize_decode` turns the window postcondition into
+     pure `decode_spec` success.
+   - `vcdiff_encode'` returning nonzero implies the produced patch bytes
+     satisfy `decode_spec patch src = Inl tgt`.
 
 6. Compose C roundtrip.
    - First theorem should be relational over produced bytes, because encoder
