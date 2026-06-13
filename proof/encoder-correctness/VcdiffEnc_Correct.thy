@@ -111,6 +111,16 @@ lemma encode_window'_after_cache_reset_success_enc_sections_cache_inv:
       and bufs_ok: "encode_window_buffers_ok s
              src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
              pending pending_cap"
+      and match_ok_entry:
+        "\<And>t. \<lbrakk>
+           encode_window_c_loop_cache_inv t
+             src src_len tgt tgt_len head_p next_p
+             data data_cap inst inst_cap addr addr_cap
+             pending pending_cap (sections_t_C 0 0 0 0) 0 0
+             src_bytes tgt_bytes [] [] [] [] [] cache_init;
+           heap_typing t = heap_typing s \<rbrakk> \<Longrightarrow>
+           encode_window_match_ok t src src_len tgt tgt_len head_p next_p
+             src_bytes tgt_bytes"
   shows "encode_window' src src_len tgt tgt_len head_p next_p
            data data_cap inst inst_cap addr addr_cap pending pending_cap \<bullet> s
           \<lbrace> \<lambda>r t. \<forall>sec. r = Result sec \<longrightarrow>
@@ -138,7 +148,10 @@ lemma encode_window'_after_cache_reset_success_enc_sections_cache_inv:
         and addr_cap = addr_cap and pending_cap = pending_cap])
     apply simp
    apply simp
-   sorry
+  apply (rule match_ok_entry)
+   apply assumption
+  apply assumption
+  done
 
 lemma encode_window'_success_enc_sections_cache_inv:
   fixes src_len tgt_len data_cap inst_cap addr_cap pending_cap :: "32 word"
@@ -149,6 +162,16 @@ lemma encode_window'_success_enc_sections_cache_inv:
       and bufs_ok: "encode_window_buffers_ok s
              src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
              pending pending_cap"
+      and match_ok_after_reset:
+        "\<And>t. \<lbrakk>
+           encode_window_c_loop_cache_inv t
+             src src_len tgt tgt_len head_p next_p
+             data data_cap inst inst_cap addr addr_cap
+             pending pending_cap (sections_t_C 0 0 0 0) 0 0
+             src_bytes tgt_bytes [] [] [] [] [] cache_init;
+           heap_typing t = heap_typing s \<rbrakk> \<Longrightarrow>
+           encode_window_match_ok t src src_len tgt tgt_len head_p next_p
+             src_bytes tgt_bytes"
   shows "encode_window' src src_len tgt tgt_len head_p next_p
            data data_cap inst inst_cap addr addr_cap pending pending_cap \<bullet> s
           \<lbrace> \<lambda>r t. \<forall>sec. r = Result sec \<longrightarrow>
@@ -172,7 +195,7 @@ proof -
       [OF src_len_eq tgt_len_eq src_heap tgt_heap])
   show ?thesis
     by (rule encode_window'_after_cache_reset_success_enc_sections_cache_inv
-      [OF reset_entry bufs_ok])
+      [OF reset_entry bufs_ok match_ok_after_reset])
 qed
 
 (*
@@ -214,6 +237,17 @@ lemma vcdiff_encode'_success_serialized_sections:
                 length data_bytes + length inst_bytes + length addr_bytes
                   < 2 ^ 32) \<rbrace>"
 proof -
+  have match_ok_after_reset:
+    "\<And>t. \<lbrakk>
+       encode_window_c_loop_cache_inv t
+         src src_len tgt tgt_len head_p next_p
+         data data_cap inst inst_cap addr addr_cap
+         pending pending_cap (sections_t_C 0 0 0 0) 0 0
+         src_bytes tgt_bytes [] [] [] [] [] cache_init;
+       heap_typing t = heap_typing s \<rbrakk> \<Longrightarrow>
+       encode_window_match_ok t src src_len tgt tgt_len head_p next_p
+         src_bytes tgt_bytes"
+    sorry
   have window_slot:
     "encode_window' src src_len tgt tgt_len head_p next_p
        data data_cap inst inst_cap addr addr_cap pending pending_cap \<bullet> s
@@ -225,7 +259,7 @@ proof -
             enc_cache_abs t c_out \<and>
             enc_cache_wf c_out) \<rbrace>"
     by (rule encode_window'_success_enc_sections_cache_inv
-      [OF src_len_eq tgt_len_eq src_heap tgt_heap bufs_ok])
+      [OF src_len_eq tgt_len_eq src_heap tgt_heap bufs_ok match_ok_after_reset])
   note serialize_slot = serialize'_writes_serialize
   show ?thesis
     using window_slot

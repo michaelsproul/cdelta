@@ -71,10 +71,9 @@
 - The first window `sorry` has been split.  Cache reset and loop-invariant
   entry are now proved by
   `cache_reset'_encode_window_c_loop_cache_inv_entry`, and
-  `encode_window'_success_enc_sections_cache_inv` is proved from that entry.
-  `encode_window'_after_cache_reset_success_enc_sections_cache_inv` now also
-  consumes `cache_reset'` through `runs_to_vcg`; its remaining `sorry` is the
-  generated while-loop/final-flush body.
+  `encode_window'_success_enc_sections_cache_inv` is proved from that entry
+  plus an explicit matcher-totality slot.  The after-reset lemma consumes
+  `cache_reset'` through `runs_to_vcg`.
 - The pending-byte branch now has a concrete invariant step:
   `encode_window_c_loop_cache_inv_pending_byte_step`.  It advances `tp` and
   `pend_len`, appends the target byte to the pending bytes, and preserves the
@@ -112,9 +111,10 @@
   the generated loop body to `encode_window_c_loop_body` and invokes
   `encode_window_c_loop_while_run_inv` after `cache_reset'`.  It also routes
   the generated final-flush continuation through
-  `encode_window_c_loop_final_flush_run_inv_generated`, so the top-level
-  `sorry` at this point is now the matcher-totality obligation after
-  `cache_reset'` rather than the final continuation.
+  `encode_window_c_loop_final_flush_run_inv_generated`.  Its proof is complete
+  relative to the explicit `match_ok_entry` premise; the outer serialized
+  scaffold now owns the `match_ok_after_reset` hole that should be discharged
+  from `build_index'`.
 - The window proof now carries an explicit `encode_window_buffers_ok`
   precondition.  This is needed for target/pending pointer validity and for the
   non-aliasing facts required to preserve the source, target, pending, and
@@ -148,10 +148,10 @@ Remaining proof debt before `try_emit_add_copy`/window integration:
   `encode_window_match_ok`.  The pending branch should follow from heap-update
   frame facts; COPY/fusion will follow from the emit helper heap-typing/frame
   postconditions.
-- Prove the matcher-totality slot in
-  `encode_window'_after_cache_reset_success_enc_sections_cache_inv`; reset,
+- Prove the outer `match_ok_after_reset` slot in
+  `vcdiff_encode'_success_serialized_sections` from `build_index'`; reset,
   loop-rule integration, the generated pending-byte/small-match branch, and the
-  zero-pending final exit are no longer part of that top-level hole.
+  zero-pending final exit are no longer part of the after-reset window proof.
 - Refine `vcdiff_encode'_success_serialized_sections` so it is proved by
   composing `encode_window'_success_enc_sections_cache_inv` with
   `serialize'_writes_serialize`.
