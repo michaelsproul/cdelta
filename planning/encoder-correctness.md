@@ -103,9 +103,11 @@
 - The generated `whileLoop` now has a standalone skeleton,
   `encode_window_c_loop_while_run_inv`, over `encode_window_c_loop_run_inv`.
   This plugs the body lemma into `runs_to_whileLoop_exn'` with the real `tp`
-  measure and proves the loop rule obligations.  The run invariant deliberately
-  carries result correctness, byte-buffer validity, and matcher totality so the
-  remaining preservation gaps are explicit.
+  measure and proves the loop rule obligations.  Its postcondition also exposes
+  the generated loop exit fact `tp < tgt_len` is false for successful loop
+  results.  The run invariant deliberately carries result correctness,
+  byte-buffer validity, and matcher totality so the remaining preservation gaps
+  are explicit.
 - `encode_window'_after_cache_reset_success_enc_sections_cache_inv` now folds
   the generated loop body to `encode_window_c_loop_body` and invokes
   `encode_window_c_loop_while_run_inv` after `cache_reset'`; the first top-level

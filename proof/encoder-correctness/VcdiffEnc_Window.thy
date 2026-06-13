@@ -1665,7 +1665,9 @@ lemma encode_window_c_loop_while_run_inv:
          \<lbrace> \<lambda>r t. encode_window_c_loop_run_inv
               src src_len tgt tgt_len head_p next_p
               data data_cap inst inst_cap addr addr_cap
-              pending pending_cap src_seg tgt_bytes r t \<rbrace>"
+              pending pending_cap src_seg tgt_bytes r t \<and>
+            (\<forall>pend_len sec tp.
+              r = Result (pend_len, sec, tp) \<longrightarrow> \<not> tp < tgt_len) \<rbrace>"
   apply (rule runs_to_whileLoop_exn'[
     where R = "measure
       (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
