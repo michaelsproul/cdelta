@@ -464,6 +464,73 @@ lemma encode_window_c_loop_cache_inv_entry:
         cache_abs cache_wf
   by (simp add: encode_window_c_loop_cache_inv_def)
 
+lemma cache_reset'_enc_cache_abs_preserves2:
+  fixes buf1 buf2 :: "8 word ptr"
+    and n1 n2 :: nat
+  shows "cache_reset' \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result () \<and>
+               enc_cache_abs t cache_init \<and>
+               enc_cache_wf cache_init \<and>
+               heap_typing t = heap_typing s \<and>
+               heap_bytes t buf1 n1 = heap_bytes s buf1 n1 \<and>
+               heap_bytes t buf2 n2 = heap_bytes s buf2 n2 \<rbrace>"
+proof -
+  have first:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           enc_cache_abs t cache_init \<and>
+           enc_cache_wf cache_init \<and>
+           heap_typing t = heap_typing s \<and>
+           heap_bytes t buf1 n1 = heap_bytes s buf1 n1 \<rbrace>"
+    by (rule cache_reset'_enc_cache_abs)
+  have second:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           enc_cache_abs t cache_init \<and>
+           enc_cache_wf cache_init \<and>
+           heap_typing t = heap_typing s \<and>
+           heap_bytes t buf2 n2 = heap_bytes s buf2 n2 \<rbrace>"
+    by (rule cache_reset'_enc_cache_abs)
+  have combined:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (r = Result () \<and>
+           enc_cache_abs t cache_init \<and>
+           enc_cache_wf cache_init \<and>
+           heap_typing t = heap_typing s \<and>
+           heap_bytes t buf1 n1 = heap_bytes s buf1 n1) \<and>
+          (r = Result () \<and>
+           enc_cache_abs t cache_init \<and>
+           enc_cache_wf cache_init \<and>
+           heap_typing t = heap_typing s \<and>
+           heap_bytes t buf2 n2 = heap_bytes s buf2 n2) \<rbrace>"
+    using first second by (simp add: runs_to_conj)
+  show ?thesis
+    apply (rule runs_to_weaken[OF combined])
+    by auto
+qed
+
+lemma cache_reset'_encode_window_c_loop_cache_inv_entry:
+  assumes src_len: "length src_seg = unat src_len"
+      and tgt_len: "length tgt_bytes = unat tgt_len"
+      and src_heap: "heap_bytes s src (length src_seg) = src_seg"
+      and tgt_heap: "heap_bytes s tgt (length tgt_bytes) = tgt_bytes"
+  shows "cache_reset' \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result () \<and>
+               encode_window_c_loop_cache_inv t
+                 src src_len tgt tgt_len head_p next_p
+                 data data_cap inst inst_cap addr addr_cap
+                 pending pending_cap (sections_t_C 0 0 0 0) 0 0
+                 src_seg tgt_bytes [] [] [] [] [] cache_init \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF cache_reset'_enc_cache_abs_preserves2
+      [of s src "length src_seg" tgt "length tgt_bytes"]])
+  using src_len tgt_len src_heap tgt_heap
+        encode_window_c_loop_cache_inv_entry
+        [where sec = "sections_t_C 0 0 0 0" and st = _]
+  by (auto simp: sections_result_def)
+
 lemma encode_window_c_loop_cache_inv_pending_byte_step:
   assumes inv: "encode_window_c_loop_cache_inv st
      src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap

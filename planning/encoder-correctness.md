@@ -68,6 +68,12 @@
   postcondition is checked at the C top-level boundary.  The remaining `sorry`
   there is the build-index/serialize glue, including the large
   `serialize'_writes_serialize` premise package.
+- The first window `sorry` has been split.  Cache reset and loop-invariant
+  entry are now proved by
+  `cache_reset'_encode_window_c_loop_cache_inv_entry`, and
+  `encode_window'_success_enc_sections_cache_inv` is proved from that entry.
+  The remaining window hole is the named post-reset control-flow lemma
+  `encode_window'_after_cache_reset_success_enc_sections_cache_inv`.
 - The pending-byte branch now has a concrete invariant step:
   `encode_window_c_loop_cache_inv_pending_byte_step`.  It advances `tp` and
   `pend_len`, appends the target byte to the pending bytes, and preserves the
@@ -82,8 +88,9 @@ Remaining proof debt before `try_emit_add_copy`/window integration:
 - Discharge or centralize the C-varint byte-equality assumptions.
 - Prove `flush_pending` and fused ADD+COPY preservation over the same
   section/cache invariant shape.
-- Prove the `encode_window'_success_enc_sections_cache_inv` target using
-  `encode_window_c_loop_cache_inv`.
+- Prove `encode_window'_after_cache_reset_success_enc_sections_cache_inv`
+  using `encode_window_c_loop_cache_inv`; reset/entry is no longer part of the
+  hole.
 - Refine `vcdiff_encode'_success_serialized_sections` so it is proved by
   composing `encode_window'_success_enc_sections_cache_inv` with
   `serialize'_writes_serialize`.

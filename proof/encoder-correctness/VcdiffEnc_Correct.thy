@@ -80,7 +80,7 @@ lemma encoder_sections_serialize_decode:
   shows "decode_spec (serialize src tgt data inst addr) src = Inl tgt"
 proof -
   show ?thesis
-    by (rule section_decodes_serialize_decode
+  by (rule section_decodes_serialize_decode
       [OF enc_sections_invD(2)[OF win] src_bd tgt_bd data_bd inst_bd addr_bd
           dlen_bd])
 qed
@@ -97,6 +97,30 @@ qed
       optional remainder emit_copy' wrapper.
     - final flush: flush_pending' preservation and encoder_loop_inv_doneD.
 *)
+lemma encode_window'_after_cache_reset_success_enc_sections_cache_inv:
+  fixes src_len tgt_len data_cap inst_cap addr_cap pending_cap :: "32 word"
+  assumes reset_entry:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           encode_window_c_loop_cache_inv t
+             src src_len tgt tgt_len head_p next_p
+             data data_cap inst inst_cap addr addr_cap
+             pending pending_cap (sections_t_C 0 0 0 0) 0 0
+             src_bytes tgt_bytes [] [] [] [] [] cache_init \<and>
+           heap_typing t = heap_typing s \<rbrace>"
+  shows "encode_window' src src_len tgt tgt_len head_p next_p
+           data data_cap inst inst_cap addr addr_cap pending pending_cap \<bullet> s
+          \<lbrace> \<lambda>r t. \<forall>sec. r = Result sec \<longrightarrow>
+              sections_t_C.err_C sec = ENC_OK \<longrightarrow>
+              (\<exists>data_bytes inst_bytes addr_bytes c_out.
+                enc_sections_inv t data inst addr sec src_bytes (length tgt_bytes)
+                  data_bytes inst_bytes addr_bytes tgt_bytes c_out \<and>
+                enc_cache_abs t c_out \<and>
+                enc_cache_wf c_out) \<rbrace>"
+  unfolding encode_window'_def
+  using reset_entry
+  sorry
+
 lemma encode_window'_success_enc_sections_cache_inv:
   fixes src_len tgt_len data_cap inst_cap addr_cap pending_cap :: "32 word"
   assumes src_len_eq: "length src_bytes = unat src_len"
@@ -112,7 +136,22 @@ lemma encode_window'_success_enc_sections_cache_inv:
                   data_bytes inst_bytes addr_bytes tgt_bytes c_out \<and>
                 enc_cache_abs t c_out \<and>
                 enc_cache_wf c_out) \<rbrace>"
-  sorry
+proof -
+  have reset_entry:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           encode_window_c_loop_cache_inv t
+             src src_len tgt tgt_len head_p next_p
+             data data_cap inst inst_cap addr addr_cap
+             pending pending_cap (sections_t_C 0 0 0 0) 0 0
+             src_bytes tgt_bytes [] [] [] [] [] cache_init \<and>
+           heap_typing t = heap_typing s \<rbrace>"
+    by (rule cache_reset'_encode_window_c_loop_cache_inv_entry
+      [OF src_len_eq tgt_len_eq src_heap tgt_heap])
+  show ?thesis
+    by (rule encode_window'_after_cache_reset_success_enc_sections_cache_inv
+      [OF reset_entry])
+qed
 
 (*
   Public encoder theorem target. This composes:
