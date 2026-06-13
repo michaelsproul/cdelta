@@ -99,6 +99,11 @@
   exact body.  Its `gets_the find_best_match'` witness is supplied through the
   new `encode_window_match_ok` predicate; the `len < 4` branch is proved, while
   the COPY/fusion side is the remaining local body `sorry`.
+- The matcher proof has base cases for windows that do not need the index:
+  `find_best_match'_early_zero`/`find_best_match'_early_zero_valid` cover the
+  generated early return, and `encode_window_match_ok_src_len_lt4` plus
+  `encode_window_match_ok_tgt_len_lt4` lift those cases to the loop-level
+  matcher predicate.
 - The generated `whileLoop` now has a standalone skeleton,
   `encode_window_c_loop_while_run_inv`, over `encode_window_c_loop_run_inv`.
   This plugs the body lemma into `runs_to_whileLoop_exn'` with the real `tp`

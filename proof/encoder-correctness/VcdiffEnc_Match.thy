@@ -133,6 +133,22 @@ proof -
     using checked_lt by (simp add: unat_suc)
 qed
 
+lemma find_best_match'_early_zero:
+  assumes "src_len < 4 \<or> tgt_len - tp < 4"
+  shows "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+         Some (match_t_C 0 0)"
+  using assms
+  unfolding find_best_match'_def
+  by (auto simp: ocondition_def oreturn_def K_def)
+
+lemma find_best_match'_early_zero_valid:
+  assumes early: "src_len < 4 \<or> tgt_len - tp < 4"
+  shows "\<exists>m.
+     find_best_match' src src_len tgt tgt_len tp head_arr next_arr s = Some m \<and>
+     match_valid src_bytes tgt_bytes (unat tp)
+       (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
+  using find_best_match'_early_zero[OF early]
+  by auto
 
 lemma find_best_match'_match_valid_if_common_prefix:
   assumes common_prefix_valid:

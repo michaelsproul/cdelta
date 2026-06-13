@@ -449,6 +449,39 @@ lemma encode_window_match_okD:
        (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
   using ok tp_lt by (auto simp: encode_window_match_ok_def)
 
+lemma encode_window_match_ok_src_len_lt4:
+  assumes src_lt: "src_len < 4"
+  shows "encode_window_match_ok st src src_len tgt tgt_len head_p next_p
+           src_seg tgt_bytes"
+  unfolding encode_window_match_ok_def
+  using find_best_match'_early_zero_valid[of src_len _ _]
+        src_lt
+  by auto
+
+lemma word_sub_less_4_of_lt:
+  fixes tp tgt_len :: "32 word"
+  assumes tp_lt: "tp < tgt_len"
+      and tgt_lt: "tgt_len < 4"
+  shows "tgt_len - tp < 4"
+  using tp_lt tgt_lt by unat_arith
+
+lemma encode_window_match_ok_tgt_len_lt4:
+  assumes tgt_lt: "tgt_len < 4"
+  shows "encode_window_match_ok st src src_len tgt tgt_len head_p next_p
+           src_seg tgt_bytes"
+  unfolding encode_window_match_ok_def
+proof (intro allI impI)
+  fix tp
+  assume tp_lt: "tp < tgt_len"
+  have early: "src_len < 4 \<or> tgt_len - tp < 4"
+    using word_sub_less_4_of_lt[OF tp_lt tgt_lt] by simp
+  show "\<exists>m.
+      find_best_match' src src_len tgt tgt_len tp head_p next_p st = Some m \<and>
+      match_valid src_seg tgt_bytes (unat tp)
+        (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
+    by (rule find_best_match'_early_zero_valid[OF early])
+qed
+
 definition encode_window_buffers_ok ::
   "lifted_globals \<Rightarrow>
    8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
