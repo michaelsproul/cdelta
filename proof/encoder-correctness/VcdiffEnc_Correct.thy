@@ -126,9 +126,18 @@ lemma encode_window'_after_cache_reset_success_enc_sections_cache_inv:
   apply (fold encode_window_c_loop_body_def)
   apply (rule runs_to_weaken)
    apply (rule encode_window_c_loop_while_run_inv)
-     apply assumption
-    apply (rule encode_window_buffers_ok_heap_typing_eq[OF _ bufs_ok])
     apply assumption
+   apply (rule encode_window_buffers_ok_heap_typing_eq[OF _ bufs_ok])
+   apply assumption
+   defer
+   apply (simp add: encode_window_final_sections_cache_post_def)
+   apply (rule encode_window_c_loop_final_flush_run_inv_generated
+     [where src = src and src_len = src_len
+        and tgt = tgt and tgt_len = tgt_len
+        and head_p = head_p and next_p = next_p
+        and addr_cap = addr_cap and pending_cap = pending_cap])
+    apply simp
+   apply simp
    sorry
 
 lemma encode_window'_success_enc_sections_cache_inv:

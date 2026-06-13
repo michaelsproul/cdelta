@@ -1734,6 +1734,259 @@ proof -
     using sections abs wf by blast
 qed
 
+definition encode_window_final_sections_cache_post ::
+  "8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow>
+   byte list \<Rightarrow> byte list \<Rightarrow>
+   (sections_t_C, sections_t_C) xval \<Rightarrow> lifted_globals \<Rightarrow> bool" where
+  "encode_window_final_sections_cache_post data inst addr src_seg tgt_bytes rv st \<longleftrightarrow>
+     (case rv of
+       Result sec \<Rightarrow>
+         sections_t_C.err_C sec = ENC_OK \<longrightarrow>
+         (\<exists>data_bytes inst_bytes addr_bytes c_out.
+           enc_sections_inv st data inst addr sec src_seg (length tgt_bytes)
+             data_bytes inst_bytes addr_bytes tgt_bytes c_out \<and>
+           enc_cache_abs st c_out \<and>
+           enc_cache_wf c_out)
+     | Exn sec \<Rightarrow>
+         sections_t_C.err_C sec = ENC_OK \<longrightarrow>
+         (\<exists>data_bytes inst_bytes addr_bytes c_out.
+           enc_sections_inv st data inst addr sec src_seg (length tgt_bytes)
+             data_bytes inst_bytes addr_bytes tgt_bytes c_out \<and>
+           enc_cache_abs st c_out \<and>
+           enc_cache_wf c_out))"
+
+lemma encode_window_c_loop_final_flush_zero:
+  assumes run: "encode_window_c_loop_run_inv
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap src_seg tgt_bytes (Result (0, sec, tp)) st"
+      and exit: "\<not> tp < tgt_len"
+  shows "((liftE
+            (condition (\<lambda>s. 0 < (0 :: 32 word))
+              (flush_pending' sec data data_cap inst inst_cap pending 0)
+              (return sec)) >>= throw) ::
+         (sections_t_C, sections_t_C, lifted_globals) exn_monad) \<bullet> st
+         \<lbrace> encode_window_final_sections_cache_post data inst addr
+              src_seg tgt_bytes \<rbrace>"
+  apply (simp add: condition_def encode_window_final_sections_cache_post_def)
+  apply runs_to_vcg
+  using assms encode_window_c_loop_result_inv_doneD
+  by (fastforce simp: encode_window_c_loop_run_inv_def)
+
+lemma encode_window_c_loop_final_flush_result:
+  assumes run: "encode_window_c_loop_run_inv
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap src_seg tgt_bytes (Result (pend_len, sec, tp)) st"
+      and exit: "\<not> tp < tgt_len"
+  shows "((liftE
+            (condition (\<lambda>s. 0 < pend_len)
+              (flush_pending' sec data data_cap inst inst_cap pending pend_len)
+              (return sec)) >>= throw) ::
+          (sections_t_C, sections_t_C, lifted_globals) exn_monad) \<bullet> st
+         \<lbrace> encode_window_final_sections_cache_post data inst addr
+              src_seg tgt_bytes \<rbrace>"
+  apply (cases "pend_len = 0")
+   apply hypsubst
+   apply (rule encode_window_c_loop_final_flush_zero
+     [where src = src and src_len = src_len
+        and tgt = tgt and tgt_len = tgt_len
+        and head_p = head_p and next_p = next_p
+        and addr_cap = addr_cap and pending_cap = pending_cap
+        and tp = tp])
+    apply (use run in simp)
+   apply (use exit in simp)
+  sorry
+
+lemma encode_window_c_loop_final_flush_run_inv:
+  assumes run: "encode_window_c_loop_run_inv
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap src_seg tgt_bytes r st"
+      and exit:
+        "\<forall>pend_len sec tp.
+           r = Result (pend_len, sec, tp) \<longrightarrow> \<not> tp < tgt_len"
+  shows "(\<forall>v. r = Result v \<longrightarrow>
+            (case v of
+              (pend_len, sec, tp) \<Rightarrow>
+                liftE
+                  (condition (\<lambda>s. 0 < pend_len)
+                    (flush_pending' sec data data_cap inst inst_cap pending
+                      pend_len)
+                    (return sec)) >>= throw)
+            \<bullet> st
+            \<lbrace> encode_window_final_sections_cache_post data inst addr
+                 src_seg tgt_bytes \<rbrace>) \<and>
+         (\<forall>e. r = Exn e \<longrightarrow>
+            encode_window_final_sections_cache_post data inst addr
+              src_seg tgt_bytes (Exn e) st)"
+proof (intro conjI allI impI)
+  fix v
+  assume r_result: "r = Result v"
+  obtain pend_len sec tp where v: "v = (pend_len, sec, tp)"
+    by (cases v) auto
+  have run_result:
+    "encode_window_c_loop_run_inv
+       src src_len tgt tgt_len head_p next_p
+       data data_cap inst inst_cap addr addr_cap
+       pending pending_cap src_seg tgt_bytes
+       (Result (pend_len, sec, tp)) st"
+    using run r_result v by simp
+  have exit_result: "\<not> tp < tgt_len"
+    using exit r_result v by simp
+  have final:
+    "((liftE
+          (condition (\<lambda>s. 0 < pend_len)
+            (flush_pending' sec data data_cap inst inst_cap pending pend_len)
+            (return sec)) >>= throw) ::
+        (sections_t_C, sections_t_C, lifted_globals) exn_monad) \<bullet> st
+       \<lbrace> encode_window_final_sections_cache_post data inst addr
+            src_seg tgt_bytes \<rbrace>"
+    by (rule encode_window_c_loop_final_flush_result[OF run_result exit_result])
+  show "(case v of
+          (pend_len, sec, tp) \<Rightarrow>
+            liftE
+              (condition (\<lambda>s. 0 < pend_len)
+                (flush_pending' sec data data_cap inst inst_cap pending pend_len)
+                (return sec)) >>= throw)
+        \<bullet> st
+        \<lbrace> encode_window_final_sections_cache_post data inst addr
+             src_seg tgt_bytes \<rbrace>"
+    using v final by simp
+next
+  fix e
+  assume r_exn: "r = Exn e"
+  have err: "sections_t_C.err_C e \<noteq> ENC_OK"
+    using run r_exn
+    by (simp add: encode_window_c_loop_run_inv_def
+                  encode_window_c_loop_result_inv_def)
+  show "encode_window_final_sections_cache_post data inst addr
+          src_seg tgt_bytes (Exn e) st"
+    using err by (simp add: encode_window_final_sections_cache_post_def)
+qed
+
+lemma encode_window_c_loop_final_flush_run_inv_generated:
+  assumes run: "encode_window_c_loop_run_inv
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap src_seg tgt_bytes r st"
+      and exit:
+        "\<forall>pend_len sec tp.
+           r = Result (pend_len, sec, tp) \<longrightarrow> \<not> tp < tgt_len"
+  shows "(\<forall>pend_len sec.
+            (\<exists>tp. r = Result (pend_len, sec, tp)) \<longrightarrow>
+            ((liftE
+                (condition (\<lambda>s. 0 < pend_len)
+                  (flush_pending' sec data data_cap inst inst_cap pending
+                    pend_len)
+                  (return sec)) >>= throw) ::
+              (sections_t_C, sections_t_C, lifted_globals) exn_monad) \<bullet> st
+            \<lbrace> \<lambda>r t.
+              (\<forall>sec. r = Result sec \<longrightarrow>
+                sections_t_C.err_C sec = ENC_OK \<longrightarrow>
+                (\<exists>data_bytes inst_bytes addr_bytes c_out.
+                  enc_sections_inv t data inst addr sec src_seg
+                    (length tgt_bytes) data_bytes inst_bytes addr_bytes
+                    tgt_bytes c_out \<and>
+                  enc_cache_abs t c_out \<and>
+                  enc_cache_wf c_out)) \<and>
+              (\<forall>sec. r = Exn sec \<longrightarrow>
+                sections_t_C.err_C sec = ENC_OK \<longrightarrow>
+                (\<exists>data_bytes inst_bytes addr_bytes c_out.
+                  enc_sections_inv t data inst addr sec src_seg
+                    (length tgt_bytes) data_bytes inst_bytes addr_bytes
+                    tgt_bytes c_out \<and>
+                  enc_cache_abs t c_out \<and>
+                  enc_cache_wf c_out)) \<rbrace>) \<and>
+         (\<forall>e. r = Exn e \<longrightarrow>
+            sections_t_C.err_C e = ENC_OK \<longrightarrow>
+            (\<exists>data_bytes inst_bytes addr_bytes c_out.
+              enc_sections_inv st data inst addr e src_seg (length tgt_bytes)
+                data_bytes inst_bytes addr_bytes tgt_bytes c_out \<and>
+              enc_cache_abs st c_out \<and>
+              enc_cache_wf c_out))"
+proof (intro conjI allI impI)
+  fix pend_len sec
+  assume "\<exists>tp. r = Result (pend_len, sec, tp)"
+  then obtain tp where r_result: "r = Result (pend_len, sec, tp)"
+    by blast
+  have base:
+    "(\<forall>v. r = Result v \<longrightarrow>
+        (case v of
+          (pend_len, sec, tp) \<Rightarrow>
+            liftE
+              (condition (\<lambda>s. 0 < pend_len)
+                (flush_pending' sec data data_cap inst inst_cap pending
+                  pend_len)
+                (return sec)) >>= throw)
+        \<bullet> st
+        \<lbrace> encode_window_final_sections_cache_post data inst addr
+             src_seg tgt_bytes \<rbrace>) \<and>
+     (\<forall>e. r = Exn e \<longrightarrow>
+        encode_window_final_sections_cache_post data inst addr
+          src_seg tgt_bytes (Exn e) st)"
+    by (rule encode_window_c_loop_final_flush_run_inv[OF run exit])
+  have final:
+    "((liftE
+        (condition (\<lambda>s. 0 < pend_len)
+          (flush_pending' sec data data_cap inst inst_cap pending pend_len)
+          (return sec)) >>= throw) ::
+      (sections_t_C, sections_t_C, lifted_globals) exn_monad) \<bullet> st
+     \<lbrace> encode_window_final_sections_cache_post data inst addr
+          src_seg tgt_bytes \<rbrace>"
+    using base r_result by auto
+  show "((liftE
+          (condition (\<lambda>s. 0 < pend_len)
+            (flush_pending' sec data data_cap inst inst_cap pending pend_len)
+            (return sec)) >>= throw) ::
+        (sections_t_C, sections_t_C, lifted_globals) exn_monad) \<bullet> st
+       \<lbrace> \<lambda>r t.
+          (\<forall>sec. r = Result sec \<longrightarrow>
+            sections_t_C.err_C sec = ENC_OK \<longrightarrow>
+            (\<exists>data_bytes inst_bytes addr_bytes c_out.
+              enc_sections_inv t data inst addr sec src_seg
+                (length tgt_bytes) data_bytes inst_bytes addr_bytes
+                tgt_bytes c_out \<and>
+              enc_cache_abs t c_out \<and>
+              enc_cache_wf c_out)) \<and>
+          (\<forall>sec. r = Exn sec \<longrightarrow>
+            sections_t_C.err_C sec = ENC_OK \<longrightarrow>
+            (\<exists>data_bytes inst_bytes addr_bytes c_out.
+              enc_sections_inv t data inst addr sec src_seg
+                (length tgt_bytes) data_bytes inst_bytes addr_bytes
+                tgt_bytes c_out \<and>
+              enc_cache_abs t c_out \<and>
+              enc_cache_wf c_out)) \<rbrace>"
+    apply (rule runs_to_weaken[OF final])
+    by (auto simp: encode_window_final_sections_cache_post_def)
+next
+  fix e
+  assume r_exn: "r = Exn e"
+     and err_ok: "sections_t_C.err_C e = ENC_OK"
+  have base:
+    "(\<forall>v. r = Result v \<longrightarrow>
+        (case v of
+          (pend_len, sec, tp) \<Rightarrow>
+            liftE
+              (condition (\<lambda>s. 0 < pend_len)
+                (flush_pending' sec data data_cap inst inst_cap pending
+                  pend_len)
+                (return sec)) >>= throw)
+        \<bullet> st
+        \<lbrace> encode_window_final_sections_cache_post data inst addr
+             src_seg tgt_bytes \<rbrace>) \<and>
+     (\<forall>e. r = Exn e \<longrightarrow>
+        encode_window_final_sections_cache_post data inst addr
+          src_seg tgt_bytes (Exn e) st)"
+    by (rule encode_window_c_loop_final_flush_run_inv[OF run exit])
+  have post:
+    "encode_window_final_sections_cache_post data inst addr
+       src_seg tgt_bytes (Exn e) st"
+    using base r_exn by simp
+  show "\<exists>data_bytes inst_bytes addr_bytes c_out.
+          enc_sections_inv st data inst addr e src_seg (length tgt_bytes)
+            data_bytes inst_bytes addr_bytes tgt_bytes c_out \<and>
+          enc_cache_abs st c_out \<and>
+          enc_cache_wf c_out"
+    using post err_ok by (simp add: encode_window_final_sections_cache_post_def)
+qed
+
 lemma encode_window_c_loop_cache_inv_doneD:
   assumes inv: "encode_window_c_loop_cache_inv st
      src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap

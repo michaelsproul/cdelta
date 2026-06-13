@@ -110,9 +110,11 @@
   are explicit.
 - `encode_window'_after_cache_reset_success_enc_sections_cache_inv` now folds
   the generated loop body to `encode_window_c_loop_body` and invokes
-  `encode_window_c_loop_while_run_inv` after `cache_reset'`; the first top-level
-  `sorry` is therefore below the reset and loop-rule boundaries rather than
-  covering the whole generated loop.
+  `encode_window_c_loop_while_run_inv` after `cache_reset'`.  It also routes
+  the generated final-flush continuation through
+  `encode_window_c_loop_final_flush_run_inv_generated`, so the top-level
+  `sorry` at this point is now the matcher-totality obligation after
+  `cache_reset'` rather than the final continuation.
 - The window proof now carries an explicit `encode_window_buffers_ok`
   precondition.  This is needed for target/pending pointer validity and for the
   non-aliasing facts required to preserve the source, target, pending, and
@@ -121,6 +123,12 @@
   `encode_window_c_loop_result_inv_doneD`: if the generated `whileLoop` exits
   with `(0, sec, tp)` and `tp < tgt_len` is false, the result invariant yields
   the final `enc_sections_inv` plus cache facts directly.
+- The generated final-flush continuation has a named split:
+  `encode_window_c_loop_final_flush_zero` proves the `pend_len = 0` exit path,
+  `encode_window_c_loop_final_flush_result` centralizes the remaining nonzero
+  `flush_pending'` preservation hole, and
+  `encode_window_c_loop_final_flush_run_inv_generated` adapts this to the
+  postcondition shape emitted by the top-level VCG.
 - The completed-loop extraction is captured by
   `encode_window_c_loop_cache_inv_doneD`: at `tp = tgt_len` and `pend_len = 0`,
   the strengthened loop invariant yields the exact `enc_sections_inv` and cache
@@ -129,7 +137,7 @@
 Remaining proof debt before `try_emit_add_copy`/window integration:
 
 - Discharge or centralize the C-varint byte-equality assumptions.
-- Prove `flush_pending` and fused ADD+COPY preservation over the same
+- Prove nonzero `flush_pending` and fused ADD+COPY preservation over the same
   section/cache invariant shape.
 - Prove `encode_window_match_ok` from `build_index` plus source/target heap
   facts, or thread it from the build-index stage into the window proof.  This
@@ -140,10 +148,10 @@ Remaining proof debt before `try_emit_add_copy`/window integration:
   `encode_window_match_ok`.  The pending branch should follow from heap-update
   frame facts; COPY/fusion will follow from the emit helper heap-typing/frame
   postconditions.
-- Prove `encode_window'_after_cache_reset_success_enc_sections_cache_inv`
-  using `encode_window_c_loop_cache_inv`; reset/entry and the generated
-  pending-byte/small-match branch, matcher slot, and zero-pending exit are no
-  longer part of the hole.
+- Prove the matcher-totality slot in
+  `encode_window'_after_cache_reset_success_enc_sections_cache_inv`; reset,
+  loop-rule integration, the generated pending-byte/small-match branch, and the
+  zero-pending final exit are no longer part of that top-level hole.
 - Refine `vcdiff_encode'_success_serialized_sections` so it is proved by
   composing `encode_window'_success_enc_sections_cache_inv` with
   `serialize'_writes_serialize`.
