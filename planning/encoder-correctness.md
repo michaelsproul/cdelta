@@ -100,6 +100,12 @@
   exact body.  Its `gets_the find_best_match'` witness is supplied through the
   new `encode_window_match_ok` predicate; the `len < 4` branch is proved, while
   the COPY/fusion side is the remaining local body `sorry`.
+- The generated `whileLoop` now has a standalone skeleton,
+  `encode_window_c_loop_while_run_inv`, over `encode_window_c_loop_run_inv`.
+  This plugs the body lemma into `runs_to_whileLoop_exn'` with the real `tp`
+  measure and proves the loop rule obligations.  The run invariant deliberately
+  carries result correctness, byte-buffer validity, and matcher totality so the
+  remaining preservation gaps are explicit.
 - The window proof now carries an explicit `encode_window_buffers_ok`
   precondition.  This is needed for target/pending pointer validity and for the
   non-aliasing facts required to preserve the source, target, pending, and
@@ -122,6 +128,11 @@ Remaining proof debt before `try_emit_add_copy`/window integration:
   facts, or thread it from the build-index stage into the window proof.  This
   is the real totality/match-validity precondition for the generated
   `gets_the (find_best_match' ...)`.
+- Prove `encode_window_c_loop_body_run_inv`'s auxiliary preservation slot:
+  successful body steps must preserve `encode_window_buffers_ok` and
+  `encode_window_match_ok`.  The pending branch should follow from heap-update
+  frame facts; COPY/fusion will follow from the emit helper heap-typing/frame
+  postconditions.
 - Prove `encode_window'_after_cache_reset_success_enc_sections_cache_inv`
   using `encode_window_c_loop_cache_inv`; reset/entry and the generated
   pending-byte/small-match branch, matcher slot, and zero-pending exit are no
