@@ -3450,6 +3450,38 @@ proof -
     by auto
 qed
 
+lemma flush_pending'_len_zero_noop:
+  shows "flush_pending' sec data data_cap inst inst_cap pending 0 \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result sec \<and> t = s \<rbrace>"
+  unfolding flush_pending'_def
+  apply runs_to_vcg
+  apply (rule runs_to_whileLoop_exn'[
+    where R = "measure (\<lambda>((x :: 32 word \<times> 32 word \<times> sections_t_C), _). 0)"
+      and I = "\<lambda>r t. r = Result (0, 0, sec) \<and> t = s"])
+     apply simp
+    apply simp
+   apply simp
+  apply runs_to_vcg
+  by (auto simp: word_less_nat_alt)
+
+lemma flush_pending'_len_zero_enc_sections_cache_inv:
+  assumes inv:
+        "enc_sections_inv s data inst addr sec src_seg tgt_len
+          data_bytes inst_bytes addr_bytes target c_out"
+      and abs: "enc_cache_abs s c_out"
+      and cache_wf: "enc_cache_wf c_out"
+  shows "flush_pending' sec data data_cap inst inst_cap pending 0 \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                enc_sections_inv t data inst addr sec' src_seg tgt_len
+                  data_bytes inst_bytes addr_bytes target c_out \<and>
+                enc_cache_abs t c_out \<and>
+                enc_cache_wf c_out) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[OF flush_pending'_len_zero_noop])
+  using inv abs cache_wf by auto
+
 lemma try_emit_add_copy'_pend_len_zero_noop:
   shows "try_emit_add_copy' sec data data_cap inst inst_cap addr_buf addr_cap
             pending 0 copy_addr here copy_len \<bullet> s
