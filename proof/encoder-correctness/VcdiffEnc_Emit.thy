@@ -3558,6 +3558,52 @@ lemma try_emit_add_copy'_early_enc_sections_cache_inv:
     OF try_emit_add_copy'_early_noop[OF early]])
   using inv abs cache_wf by auto
 
+lemma try_emit_add_copy'_mode_gt5_copy_ne4_noop:
+  assumes bm: "best_mode' copy_addr here s = Some m"
+      and mode_gt: "(5 :: 32 word) < mode_t_C.mode_C m"
+      and copy_ne: "copy_len \<noteq> (4 :: 32 word)"
+  shows "try_emit_add_copy' sec data data_cap inst inst_cap addr_buf addr_cap
+            pending pend_len copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>f. r = Result f \<and>
+                   fused_t_C.s_C f = sec \<and>
+                   fused_t_C.fused_C f = 0) \<and>
+              t = s \<rbrace>"
+  unfolding try_emit_add_copy'_def
+  apply runs_to_vcg
+  apply (rule exI[where x = m])
+  using bm mode_gt copy_ne
+  apply (auto simp: word_less_nat_alt word_le_nat_alt)
+   apply runs_to_vcg
+  apply runs_to_vcg
+  done
+
+lemma try_emit_add_copy'_mode_gt5_copy_ne4_enc_sections_cache_inv:
+  assumes inv:
+        "enc_sections_inv s data inst addr_buf sec src_seg tgt_len
+          data_bytes inst_bytes addr_bytes target c_out"
+      and abs: "enc_cache_abs s c_out"
+      and cache_wf: "enc_cache_wf c_out"
+      and bm: "best_mode' copy_addr here s = Some m"
+      and mode_gt: "(5 :: 32 word) < mode_t_C.mode_C m"
+      and copy_ne: "copy_len \<noteq> (4 :: 32 word)"
+  shows "try_emit_add_copy' sec data data_cap inst inst_cap addr_buf addr_cap
+            pending pend_len copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>f.
+                r = Result f \<and>
+                fused_t_C.s_C f = sec \<and>
+                fused_t_C.fused_C f = 0 \<and>
+                enc_sections_inv t data inst addr_buf (fused_t_C.s_C f)
+                  src_seg tgt_len data_bytes inst_bytes addr_bytes target c_out \<and>
+                enc_cache_abs t c_out \<and>
+                enc_cache_wf c_out) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF try_emit_add_copy'_mode_gt5_copy_ne4_noop
+      [OF bm mode_gt copy_ne]])
+  using inv abs cache_wf by auto
+
 (* Nontrivial COPY/flush/fused preservation needs these shared facts:
    best_mode'_encode_address_correct for the C cache state,
    section_decodes_copy_append,
