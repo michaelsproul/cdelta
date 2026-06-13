@@ -1747,7 +1747,6 @@ lemma emit_copy'_small_addr_varint_success_enc_sections_inv:
       and addr_ok: "unat copy_addr < length src_seg + length target"
       and target_room: "length target + unat copy_len \<le> tgt_len"
       and sec_ok: "sections_t_C.err_C sec = ENC_OK"
-      and near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
       and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
       and inst_byte_ptr:
         "ptr_valid (heap_typing s)
@@ -1800,6 +1799,8 @@ lemma emit_copy'_small_addr_varint_success_enc_sections_inv:
               heap_typing t = heap_typing s \<rbrace>"
 proof -
   let ?op = "single_copy_opcode' copy_len (mode_t_C.mode_C m)"
+  have near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
+    by (rule enc_cache_abs_near_ptr_lt_word[OF abs])
   have mode_wf:
     "enc_mode_arg_wf c_out copy_addr here m"
     by (rule best_mode'_encode_address_correct[OF abs cache_wf bm])
@@ -1878,7 +1879,6 @@ lemma emit_copy'_large_addr_byte_success_enc_sections_inv:
       and addr_ok: "unat copy_addr < length src_seg + length target"
       and target_room: "length target + unat copy_len \<le> tgt_len"
       and sec_ok: "sections_t_C.err_C sec = ENC_OK"
-      and near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
       and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
       and inst_byte_ptr:
         "ptr_valid (heap_typing s)
@@ -1944,6 +1944,8 @@ lemma emit_copy'_large_addr_byte_success_enc_sections_inv:
               heap_typing t = heap_typing s \<rbrace>"
 proof -
   let ?op = "single_copy_opcode' copy_len (mode_t_C.mode_C m)"
+  have near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
+    by (rule enc_cache_abs_near_ptr_lt_word[OF abs])
   have mode_wf:
     "enc_mode_arg_wf c_out copy_addr here m"
     by (rule best_mode'_encode_address_correct[OF abs cache_wf bm])
@@ -2025,7 +2027,6 @@ lemma emit_copy'_large_addr_varint_success_enc_sections_inv:
       and addr_ok: "unat copy_addr < length src_seg + length target"
       and target_room: "length target + unat copy_len \<le> tgt_len"
       and sec_ok: "sections_t_C.err_C sec = ENC_OK"
-      and near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
       and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
       and inst_byte_ptr:
         "ptr_valid (heap_typing s)
@@ -2100,6 +2101,8 @@ lemma emit_copy'_large_addr_varint_success_enc_sections_inv:
               heap_typing t = heap_typing s \<rbrace>"
 proof -
   let ?op = "single_copy_opcode' copy_len (mode_t_C.mode_C m)"
+  have near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
+    by (rule enc_cache_abs_near_ptr_lt_word[OF abs])
   have mode_wf:
     "enc_mode_arg_wf c_out copy_addr here m"
     by (rule best_mode'_encode_address_correct[OF abs cache_wf bm])
