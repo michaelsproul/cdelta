@@ -2153,6 +2153,88 @@ lemma write_varint'_success_preserves_heap_bytes_word_bounded:
     [OF size fits dst_valid _ disj])
   using varint_size'_shift_ok[OF size] by auto
 
+lemma write_varint_loop_preserves_near_ptr:
+  fixes len pos :: "32 word"
+  assumes dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and shift_ok: "\<forall>i. i < len \<longrightarrow>
+           7 * len - 7 - 7 * i < (0x20 :: 32 word)"
+  shows "(whileLoop (\<lambda>(i :: 32 word) st. i < len)
+           (\<lambda>i. do {
+              guard (\<lambda>st. 7 * len - 7 - 7 * i < (0x20 :: 32 word));
+              guard (\<lambda>st. ptr_valid (heap_typing st) (buf +\<^sub>p uint (pos + i)));
+              modify (heap_w8_update
+                (\<lambda>h. h(buf +\<^sub>p uint (pos + i) :=
+                  if i + 1 < len
+                  then (ucast
+                    ((ucast
+                      (ucast ((v >> unat (7 * len - 7 - 7 * i)) && 0x7F)
+                        :: 8 word) :: 32 word) || 0x80) :: 8 word)
+                  else (ucast ((v >> unat (7 * len - 7 - 7 * i)) && 0x7F)
+                        :: 8 word))));
+              return (i + 1)
+           }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result len \<and>
+            near_ptr_'' t = near_ptr_'' s \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((i :: 32 word), _). unat len - unat i)"
+      and I = "\<lambda>i st. unat i \<le> unat len \<and>
+             near_ptr_'' st = near_ptr_'' s \<and>
+             heap_typing st = heap_typing s"])
+     subgoal by simp
+     subgoal by unat_arith
+    subgoal premises prems for i st
+    proof -
+      have len_le: "unat len \<le> unat i"
+        using prems(1) by (simp add: word_less_nat_alt)
+      have i_eq: "i = len"
+        using prems(2) len_le by (metis antisym_conv word_unat.Rep_inject)
+      show ?thesis
+        using prems(2) i_eq by simp
+    qed
+  subgoal for i st
+    using dst_valid[rule_format, of "unat i"]
+          shift_ok[rule_format, of i]
+    by (auto simp: runs_to.rep_eq run_bind run_guard run_modify
+                   word_less_nat_alt word_unat.Rep_inverse
+             intro: unat_suc_le_of_word_less
+                    unat_measure_decrease_of_word_less)
+  done
+
+lemma write_varint'_success_preserves_near_ptr:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and shift_ok: "\<forall>i. i < n \<longrightarrow>
+           7 * n - 7 - 7 * i < (0x20 :: 32 word)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   near_ptr_'' t = near_ptr_'' s \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  unfolding write_varint'_def
+  apply runs_to_vcg
+  using size fits
+  apply simp
+  apply runs_to_vcg
+  apply (rule runs_to_weaken[
+    OF write_varint_loop_preserves_near_ptr[OF dst_valid shift_ok]])
+  by auto
+
+lemma write_varint'_success_preserves_near_ptr_bounded:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   near_ptr_'' t = near_ptr_'' s \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_varint'_success_preserves_near_ptr
+    [OF size fits dst_valid _])
+  using varint_size'_shift_ok[OF size] by auto
+
 lemma write_bytes_loop_preserves_heap_bytes:
   fixes len pos src_off :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
@@ -2984,6 +3066,66 @@ proof -
            heap_bytes_word s out3 out3_pos out3_len \<and>
            heap_typing t = heap_typing s) \<rbrace>"
     using append2 pres3 by (simp add: runs_to_conj)
+  show ?thesis
+    apply (rule runs_to_weaken[OF combined])
+    by auto
+qed
+
+lemma write_varint'_success_heap_bytes_append_wordpos_preserves2_near_ptr:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat pos. \<forall>i.
+           i < n \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and no_overflow: "unat pos + unat n < 2 ^ 32"
+      and disj1: "\<forall>k < out1_n. \<forall>i.
+           i < n \<longrightarrow> out1 +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and disj2: "\<forall>k < out2_n. \<forall>i.
+           i < n \<longrightarrow> out2 +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + n)) =
+                   heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+                   heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+                   heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+                   near_ptr_'' t = near_ptr_'' s \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have append2:
+    "write_varint' buf cap pos v \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+               heap_bytes t buf (unat (pos + n)) =
+               heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+               heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+               heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_varint'_success_heap_bytes_append_wordpos_preserves2
+      [OF size fits dst_valid dst_inj prefix_disj no_overflow disj1 disj2])
+  have near:
+    "write_varint' buf cap pos v \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+               near_ptr_'' t = near_ptr_'' s \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_varint'_success_preserves_near_ptr_bounded
+      [OF size fits dst_valid])
+  have combined:
+    "write_varint' buf cap pos v \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+           heap_bytes t buf (unat (pos + n)) =
+           heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+           heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+           heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+           heap_typing t = heap_typing s) \<and>
+          (r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+           near_ptr_'' t = near_ptr_'' s \<and>
+           heap_typing t = heap_typing s) \<rbrace>"
+    using append2 near by (simp add: runs_to_conj)
   show ?thesis
     apply (rule runs_to_weaken[OF combined])
     by auto
