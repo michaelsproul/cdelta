@@ -46,6 +46,116 @@ lemma emit_address'_success_byte_heap_bytes_append:
   apply simp
   by (rule write_byte'_heap_bytes_append_next_typing[OF pos_lt ptr_ok dist])
 
+lemma emit_address'_success_varint_heap_bytes_append_preserves2:
+  assumes mode_lt: "mode_t_C.mode_C m < (6 :: 32 word)"
+      and size: "varint_size' (mode_t_C.arg_C m) s = Some n"
+      and fits: "\<not> addr_cap - addr_pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (addr_buf +\<^sub>p uint (addr_pos + of_nat j))"
+      and dst_inj: "\<forall>i < unat n. \<forall>j < unat n.
+           i \<noteq> j \<longrightarrow>
+           addr_buf +\<^sub>p uint (addr_pos + of_nat i) \<noteq>
+           addr_buf +\<^sub>p uint (addr_pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat addr_pos. \<forall>i.
+           i < n \<longrightarrow> addr_buf +\<^sub>p int k \<noteq> addr_buf +\<^sub>p uint (addr_pos + i)"
+      and no_overflow: "unat addr_pos + unat n < 2 ^ 32"
+      and disj1: "\<forall>k < out1_n. \<forall>i.
+           i < n \<longrightarrow> out1 +\<^sub>p int k \<noteq> addr_buf +\<^sub>p uint (addr_pos + i)"
+      and disj2: "\<forall>k < out2_n. \<forall>i.
+           i < n \<longrightarrow> out2 +\<^sub>p int k \<noteq> addr_buf +\<^sub>p uint (addr_pos + i)"
+  shows "emit_address' addr_buf addr_cap addr_pos m \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (addr_pos + n) ENC_OK) \<and>
+                   heap_bytes t addr_buf (unat (addr_pos + n)) =
+                   heap_bytes s addr_buf (unat addr_pos) @
+                   varint_bytes32 (mode_t_C.arg_C m) n \<and>
+                   heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+                   heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  unfolding emit_address'_def
+  using mode_lt
+  apply simp
+  by (rule write_varint'_success_heap_bytes_append_wordpos_preserves2
+      [OF size fits dst_valid dst_inj prefix_disj no_overflow disj1 disj2])
+
+lemma emit_address'_success_byte_heap_bytes_append_preserves2:
+  assumes mode_ge: "\<not> mode_t_C.mode_C m < (6 :: 32 word)"
+      and pos_lt: "addr_pos < addr_cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (addr_buf +\<^sub>p uint addr_pos)"
+      and dist: "ptr_range_distinct addr_buf (Suc (unat addr_pos))"
+      and disj1: "\<forall>i < out1_n. out1 +\<^sub>p int i \<noteq> addr_buf +\<^sub>p uint addr_pos"
+      and disj2: "\<forall>i < out2_n. out2 +\<^sub>p int i \<noteq> addr_buf +\<^sub>p uint addr_pos"
+  shows "emit_address' addr_buf addr_cap addr_pos m \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (addr_pos + 1) ENC_OK) \<and>
+                   heap_bytes t addr_buf (unat (addr_pos + 1)) =
+                   heap_bytes s addr_buf (unat addr_pos) @
+                   [ucast (mode_t_C.arg_C m)] \<and>
+                   heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+                   heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  unfolding emit_address'_def
+  using mode_ge
+  apply simp
+  by (rule write_byte'_heap_bytes_append_next_typing_preserves2
+      [OF pos_lt ptr_ok dist disj1 disj2])
+
+lemma emit_address'_success_byte_heap_bytes_append_preserves2_near_ptr:
+  assumes mode_ge: "\<not> mode_t_C.mode_C m < (6 :: 32 word)"
+      and pos_lt: "addr_pos < addr_cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (addr_buf +\<^sub>p uint addr_pos)"
+      and dist: "ptr_range_distinct addr_buf (Suc (unat addr_pos))"
+      and disj1: "\<forall>i < out1_n. out1 +\<^sub>p int i \<noteq> addr_buf +\<^sub>p uint addr_pos"
+      and disj2: "\<forall>i < out2_n. out2 +\<^sub>p int i \<noteq> addr_buf +\<^sub>p uint addr_pos"
+  shows "emit_address' addr_buf addr_cap addr_pos m \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (addr_pos + 1) ENC_OK) \<and>
+                   heap_bytes t addr_buf (unat (addr_pos + 1)) =
+                   heap_bytes s addr_buf (unat addr_pos) @
+                   [ucast (mode_t_C.arg_C m)] \<and>
+                   heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+                   heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+                   near_ptr_'' t = near_ptr_'' s \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have append2:
+    "emit_address' addr_buf addr_cap addr_pos m \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (addr_pos + 1) ENC_OK) \<and>
+               heap_bytes t addr_buf (unat (addr_pos + 1)) =
+               heap_bytes s addr_buf (unat addr_pos) @
+               [ucast (mode_t_C.arg_C m)] \<and>
+               heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+               heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule emit_address'_success_byte_heap_bytes_append_preserves2
+      [OF mode_ge pos_lt ptr_ok dist disj1 disj2])
+  have near:
+    "emit_address' addr_buf addr_cap addr_pos m \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (addr_pos + 1) ENC_OK) \<and>
+               near_ptr_'' t = near_ptr_'' s \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    unfolding emit_address'_def
+    using mode_ge
+    apply simp
+    apply (rule runs_to_weaken[OF write_byte'_spec])
+     apply (rule ptr_ok)
+    using pos_lt by auto
+  have combined:
+    "emit_address' addr_buf addr_cap addr_pos m \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (r = Result (wr_t_C (addr_pos + 1) ENC_OK) \<and>
+           heap_bytes t addr_buf (unat (addr_pos + 1)) =
+           heap_bytes s addr_buf (unat addr_pos) @
+           [ucast (mode_t_C.arg_C m)] \<and>
+           heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+           heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+           heap_typing t = heap_typing s) \<and>
+          (r = Result (wr_t_C (addr_pos + 1) ENC_OK) \<and>
+           near_ptr_'' t = near_ptr_'' s \<and>
+           heap_typing t = heap_typing s) \<rbrace>"
+    using append2 near by (simp add: runs_to_conj)
+  show ?thesis
+    apply (rule runs_to_weaken[OF combined])
+    by auto
+qed
+
 lemma single_add_opcode'_small:
   assumes sz_ge: "(1 :: 32 word) \<le> sz"
       and sz_le: "sz \<le> (17 :: 32 word)"
@@ -689,6 +799,18 @@ lemma cache_update'_preserves_heap_bytes:
                heap_bytes t buf n = heap_bytes s buf n \<rbrace>"
   apply (rule runs_to_weaken[OF cache_update'_state[OF near_ptr_lt, where buf = buf and n = n]])
   by simp
+
+lemma cache_update'_preserves_heap_bytes3:
+  assumes near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
+  shows "cache_update' addr \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result () \<and>
+               heap_typing t = heap_typing s \<and>
+               heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+               heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+               heap_bytes t out3 out3_n = heap_bytes s out3 out3_n \<rbrace>"
+  unfolding cache_update'_def
+  apply runs_to_vcg
+  using near_ptr_lt by (auto simp: word_less_nat_alt unat_mod)
 
 lemma cache_update'_enc_cache_abs:
   assumes abs: "enc_cache_abs s c"

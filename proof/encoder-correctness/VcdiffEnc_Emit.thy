@@ -63,6 +63,57 @@ proof -
     by auto
 qed
 
+lemma write_byte'_heap_bytes_append_next_typing_preserves2_near_ptr:
+  assumes pos_lt: "pos < cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+      and dist: "ptr_range_distinct buf (Suc (unat pos))"
+      and disj1: "\<forall>i < out1_n. out1 +\<^sub>p int i \<noteq> buf +\<^sub>p uint pos"
+      and disj2: "\<forall>i < out2_n. out2 +\<^sub>p int i \<noteq> buf +\<^sub>p uint pos"
+  shows "write_byte' buf cap pos b \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + 1)) =
+                   heap_bytes s buf (unat pos) @ [b] \<and>
+                   heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+                   heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+                   near_ptr_'' t = near_ptr_'' s \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have append2:
+    "write_byte' buf cap pos b \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+               heap_bytes t buf (unat (pos + 1)) =
+               heap_bytes s buf (unat pos) @ [b] \<and>
+               heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+               heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_byte'_heap_bytes_append_next_typing_preserves2
+      [OF pos_lt ptr_ok dist disj1 disj2])
+  have near:
+    "write_byte' buf cap pos b \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+               near_ptr_'' t = near_ptr_'' s \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    apply (rule runs_to_weaken[OF write_byte'_spec])
+     apply (rule ptr_ok)
+    using pos_lt by auto
+  have combined:
+    "write_byte' buf cap pos b \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+           heap_bytes t buf (unat (pos + 1)) =
+           heap_bytes s buf (unat pos) @ [b] \<and>
+           heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+           heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+           heap_typing t = heap_typing s) \<and>
+          (r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+           near_ptr_'' t = near_ptr_'' s \<and>
+           heap_typing t = heap_typing s) \<rbrace>"
+    using append2 near by (simp add: runs_to_conj)
+  show ?thesis
+    apply (rule runs_to_weaken[OF combined])
+    by auto
+qed
+
 lemma emit_add'_small_success_emitted_sections:
   assumes emitted:
         "emitted_sections s data inst addr sec data_bytes inst_bytes addr_bytes"
@@ -861,6 +912,106 @@ proof -
           data_byte_ptr data_byte_dist data_byte_inst_disj
           data_byte_addr_disj]])
   using decodes_post by (auto simp: enc_sections_inv_def)
+qed
+
+lemma gets_the_best_mode'_result:
+  assumes "best_mode' copy_addr here s = Some m"
+  shows "gets_the (best_mode' copy_addr here) \<bullet> s
+           \<lbrace> \<lambda>r t. t = s \<and> r = Result m \<rbrace>"
+  unfolding gets_the_def
+  apply runs_to_vcg
+  using assms by simp
+
+lemma emit_copy'_small_addr_byte_success_emitted_sections:
+  assumes emitted:
+        "emitted_sections s data inst addr_buf sec data_bytes inst_bytes addr_bytes"
+      and bm: "best_mode' copy_addr here s = Some m"
+      and sz_ge: "(4 :: 32 word) \<le> copy_len"
+      and sz_le: "copy_len \<le> (18 :: 32 word)"
+      and mode_ge: "\<not> mode_t_C.mode_C m < (6 :: 32 word)"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_byte_dist:
+        "ptr_range_distinct inst (Suc (unat (sections_t_C.inst_pos_C sec)))"
+      and inst_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr_buf +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and addr_byte_fits: "sections_t_C.addr_pos_C sec < addr_cap"
+      and addr_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (addr_buf +\<^sub>p uint (sections_t_C.addr_pos_C sec))"
+      and addr_byte_dist:
+        "ptr_range_distinct addr_buf (Suc (unat (sections_t_C.addr_pos_C sec)))"
+      and addr_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> addr_buf +\<^sub>p uint (sections_t_C.addr_pos_C sec)"
+      and addr_byte_inst_disj:
+        "\<forall>i < unat (sections_t_C.inst_pos_C sec + 1).
+           inst +\<^sub>p int i \<noteq> addr_buf +\<^sub>p uint (sections_t_C.addr_pos_C sec)"
+  shows "emit_copy' sec inst inst_cap addr_buf addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                sections_result sec'
+                  (sections_t_C.data_pos_C sec)
+                  (sections_t_C.inst_pos_C sec + 1)
+                  (sections_t_C.addr_pos_C sec + 1)
+                  ENC_OK \<and>
+                emitted_sections t data inst addr_buf sec'
+                  data_bytes
+                  (inst_bytes @
+                    [ucast (op_t_C.op_C
+                      (single_copy_opcode' copy_len (mode_t_C.mode_C m)))])
+                  (addr_bytes @ [ucast (mode_t_C.arg_C m)])) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have op:
+    "op_t_C.needs_size_C
+      (single_copy_opcode' copy_len (mode_t_C.mode_C m)) = 0"
+    using single_copy_opcode'_small[OF sz_ge sz_le] by auto
+  note gets_the_best_mode'_result[runs_to_vcg]
+  show ?thesis
+    unfolding emit_copy'_def
+    using bm op
+    apply runs_to_vcg
+    apply (rule exI[where x = m])
+    apply (simp add: bm op)
+    apply runs_to_vcg
+      apply (rule runs_to_weaken[
+        OF write_byte'_heap_bytes_append_next_typing_preserves2_near_ptr])
+           apply (rule inst_byte_fits)
+          apply (rule inst_byte_ptr)
+         apply (rule inst_byte_dist)
+        apply (rule inst_byte_data_disj)
+       apply (rule inst_byte_addr_disj)
+      apply clarsimp
+      apply runs_to_vcg
+      apply (rule runs_to_weaken[
+        OF emit_address'_success_byte_heap_bytes_append_preserves2_near_ptr])
+            apply (rule mode_ge)
+           apply (rule addr_byte_fits)
+          apply (simp add: addr_byte_ptr)
+         apply (rule addr_byte_dist)
+        apply (rule addr_byte_data_disj)
+       apply (rule addr_byte_inst_disj)
+     apply clarsimp
+     apply runs_to_vcg
+     apply (rule runs_to_weaken[
+       OF cache_update'_preserves_heap_bytes3
+        [of _ _ data "unat (sections_t_C.data_pos_C sec)"
+           inst "unat (sections_t_C.inst_pos_C sec + 1)"
+           addr_buf "unat (sections_t_C.addr_pos_C sec + 1)"]])
+      using near_ptr_lt apply simp
+    using emitted
+    apply (clarsimp simp: sections_result_def emitted_sections_def sec_ok)
+    done
 qed
 
 lemma try_emit_add_copy'_pend_len_zero_noop:
