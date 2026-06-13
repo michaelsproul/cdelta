@@ -425,6 +425,30 @@ lemma encode_window_c_loop_cache_invD:
     and "enc_cache_wf c_out"
   using inv by (simp_all add: encode_window_c_loop_cache_inv_def)
 
+definition encode_window_match_ok ::
+  "lifted_globals \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow>
+   byte list \<Rightarrow> byte list \<Rightarrow> bool" where
+  "encode_window_match_ok st src src_len tgt tgt_len head_p next_p
+     src_seg tgt_bytes \<longleftrightarrow>
+     (\<forall>tp. tp < tgt_len \<longrightarrow>
+       (\<exists>m.
+          find_best_match' src src_len tgt tgt_len tp head_p next_p st =
+            Some m \<and>
+          match_valid src_seg tgt_bytes (unat tp)
+            (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))))"
+
+lemma encode_window_match_okD:
+  assumes ok: "encode_window_match_ok st src src_len tgt tgt_len
+     head_p next_p src_seg tgt_bytes"
+      and tp_lt: "tp < tgt_len"
+  obtains m where
+    "find_best_match' src src_len tgt tgt_len tp head_p next_p st = Some m"
+    "match_valid src_seg tgt_bytes (unat tp)
+       (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
+  using ok tp_lt by (auto simp: encode_window_match_ok_def)
+
 definition encode_window_buffers_ok ::
   "lifted_globals \<Rightarrow>
    8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
@@ -470,6 +494,80 @@ lemma encode_window_buffers_ok_heap_typing_eq:
      src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
      pending pending_cap"
   using assms by (simp add: encode_window_buffers_ok_def buf_valid_def)
+
+definition encode_window_c_loop_body ::
+  "8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   32 word \<times> sections_t_C \<times> 32 word \<Rightarrow>
+   (sections_t_C, 32 word \<times> sections_t_C \<times> 32 word,
+    lifted_globals) exn_monad" where
+  "encode_window_c_loop_body
+     src src_len tgt tgt_len head_p next_p
+     data data_cap inst inst_cap addr addr_cap pending pending_cap =
+   (\<lambda>(pend_len, sec, tp). do {
+      m \<leftarrow> gets_the
+            (find_best_match' src src_len tgt tgt_len tp head_p next_p);
+      condition (\<lambda>s. match_t_C.len_C m < 4)
+        (condition (\<lambda>s. pending_cap \<le> pend_len)
+           (throw (sections_t_C.err_C_update (\<lambda>_. 1) sec))
+           (liftE (do {
+              guard (\<lambda>s. IS_VALID(8 word) s (pending +\<^sub>p uint pend_len));
+              guard (\<lambda>s. IS_VALID(8 word) s (tgt +\<^sub>p uint tp));
+              modify
+                (heap_w8_update
+                  (\<lambda>h. h(pending +\<^sub>p uint pend_len :=
+                         h (tgt +\<^sub>p uint tp))));
+              return (pend_len + 1, sec, tp + 1)
+            })))
+        (do {
+           here \<leftarrow> return (src_len + tp);
+           f \<leftarrow> liftE
+                (try_emit_add_copy' sec data data_cap inst inst_cap
+                  addr addr_cap pending pend_len
+                  (match_t_C.pos_C m) here (match_t_C.len_C m));
+           unless (sections_t_C.err_C (fused_t_C.s_C f) = 0)
+            (throw (fused_t_C.s_C f));
+           condition (\<lambda>s. fused_t_C.fused_C f \<noteq> 0)
+             (do {
+                consumed \<leftarrow> return (fused_t_C.fused_C f);
+                sec \<leftarrow> return (fused_t_C.s_C f);
+                tp \<leftarrow> return (tp + consumed);
+                (sec, tp) \<leftarrow>
+                  condition (\<lambda>s. consumed < match_t_C.len_C m)
+                    (do {
+                       rem \<leftarrow> return (match_t_C.len_C m - consumed);
+                       sec \<leftarrow> liftE
+                         (emit_copy' sec inst inst_cap addr addr_cap
+                           (match_t_C.pos_C m + consumed)
+                           (src_len + tp) rem);
+                       unless (sections_t_C.err_C sec = 0) (throw sec);
+                       return (sec, tp + rem)
+                     })
+                    (return (sec, tp));
+                return (0, sec, tp)
+              })
+             (do {
+                (pend_len, sec, tp) \<leftarrow> return (pend_len, sec, tp);
+                (pend_len, sec) \<leftarrow>
+                  condition (\<lambda>s. 0 < pend_len)
+                    (do {
+                       sec \<leftarrow> liftE
+                         (flush_pending' sec data data_cap inst inst_cap
+                           pending pend_len);
+                       unless (sections_t_C.err_C sec = 0) (throw sec);
+                       return (0, sec)
+                     })
+                    (return (pend_len, sec));
+                sec \<leftarrow> liftE
+                  (emit_copy' sec inst inst_cap addr addr_cap
+                    (match_t_C.pos_C m) here (match_t_C.len_C m));
+                unless (sections_t_C.err_C sec = 0) (throw sec);
+                return (pend_len, sec, tp + match_t_C.len_C m)
+              })
+         })
+    })"
 
 lemma encode_window_buffers_ok_pending_dist:
   assumes ok: "encode_window_buffers_ok st
@@ -630,6 +728,19 @@ lemma encode_window_c_loop_result_inv_ExnI:
      src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
      pending pending_cap src_seg tgt_bytes (Exn sec) st"
   using assms by (simp add: encode_window_c_loop_result_inv_def)
+
+lemma encode_window_c_loop_result_inv_ResultD:
+  assumes inv: "encode_window_c_loop_result_inv
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap src_seg tgt_bytes (Result (pend_len, sec, tp)) st"
+  obtains data_bytes inst_bytes addr_bytes flushed pending_bytes c_out where
+    "encode_window_c_loop_cache_inv st
+       src src_len tgt tgt_len head_p next_p
+       data data_cap inst inst_cap addr addr_cap
+       pending pending_cap sec tp pend_len
+       src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+       flushed pending_bytes c_out"
+  using inv by (auto simp: encode_window_c_loop_result_inv_def)
 
 lemma encode_window_c_loop_inv_entry:
   assumes sec: "sections_result sec 0 0 0 ENC_OK"
@@ -1372,6 +1483,57 @@ next
                     unat tgt_len - unat tp)) \<rbrace>"
     by (rule encode_window_pending_byte_branch_loop_step
       [OF inv ok tp_lt pend_lt])
+qed
+
+lemma encode_window_c_loop_body_result_inv:
+  assumes inv: "encode_window_c_loop_result_inv
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap src_seg tgt_bytes (Result (pend_len, sec, tp)) st"
+      and ok: "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+      and match_ok: "encode_window_match_ok st src src_len tgt tgt_len
+     head_p next_p src_seg tgt_bytes"
+      and tp_lt: "tp < tgt_len"
+  shows "encode_window_c_loop_body
+           src src_len tgt tgt_len head_p next_p
+           data data_cap inst inst_cap addr addr_cap
+           pending pending_cap (pend_len, sec, tp) \<bullet> st
+         \<lbrace> \<lambda>r t. encode_window_c_loop_result_inv
+              src src_len tgt tgt_len head_p next_p
+              data data_cap inst inst_cap addr addr_cap
+              pending pending_cap src_seg tgt_bytes r t \<and>
+            (\<forall>b. r = Result b \<longrightarrow>
+              ((b, t), ((pend_len, sec, tp), st)) \<in>
+                measure
+                  (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
+                     unat tgt_len - unat tp)) \<rbrace>"
+proof -
+  obtain data_bytes inst_bytes addr_bytes flushed pending_bytes c_out where loop:
+    "encode_window_c_loop_cache_inv st
+       src src_len tgt tgt_len head_p next_p
+       data data_cap inst inst_cap addr addr_cap
+       pending pending_cap sec tp pend_len
+       src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+       flushed pending_bytes c_out"
+    by (rule encode_window_c_loop_result_inv_ResultD[OF inv])
+  obtain m where find:
+    "find_best_match' src src_len tgt tgt_len tp head_p next_p st = Some m"
+    and match_valid:
+    "match_valid src_seg tgt_bytes (unat tp)
+       (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
+    by (rule encode_window_match_okD[OF match_ok tp_lt])
+  show ?thesis
+    unfolding encode_window_c_loop_body_def
+    apply simp
+    apply runs_to_vcg
+    apply (rule exI[where x = m])
+    apply (simp add: find)
+    apply (rule runs_to_condition_exnI)
+     apply (rule runs_to_weaken[
+       OF encode_window_pending_match_branch_loop_step[OF loop ok tp_lt]])
+     apply auto
+    sorry
 qed
 
 lemma encode_window_c_loop_result_inv_doneD:

@@ -91,6 +91,15 @@
   `encode_window_pending_match_branch_result_inv` is also proved: the
   pending-full path throws a non-OK section, and the non-full path calls the
   pending-byte branch lemma.
+- The small-match branch now has a loop-step-strengthened wrapper:
+  `encode_window_pending_match_branch_loop_step`.  It proves the same
+  result invariant plus the `tp` measure decrease required by
+  `runs_to_whileLoop_exn'`.
+- The generated loop body has been named as `encode_window_c_loop_body`, and
+  `encode_window_c_loop_body_result_inv` checks the decomposition against that
+  exact body.  Its `gets_the find_best_match'` witness is supplied through the
+  new `encode_window_match_ok` predicate; the `len < 4` branch is proved, while
+  the COPY/fusion side is the remaining local body `sorry`.
 - The window proof now carries an explicit `encode_window_buffers_ok`
   precondition.  This is needed for target/pending pointer validity and for the
   non-aliasing facts required to preserve the source, target, pending, and
@@ -109,10 +118,14 @@ Remaining proof debt before `try_emit_add_copy`/window integration:
 - Discharge or centralize the C-varint byte-equality assumptions.
 - Prove `flush_pending` and fused ADD+COPY preservation over the same
   section/cache invariant shape.
+- Prove `encode_window_match_ok` from `build_index` plus source/target heap
+  facts, or thread it from the build-index stage into the window proof.  This
+  is the real totality/match-validity precondition for the generated
+  `gets_the (find_best_match' ...)`.
 - Prove `encode_window'_after_cache_reset_success_enc_sections_cache_inv`
   using `encode_window_c_loop_cache_inv`; reset/entry and the generated
-  pending-byte/small-match branch and zero-pending exit are no longer part of
-  the hole.
+  pending-byte/small-match branch, matcher slot, and zero-pending exit are no
+  longer part of the hole.
 - Refine `vcdiff_encode'_success_serialized_sections` so it is proved by
   composing `encode_window'_success_enc_sections_cache_inv` with
   `serialize'_writes_serialize`.
