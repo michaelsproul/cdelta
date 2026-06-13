@@ -1094,6 +1094,73 @@ proof -
     by (rule encode_window_c_loop_result_inv_ResultI[OF step])
 qed
 
+lemma runs_to_condition_exnI:
+  assumes "c s \<Longrightarrow> (f :: ('e, 'a, 's) exn_monad) \<bullet> s \<lbrace>Q\<rbrace>"
+      and "\<not> c s \<Longrightarrow> (g :: ('e, 'a, 's) exn_monad) \<bullet> s \<lbrace>Q\<rbrace>"
+  shows "condition c f g \<bullet> s \<lbrace>Q\<rbrace>"
+  unfolding condition_def
+  apply runs_to_vcg
+  using assms by simp_all
+
+lemma encode_window_pending_match_branch_result_inv:
+  assumes inv: "encode_window_c_loop_cache_inv st
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out"
+      and ok: "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+      and tp_lt: "tp < tgt_len"
+  shows "(condition (\<lambda>s. pending_cap \<le> pend_len)
+            (throw (sections_t_C.err_C_update (\<lambda>_. 1) sec))
+            (liftE (do {
+              guard (\<lambda>s. IS_VALID(8 word) s (pending +\<^sub>p uint pend_len));
+              guard (\<lambda>s. IS_VALID(8 word) s (tgt +\<^sub>p uint tp));
+              modify
+                (heap_w8_update
+                  (\<lambda>h. h(pending +\<^sub>p uint pend_len :=
+                         h (tgt +\<^sub>p uint tp))));
+              return (pend_len + 1, sec, tp + 1)
+            })) :: (sections_t_C, 32 word \<times> sections_t_C \<times> 32 word,
+                    lifted_globals) exn_monad) \<bullet> st
+         \<lbrace> \<lambda>r t. encode_window_c_loop_result_inv
+              src src_len tgt tgt_len head_p next_p
+              data data_cap inst inst_cap addr addr_cap
+              pending pending_cap src_seg tgt_bytes r t \<rbrace>"
+proof (rule runs_to_condition_exnI)
+  assume "(\<lambda>s. pending_cap \<le> pend_len) st"
+  show "(throw (sections_t_C.err_C_update (\<lambda>_. 1) sec) ::
+          (sections_t_C, 32 word \<times> sections_t_C \<times> 32 word,
+           lifted_globals) exn_monad) \<bullet> st
+        \<lbrace> \<lambda>r t. encode_window_c_loop_result_inv
+             src src_len tgt tgt_len head_p next_p
+             data data_cap inst inst_cap addr addr_cap
+             pending pending_cap src_seg tgt_bytes r t \<rbrace>"
+    apply runs_to_vcg
+    by (rule encode_window_c_loop_result_inv_ExnI) simp
+next
+  assume not_full: "\<not> (\<lambda>s. pending_cap \<le> pend_len) st"
+  have pend_lt: "pend_len < pending_cap"
+    using not_full by simp
+  show "(liftE (do {
+              guard (\<lambda>s. IS_VALID(8 word) s (pending +\<^sub>p uint pend_len));
+              guard (\<lambda>s. IS_VALID(8 word) s (tgt +\<^sub>p uint tp));
+              modify
+                (heap_w8_update
+                  (\<lambda>h. h(pending +\<^sub>p uint pend_len :=
+                         h (tgt +\<^sub>p uint tp))));
+              return (pend_len + 1, sec, tp + 1)
+            }) :: (sections_t_C, 32 word \<times> sections_t_C \<times> 32 word,
+                    lifted_globals) exn_monad) \<bullet> st
+        \<lbrace> \<lambda>r t. encode_window_c_loop_result_inv
+             src src_len tgt tgt_len head_p next_p
+             data data_cap inst inst_cap addr addr_cap
+             pending pending_cap src_seg tgt_bytes r t \<rbrace>"
+    by (rule encode_window_pending_byte_branch_result_inv
+      [OF inv ok tp_lt pend_lt])
+qed
+
 lemma encode_window_c_loop_result_inv_doneD:
   assumes inv: "encode_window_c_loop_result_inv
      src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap

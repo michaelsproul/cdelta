@@ -87,6 +87,10 @@
   `encode_window_pending_byte_branch_result_inv`.  This establishes the
   `liftE { guard; guard; heap update; return }` branch against the loop-result
   invariant that the real `whileLoop` will use.
+- The generated small-match branch wrapper
+  `encode_window_pending_match_branch_result_inv` is also proved: the
+  pending-full path throws a non-OK section, and the non-full path calls the
+  pending-byte branch lemma.
 - The window proof now carries an explicit `encode_window_buffers_ok`
   precondition.  This is needed for target/pending pointer validity and for the
   non-aliasing facts required to preserve the source, target, pending, and
@@ -107,7 +111,8 @@ Remaining proof debt before `try_emit_add_copy`/window integration:
   section/cache invariant shape.
 - Prove `encode_window'_after_cache_reset_success_enc_sections_cache_inv`
   using `encode_window_c_loop_cache_inv`; reset/entry and the generated
-  pending-byte branch/zero-pending exit are no longer part of the hole.
+  pending-byte/small-match branch and zero-pending exit are no longer part of
+  the hole.
 - Refine `vcdiff_encode'_success_serialized_sections` so it is proved by
   composing `encode_window'_success_enc_sections_cache_inv` with
   `serialize'_writes_serialize`.
