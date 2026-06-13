@@ -1315,6 +1315,186 @@ proof -
   using decodes_post by (auto simp: enc_sections_inv_def)
 qed
 
+lemma emit_run'_success_enc_cache_abs:
+  assumes abs: "enc_cache_abs s c_out"
+      and cache_wf: "enc_cache_wf c_out"
+      and size: "varint_size' sz s = Some n"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_varint_fits:
+        "\<not> inst_cap - (sections_t_C.inst_pos_C sec + 1) < n"
+      and inst_varint_valid: "\<forall>j < unat n.
+        ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j))"
+      and data_byte_fits: "sections_t_C.data_pos_C sec < data_cap"
+      and data_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec))"
+  shows "emit_run' sec data data_cap inst inst_cap fill sz \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                enc_cache_abs t c_out \<and>
+                enc_cache_wf c_out) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+  unfolding emit_run'_def
+  apply runs_to_vcg
+      apply (rule runs_to_weaken[
+        OF write_byte'_success_preserves_enc_cache_abs])
+         apply (rule abs)
+        apply (rule inst_byte_fits)
+       apply (rule inst_byte_ptr)
+     apply clarsimp
+     apply runs_to_vcg
+     apply (rule runs_to_weaken)
+      apply (rule write_varint'_success_preserves_enc_cache_abs_bounded
+        [where n = n])
+         apply assumption
+        subgoal for t
+          using size varint_size'_state_independent[of sz t s] by simp
+       apply (rule inst_varint_fits)
+      apply (intro allI impI)
+      subgoal premises prems for t j
+      proof -
+        have ptr:
+          "ptr_valid (heap_typing s)
+            (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j))"
+          using inst_varint_valid prems by auto
+        show ?thesis
+          using ptr prems by simp
+      qed
+    apply clarsimp
+    apply runs_to_vcg
+    apply (rule runs_to_weaken[
+      OF write_byte'_success_preserves_enc_cache_abs])
+       apply assumption
+      apply (rule data_byte_fits)
+     apply (simp add: data_byte_ptr)
+    apply clarsimp
+    apply runs_to_vcg
+    using cache_wf by auto
+
+lemma emit_run'_success_enc_sections_cache_inv:
+  assumes inv:
+        "enc_sections_inv s data inst addr sec src_seg tgt_len
+          data_bytes inst_bytes addr_bytes target c_out"
+      and abs: "enc_cache_abs s c_out"
+      and cache_wf: "enc_cache_wf c_out"
+      and size: "varint_size' sz s = Some n"
+      and sz_pos: "0 < unat sz"
+      and target_room:
+        "length target + unat sz \<le> tgt_len"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_byte_dist:
+        "ptr_range_distinct inst (Suc (unat (sections_t_C.inst_pos_C sec)))"
+      and inst_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_varint_fits:
+        "\<not> inst_cap - (sections_t_C.inst_pos_C sec + 1) < n"
+      and inst_varint_valid: "\<forall>j < unat n.
+        ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j))"
+      and inst_varint_inj: "\<forall>i < unat n. \<forall>j < unat n.
+        i \<noteq> j \<longrightarrow>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat i) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j)"
+      and inst_varint_prefix_disj: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+        i < n \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and inst_varint_no_overflow:
+        "unat (sections_t_C.inst_pos_C sec + 1) + unat n < 2 ^ 32"
+      and inst_varint_data_disj: "\<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+        i < n \<longrightarrow>
+        data +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and inst_varint_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+        i < n \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and data_byte_fits: "sections_t_C.data_pos_C sec < data_cap"
+      and data_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec))"
+      and data_byte_dist:
+        "ptr_range_distinct data (Suc (unat (sections_t_C.data_pos_C sec)))"
+      and data_byte_inst_disj:
+        "\<forall>i < unat (sections_t_C.inst_pos_C sec + 1 + n).
+           inst +\<^sub>p int i \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec)"
+      and data_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec)"
+  shows "emit_run' sec data data_cap inst inst_cap fill sz \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                sections_result sec'
+                  (sections_t_C.data_pos_C sec + 1)
+                  (sections_t_C.inst_pos_C sec + 1 + n)
+                  (sections_t_C.addr_pos_C sec)
+                  ENC_OK \<and>
+                enc_sections_inv t data inst addr sec' src_seg tgt_len
+                  (data_bytes @ [fill])
+                  (inst_bytes @ [0] @ varint_bytes32 sz n)
+                  addr_bytes (target @ replicate (unat sz) fill) c_out \<and>
+                enc_cache_abs t c_out \<and>
+                enc_cache_wf c_out) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  let ?section_post =
+    "\<lambda>r t.
+      (\<exists>sec'.
+        r = Result sec' \<and>
+        sections_result sec'
+          (sections_t_C.data_pos_C sec + 1)
+          (sections_t_C.inst_pos_C sec + 1 + n)
+          (sections_t_C.addr_pos_C sec)
+          ENC_OK \<and>
+        enc_sections_inv t data inst addr sec' src_seg tgt_len
+          (data_bytes @ [fill])
+          (inst_bytes @ [0] @ varint_bytes32 sz n)
+          addr_bytes (target @ replicate (unat sz) fill) c_out) \<and>
+      heap_typing t = heap_typing s"
+  let ?cache_post =
+    "\<lambda>r t.
+      (\<exists>sec'.
+        r = Result sec' \<and>
+        enc_cache_abs t c_out \<and>
+        enc_cache_wf c_out) \<and>
+      heap_typing t = heap_typing s"
+  have sections:
+    "emit_run' sec data data_cap inst inst_cap fill sz \<bullet> s
+       \<lbrace> ?section_post \<rbrace>"
+    by (rule emit_run'_success_enc_sections_inv
+      [OF inv size sz_pos target_room sec_ok inst_byte_fits
+          inst_byte_ptr inst_byte_dist inst_byte_data_disj
+          inst_byte_addr_disj inst_varint_fits inst_varint_valid
+          inst_varint_inj inst_varint_prefix_disj inst_varint_no_overflow
+          inst_varint_data_disj inst_varint_addr_disj data_byte_fits
+          data_byte_ptr data_byte_dist data_byte_inst_disj
+          data_byte_addr_disj])
+  have cache:
+    "emit_run' sec data data_cap inst inst_cap fill sz \<bullet> s
+       \<lbrace> ?cache_post \<rbrace>"
+    by (rule emit_run'_success_enc_cache_abs
+      [OF abs cache_wf size inst_byte_fits inst_byte_ptr
+          inst_varint_fits inst_varint_valid data_byte_fits data_byte_ptr])
+  have combined:
+    "emit_run' sec data data_cap inst inst_cap fill sz \<bullet> s
+       \<lbrace> \<lambda>r t. ?section_post r t \<and> ?cache_post r t \<rbrace>"
+    using sections cache by (simp add: runs_to_conj)
+  show ?thesis
+    apply (rule runs_to_weaken[OF combined])
+    by auto
+qed
+
 lemma gets_the_best_mode'_result:
   assumes "best_mode' copy_addr here s = Some m"
   shows "gets_the (best_mode' copy_addr here) \<bullet> s
