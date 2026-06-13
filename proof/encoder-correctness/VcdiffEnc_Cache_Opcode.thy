@@ -451,6 +451,14 @@ definition enc_cache_wf :: "cache \<Rightarrow> bool" where
      (\<forall>i < s_near. near c ! i < 2 ^ 32) \<and>
      (\<forall>i < same_buckets. same c ! i < 2 ^ 32)"
 
+lemma heap_typing_heap_w8_update[simp]:
+  "heap_typing (heap_w8_update f s) = heap_typing s"
+  by simp
+
+lemma enc_cache_abs_heap_w8_update[simp]:
+  "enc_cache_abs (heap_w8_update f s) c = enc_cache_abs s c"
+  by (simp add: enc_cache_abs_def)
+
 lemma enc_cache_wf_cache_init[simp]:
   "enc_cache_wf cache_init"
 proof -
@@ -812,6 +820,18 @@ lemma heap_bytes_same_arr_update[simp]:
   "heap_bytes (same_arr_''_update f s) buf n = heap_bytes s buf n"
   by (simp add: heap_bytes_def)
 
+lemma write_byte'_success_preserves_enc_cache_abs:
+  assumes abs: "enc_cache_abs s c"
+      and pos_lt: "pos < cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+  shows "write_byte' buf cap pos b \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+                   enc_cache_abs t c \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[OF write_byte'_spec])
+   using ptr_ok apply simp
+  using assms by auto
+
 lemma cache_update'_state:
   assumes near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
   shows "cache_update' addr \<bullet> s
@@ -878,6 +898,20 @@ lemma cache_update'_enc_cache_abs_wf:
                heap_bytes t buf n = heap_bytes s buf n \<rbrace>"
   apply (rule runs_to_weaken[OF cache_update'_enc_cache_abs[OF abs, where buf = buf and n = n]])
   using wf by auto
+
+lemma emit_address'_success_byte_preserves_enc_cache_abs:
+  assumes abs: "enc_cache_abs s c"
+      and mode_ge: "\<not> mode_t_C.mode_C m < (6 :: 32 word)"
+      and pos_lt: "addr_pos < addr_cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (addr_buf +\<^sub>p uint addr_pos)"
+  shows "emit_address' addr_buf addr_cap addr_pos m \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (addr_pos + 1) ENC_OK) \<and>
+                   enc_cache_abs t c \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  unfolding emit_address'_def
+  using mode_ge
+  apply simp
+  by (rule write_byte'_success_preserves_enc_cache_abs[OF abs pos_lt ptr_ok])
 
 lemma cache_reset'_enc_cache_abs:
   shows "cache_reset' \<bullet> s
