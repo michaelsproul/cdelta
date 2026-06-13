@@ -5,6 +5,10 @@ begin
 
 context vcdiff_enc_global_addresses begin
 
+lemma byte_of_unat_ucast32:
+  "(word_of_nat (unat (w :: 32 word)) :: byte) = ucast w"
+  by (simp add: word_unat.Rep_inverse)
+
 lemma emit_address'_success_varint_heap_bytes_append:
   assumes mode_lt: "mode_t_C.mode_C m < (6 :: 32 word)"
       and size: "varint_size' (mode_t_C.arg_C m) s = Some n"
@@ -1052,6 +1056,19 @@ where
              (varint_encode (unat (mode_t_C.arg_C m)))
       else wf_encoding c (unat addr) (unat here) (unat (mode_t_C.mode_C m))
              [ucast (mode_t_C.arg_C m)])"
+
+lemma enc_mode_arg_wf_mode_le8:
+  assumes "enc_mode_arg_wf c addr here m"
+  shows "unat (mode_t_C.mode_C m) \<le> 8"
+  using assms
+  unfolding enc_mode_arg_wf_def wf_encoding_def
+  by (auto simp: word_less_nat_alt s_near_def s_same_def split: if_splits)
+
+lemma enc_mode_arg_wf_mode_word_le8:
+  assumes "enc_mode_arg_wf c addr here m"
+  shows "mode_t_C.mode_C m \<le> (8 :: 32 word)"
+  using enc_mode_arg_wf_mode_le8[OF assms]
+  by (simp add: word_le_nat_alt)
 
 lemma enc_best_wf_self:
   "enc_best_wf s c addr here addr 0"
