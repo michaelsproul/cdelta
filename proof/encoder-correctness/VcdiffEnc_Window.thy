@@ -616,6 +616,152 @@ proof -
         encode_window_c_loop_inv_def)
 qed
 
+lemma encode_window_c_loop_cache_inv_pending_byte_step_c_update:
+  assumes inv: "encode_window_c_loop_cache_inv st
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out"
+      and tp_lt: "tp < tgt_len"
+      and pend_lt: "pend_len < pending_cap"
+      and pending_dist: "ptr_range_distinct pending (Suc (unat pend_len))"
+      and src_disj:
+        "\<forall>i < length src_seg.
+           src +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      and tgt_disj:
+        "\<forall>i < length tgt_bytes.
+           tgt +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      and data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      and inst_disj:
+        "\<forall>i < unat (sections_t_C.inst_pos_C sec).
+           inst +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      and addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+  shows "encode_window_c_loop_cache_inv
+     (heap_w8_update
+        (\<lambda>h. h(pending +\<^sub>p uint pend_len := h (tgt +\<^sub>p uint tp))) st)
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec (tp + 1) (pend_len + 1)
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed (pending_bytes @ [tgt_bytes ! unat tp]) c_out"
+proof -
+  have base: "encode_window_c_loop_inv st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out"
+    by (rule encode_window_c_loop_cache_invD(1)[OF inv])
+  have pend_ptr:
+    "pending +\<^sub>p uint pend_len =
+     pending +\<^sub>p int (unat pend_len)"
+    by (simp only: uint_nat)
+  have tgt_ptr:
+    "tgt +\<^sub>p uint tp = tgt +\<^sub>p int (unat tp)"
+    by (simp only: uint_nat)
+  have tp_nat_lt: "unat tp < length tgt_bytes"
+    using tp_lt encode_window_c_loop_invD(3)[OF base]
+    by (simp add: word_less_nat_alt)
+  have tgt_byte:
+    "heap_w8 st (tgt +\<^sub>p uint tp) = tgt_bytes ! unat tp"
+  proof -
+    have "heap_w8 st (tgt +\<^sub>p uint tp) =
+        heap_w8 st (tgt +\<^sub>p int (unat tp))"
+      by (simp only: tgt_ptr)
+    also have "... = heap_bytes st tgt (length tgt_bytes) ! unat tp"
+      using heap_bytes_nth[OF tp_nat_lt, of st tgt] by simp
+    also have "... = tgt_bytes ! unat tp"
+      using encode_window_c_loop_invD(5)[OF base] by simp
+    finally show ?thesis .
+  qed
+  have update_eq:
+    "heap_w8_update
+       (\<lambda>h. h(pending +\<^sub>p uint pend_len := h (tgt +\<^sub>p uint tp))) st =
+     heap_w8_update
+       (\<lambda>h. h(pending +\<^sub>p int (unat pend_len) :=
+          tgt_bytes ! unat tp)) st"
+  proof -
+    have heap_fun_eq:
+      "(\<lambda>h. h(pending +\<^sub>p uint pend_len := h (tgt +\<^sub>p uint tp))) (heap_w8 st) =
+       (\<lambda>h. h(pending +\<^sub>p int (unat pend_len) :=
+          tgt_bytes ! unat tp)) (heap_w8 st)"
+      by (intro ext) (simp only: pend_ptr tgt_byte fun_upd_apply)
+    show ?thesis
+      using heap_fun_eq by simp
+  qed
+  have src_disj_int:
+    "\<forall>i < length src_seg.
+       src +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+  proof (intro allI impI)
+    fix i
+    assume "i < length src_seg"
+    hence "src +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      using src_disj by blast
+    thus "src +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+      by (subst pend_ptr[symmetric])
+  qed
+  have tgt_disj_int:
+    "\<forall>i < length tgt_bytes.
+       tgt +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+  proof (intro allI impI)
+    fix i
+    assume "i < length tgt_bytes"
+    hence "tgt +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      using tgt_disj by blast
+    thus "tgt +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+      by (subst pend_ptr[symmetric])
+  qed
+  have data_disj_int:
+    "\<forall>i < unat (sections_t_C.data_pos_C sec).
+       data +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+  proof (intro allI impI)
+    fix i
+    assume "i < unat (sections_t_C.data_pos_C sec)"
+    hence "data +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      using data_disj by blast
+    thus "data +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+      by (subst pend_ptr[symmetric])
+  qed
+  have inst_disj_int:
+    "\<forall>i < unat (sections_t_C.inst_pos_C sec).
+       inst +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+  proof (intro allI impI)
+    fix i
+    assume "i < unat (sections_t_C.inst_pos_C sec)"
+    hence "inst +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      using inst_disj by blast
+    thus "inst +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+      by (subst pend_ptr[symmetric])
+  qed
+  have addr_disj_int:
+    "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+       addr +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+  proof (intro allI impI)
+    fix i
+    assume "i < unat (sections_t_C.addr_pos_C sec)"
+    hence "addr +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      using addr_disj by blast
+    thus "addr +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+      by (subst pend_ptr[symmetric])
+  qed
+  have step:
+    "encode_window_c_loop_cache_inv
+       (heap_w8_update
+          (\<lambda>h. h(pending +\<^sub>p int (unat pend_len) :=
+             tgt_bytes ! unat tp)) st)
+       src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+       pending pending_cap sec (tp + 1) (pend_len + 1)
+       src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+       flushed (pending_bytes @ [tgt_bytes ! unat tp]) c_out"
+    by (rule encode_window_c_loop_cache_inv_pending_byte_step
+      [OF inv tp_lt pend_lt pending_dist src_disj_int tgt_disj_int
+          data_disj_int inst_disj_int addr_disj_int])
+  show ?thesis
+    using step by (simp only: update_eq)
+qed
+
 lemma encode_window_c_loop_cache_inv_doneD:
   assumes inv: "encode_window_c_loop_cache_inv st
      src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap

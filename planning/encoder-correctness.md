@@ -78,6 +78,10 @@
   `encode_window_c_loop_cache_inv_pending_byte_step`.  It advances `tp` and
   `pend_len`, appends the target byte to the pending bytes, and preserves the
   section/cache invariant under explicit buffer-disjointness premises.
+- The C-shaped pending-byte heap update is also covered by
+  `encode_window_c_loop_cache_inv_pending_byte_step_c_update`, which bridges
+  the generated `uint` pointer arithmetic and source-target heap read back to
+  the normalized invariant step.
 - The completed-loop extraction is captured by
   `encode_window_c_loop_cache_inv_doneD`: at `tp = tgt_len` and `pend_len = 0`,
   the strengthened loop invariant yields the exact `enc_sections_inv` and cache
@@ -143,7 +147,8 @@ Then compose that fact with `vcdiff_decode'_spec_inl`.
      flushed prefix, and the cache abstraction/well-formedness facts needed by
      COPY emission.
    - Branch slots:
-     pending-byte branch uses `encode_window_c_loop_cache_inv_pending_byte_step`.
+     pending-byte branch uses
+     `encode_window_c_loop_cache_inv_pending_byte_step_c_update`.
      no-fusion branch uses non-empty `flush_pending'` preservation, then the
      appropriate `emit_copy'` section/cache wrapper.
      fused branch uses fused `try_emit_add_copy'` preservation, then an
