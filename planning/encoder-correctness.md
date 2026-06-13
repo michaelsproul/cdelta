@@ -63,6 +63,10 @@
   `encode_window_c_loop_cache_inv_pending_byte_step`.  It advances `tp` and
   `pend_len`, appends the target byte to the pending bytes, and preserves the
   section/cache invariant under explicit buffer-disjointness premises.
+- The completed-loop extraction is captured by
+  `encode_window_c_loop_cache_inv_doneD`: at `tp = tgt_len` and `pend_len = 0`,
+  the strengthened loop invariant yields the exact `enc_sections_inv` and cache
+  facts needed by the `encode_window'` success target.
 
 Remaining proof debt before `try_emit_add_copy`/window integration:
 
@@ -128,7 +132,8 @@ Then compose that fact with `vcdiff_decode'_spec_inl`.
      optional remainder `emit_copy'` wrapper.
      final flush uses non-empty `flush_pending'` preservation and
      `encoder_loop_inv_doneD`.
-   - On success, emitted sections decode to the full target.
+   - On success, `encode_window_c_loop_cache_inv_doneD` extracts the full-target
+     section/cache postcondition.
 
 5. Prove top-level encoder success theorem.
    - `serialize'` writes bytes equal to pure `serialize src tgt data inst addr`.

@@ -549,6 +549,40 @@ proof -
         encode_window_c_loop_inv_def)
 qed
 
+lemma encode_window_c_loop_cache_inv_doneD:
+  assumes inv: "encode_window_c_loop_cache_inv st
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out"
+      and tp_done: "tp = tgt_len"
+      and pend_done: "pend_len = 0"
+  shows "enc_sections_inv st data inst addr sec src_seg (length tgt_bytes)
+           data_bytes inst_bytes addr_bytes tgt_bytes c_out"
+    and "enc_cache_abs st c_out"
+    and "enc_cache_wf c_out"
+proof -
+  have base: "encode_window_c_loop_inv st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out"
+    by (rule encode_window_c_loop_cache_invD(1)[OF inv])
+  have pending_empty: "pending_bytes = []"
+    using encode_window_c_loop_invD(7)[OF base] pend_done by simp
+  have flushed_eq: "flushed = tgt_bytes"
+    using encode_window_c_loop_invD(3,12)[OF base] tp_done pending_empty
+          encoder_loop_inv_done_no_pendingD
+    by fastforce
+  show "enc_sections_inv st data inst addr sec src_seg (length tgt_bytes)
+           data_bytes inst_bytes addr_bytes tgt_bytes c_out"
+    using encode_window_c_loop_invD(13)[OF base] flushed_eq by simp
+  show "enc_cache_abs st c_out"
+    by (rule encode_window_c_loop_cache_invD(2)[OF inv])
+  show "enc_cache_wf c_out"
+    by (rule encode_window_c_loop_cache_invD(3)[OF inv])
+qed
+
 end
 
 end
