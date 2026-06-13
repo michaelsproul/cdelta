@@ -90,6 +90,10 @@
   precondition.  This is needed for target/pending pointer validity and for the
   non-aliasing facts required to preserve the source, target, pending, and
   emitted-section heap slices.
+- The zero-pending loop exit is bridged by
+  `encode_window_c_loop_result_inv_doneD`: if the generated `whileLoop` exits
+  with `(0, sec, tp)` and `tp < tgt_len` is false, the result invariant yields
+  the final `enc_sections_inv` plus cache facts directly.
 - The completed-loop extraction is captured by
   `encode_window_c_loop_cache_inv_doneD`: at `tp = tgt_len` and `pend_len = 0`,
   the strengthened loop invariant yields the exact `enc_sections_inv` and cache
@@ -102,7 +106,7 @@ Remaining proof debt before `try_emit_add_copy`/window integration:
   section/cache invariant shape.
 - Prove `encode_window'_after_cache_reset_success_enc_sections_cache_inv`
   using `encode_window_c_loop_cache_inv`; reset/entry and the generated
-  pending-byte branch are no longer part of the hole.
+  pending-byte branch/zero-pending exit are no longer part of the hole.
 - Refine `vcdiff_encode'_success_serialized_sections` so it is proved by
   composing `encode_window'_success_enc_sections_cache_inv` with
   `serialize'_writes_serialize`.
