@@ -108,6 +108,9 @@ lemma encode_window'_after_cache_reset_success_enc_sections_cache_inv:
              pending pending_cap (sections_t_C 0 0 0 0) 0 0
              src_bytes tgt_bytes [] [] [] [] [] cache_init \<and>
            heap_typing t = heap_typing s \<rbrace>"
+      and bufs_ok: "encode_window_buffers_ok s
+             src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+             pending pending_cap"
   shows "encode_window' src src_len tgt tgt_len head_p next_p
            data data_cap inst inst_cap addr addr_cap pending pending_cap \<bullet> s
           \<lbrace> \<lambda>r t. \<forall>sec. r = Result sec \<longrightarrow>
@@ -127,6 +130,9 @@ lemma encode_window'_success_enc_sections_cache_inv:
       and tgt_len_eq: "length tgt_bytes = unat tgt_len"
       and src_heap: "heap_bytes s src (length src_bytes) = src_bytes"
       and tgt_heap: "heap_bytes s tgt (length tgt_bytes) = tgt_bytes"
+      and bufs_ok: "encode_window_buffers_ok s
+             src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+             pending pending_cap"
   shows "encode_window' src src_len tgt tgt_len head_p next_p
            data data_cap inst inst_cap addr addr_cap pending pending_cap \<bullet> s
           \<lbrace> \<lambda>r t. \<forall>sec. r = Result sec \<longrightarrow>
@@ -150,7 +156,7 @@ proof -
       [OF src_len_eq tgt_len_eq src_heap tgt_heap])
   show ?thesis
     by (rule encode_window'_after_cache_reset_success_enc_sections_cache_inv
-      [OF reset_entry])
+      [OF reset_entry bufs_ok])
 qed
 
 (*
@@ -167,6 +173,9 @@ lemma vcdiff_encode'_success_serialized_sections:
       and tgt_len_eq: "length tgt_bytes = unat tgt_len"
       and src_heap: "heap_bytes s src (length src_bytes) = src_bytes"
       and tgt_heap: "heap_bytes s tgt (length tgt_bytes) = tgt_bytes"
+      and bufs_ok: "encode_window_buffers_ok s
+             src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+             pending pending_cap"
   shows "vcdiff_encode' out out_cap src src_len tgt tgt_len head_p next_p
            pending pending_cap data data_cap inst inst_cap addr addr_cap \<bullet> s
           \<lbrace> \<lambda>r t. \<forall>patch_len. r = Result patch_len \<longrightarrow>
@@ -200,7 +209,7 @@ proof -
             enc_cache_abs t c_out \<and>
             enc_cache_wf c_out) \<rbrace>"
     by (rule encode_window'_success_enc_sections_cache_inv
-      [OF src_len_eq tgt_len_eq src_heap tgt_heap])
+      [OF src_len_eq tgt_len_eq src_heap tgt_heap bufs_ok])
   note serialize_slot = serialize'_writes_serialize
   show ?thesis
     using window_slot
@@ -213,6 +222,9 @@ theorem vcdiff_encode'_success_decode_spec:
       and tgt_len_eq: "length tgt_bytes = unat tgt_len"
       and src_heap: "heap_bytes s src (length src_bytes) = src_bytes"
       and tgt_heap: "heap_bytes s tgt (length tgt_bytes) = tgt_bytes"
+      and bufs_ok: "encode_window_buffers_ok s
+             src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+             pending pending_cap"
   shows "vcdiff_encode' out out_cap src src_len tgt tgt_len head_p next_p
            pending pending_cap data data_cap inst inst_cap addr addr_cap \<bullet> s
           \<lbrace> \<lambda>r t. \<forall>patch_len. r = Result patch_len \<longrightarrow>
@@ -221,7 +233,7 @@ theorem vcdiff_encode'_success_decode_spec:
                 Inl tgt_bytes \<rbrace>"
   apply (rule runs_to_weaken[
     OF vcdiff_encode'_success_serialized_sections
-      [OF src_len_eq tgt_len_eq src_heap tgt_heap]])
+      [OF src_len_eq tgt_len_eq src_heap tgt_heap bufs_ok]])
   apply clarsimp
   subgoal premises prems for patch_len t data_bytes inst_bytes addr_bytes c_out
   proof -

@@ -425,6 +425,202 @@ lemma encode_window_c_loop_cache_invD:
     and "enc_cache_wf c_out"
   using inv by (simp_all add: encode_window_c_loop_cache_inv_def)
 
+definition encode_window_buffers_ok ::
+  "lifted_globals \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow> bool" where
+  "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap \<longleftrightarrow>
+     buf_valid st src (unat src_len) \<and>
+     buf_valid st tgt (unat tgt_len) \<and>
+     buf_valid st data (unat data_cap) \<and>
+     buf_valid st inst (unat inst_cap) \<and>
+     buf_valid st addr (unat addr_cap) \<and>
+     buf_valid st pending (unat pending_cap) \<and>
+     ptr_range_distinct data (unat data_cap) \<and>
+     ptr_range_distinct inst (unat inst_cap) \<and>
+     ptr_range_distinct addr (unat addr_cap) \<and>
+     ptr_range_distinct pending (unat pending_cap) \<and>
+     bufs_disjoint src (unat src_len) pending (unat pending_cap) \<and>
+     bufs_disjoint tgt (unat tgt_len) pending (unat pending_cap) \<and>
+     bufs_disjoint data (unat data_cap) pending (unat pending_cap) \<and>
+     bufs_disjoint inst (unat inst_cap) pending (unat pending_cap) \<and>
+     bufs_disjoint addr (unat addr_cap) pending (unat pending_cap) \<and>
+     bufs_disjoint data (unat data_cap) inst (unat inst_cap) \<and>
+     bufs_disjoint data (unat data_cap) addr (unat addr_cap) \<and>
+     bufs_disjoint inst (unat inst_cap) addr (unat addr_cap)"
+
+lemma encode_window_buffers_ok_heap_w8_update[simp]:
+  "encode_window_buffers_ok (heap_w8_update f st)
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap =
+   encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+  by (simp add: encode_window_buffers_ok_def)
+
+lemma encode_window_buffers_ok_pending_dist:
+  assumes ok: "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+      and pend_lt: "pend_len < pending_cap"
+  shows "ptr_range_distinct pending (Suc (unat pend_len))"
+proof -
+  have dist: "ptr_range_distinct pending (unat pending_cap)"
+    using ok by (simp add: encode_window_buffers_ok_def)
+  have suc_le: "unat (pend_len + 1) \<le> unat pending_cap"
+    using pend_lt by (rule unat_suc_le_of_word_less)
+  have "Suc (unat pend_len) \<le> unat pending_cap"
+    using suc_le unat_word_suc_of_less[OF pend_lt] by simp
+  thus ?thesis
+    by (rule ptr_range_distinct_mono[OF dist])
+qed
+
+lemma encode_window_buffers_ok_src_pending_disj:
+  assumes ok: "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+      and i_lt: "i < unat src_len"
+      and pend_lt: "pend_len < pending_cap"
+  shows "src +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+proof -
+  have disj: "bufs_disjoint src (unat src_len) pending (unat pending_cap)"
+    using ok by (simp add: encode_window_buffers_ok_def)
+  have p_lt: "unat pend_len < unat pending_cap"
+    using pend_lt by (simp add: word_less_nat_alt)
+  have ne: "src +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+    using disj i_lt p_lt
+    unfolding bufs_disjoint_def by blast
+  thus ?thesis
+    by (subst uint_nat)
+qed
+
+lemma encode_window_buffers_ok_tgt_pending_disj:
+  assumes ok: "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+      and i_lt: "i < unat tgt_len"
+      and pend_lt: "pend_len < pending_cap"
+  shows "tgt +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+proof -
+  have disj: "bufs_disjoint tgt (unat tgt_len) pending (unat pending_cap)"
+    using ok by (simp add: encode_window_buffers_ok_def)
+  have p_lt: "unat pend_len < unat pending_cap"
+    using pend_lt by (simp add: word_less_nat_alt)
+  have ne: "tgt +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+    using disj i_lt p_lt
+    unfolding bufs_disjoint_def by blast
+  thus ?thesis
+    by (subst uint_nat)
+qed
+
+lemma encode_window_buffers_ok_data_pending_disj:
+  assumes ok: "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+      and i_lt: "i < unat data_pos"
+      and data_le: "unat data_pos \<le> unat data_cap"
+      and pend_lt: "pend_len < pending_cap"
+  shows "data +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+proof -
+  have disj: "bufs_disjoint data (unat data_cap) pending (unat pending_cap)"
+    using ok by (simp add: encode_window_buffers_ok_def)
+  have p_lt: "unat pend_len < unat pending_cap"
+    using pend_lt by (simp add: word_less_nat_alt)
+  have i_cap: "i < unat data_cap"
+    using i_lt data_le by simp
+  have ne: "data +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+    using disj i_cap p_lt
+    unfolding bufs_disjoint_def by blast
+  thus ?thesis
+    by (subst uint_nat)
+qed
+
+lemma encode_window_buffers_ok_inst_pending_disj:
+  assumes ok: "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+      and i_lt: "i < unat inst_pos"
+      and inst_le: "unat inst_pos \<le> unat inst_cap"
+      and pend_lt: "pend_len < pending_cap"
+  shows "inst +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+proof -
+  have disj: "bufs_disjoint inst (unat inst_cap) pending (unat pending_cap)"
+    using ok by (simp add: encode_window_buffers_ok_def)
+  have p_lt: "unat pend_len < unat pending_cap"
+    using pend_lt by (simp add: word_less_nat_alt)
+  have i_cap: "i < unat inst_cap"
+    using i_lt inst_le by simp
+  have ne: "inst +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+    using disj i_cap p_lt
+    unfolding bufs_disjoint_def by blast
+  thus ?thesis
+    by (subst uint_nat)
+qed
+
+lemma encode_window_buffers_ok_addr_pending_disj:
+  assumes ok: "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+      and i_lt: "i < unat addr_pos"
+      and addr_le: "unat addr_pos \<le> unat addr_cap"
+      and pend_lt: "pend_len < pending_cap"
+  shows "addr +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+proof -
+  have disj: "bufs_disjoint addr (unat addr_cap) pending (unat pending_cap)"
+    using ok by (simp add: encode_window_buffers_ok_def)
+  have p_lt: "unat pend_len < unat pending_cap"
+    using pend_lt by (simp add: word_less_nat_alt)
+  have i_cap: "i < unat addr_cap"
+    using i_lt addr_le by simp
+  have ne: "addr +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+    using disj i_cap p_lt
+    unfolding bufs_disjoint_def by blast
+  thus ?thesis
+    by (subst uint_nat)
+qed
+
+definition encode_window_c_loop_result_inv ::
+  "8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   byte list \<Rightarrow> byte list \<Rightarrow>
+   (sections_t_C, 32 word \<times> sections_t_C \<times> 32 word) xval \<Rightarrow>
+   lifted_globals \<Rightarrow> bool" where
+  "encode_window_c_loop_result_inv
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap src_seg tgt_bytes rv st \<longleftrightarrow>
+     (case rv of
+       Exn sec \<Rightarrow> sections_t_C.err_C sec \<noteq> ENC_OK
+     | Result (pend_len, sec, tp) \<Rightarrow>
+         (\<exists>data_bytes inst_bytes addr_bytes flushed pending_bytes c_out.
+           encode_window_c_loop_cache_inv st
+             src src_len tgt tgt_len head_p next_p
+             data data_cap inst inst_cap addr addr_cap
+             pending pending_cap sec tp pend_len
+             src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+             flushed pending_bytes c_out))"
+
+lemma encode_window_c_loop_result_inv_ResultI:
+  assumes "encode_window_c_loop_cache_inv st
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes flushed pending_bytes c_out"
+  shows "encode_window_c_loop_result_inv
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap src_seg tgt_bytes (Result (pend_len, sec, tp)) st"
+  using assms by (fastforce simp: encode_window_c_loop_result_inv_def)
+
+lemma encode_window_c_loop_result_inv_ExnI:
+  assumes "sections_t_C.err_C sec \<noteq> ENC_OK"
+  shows "encode_window_c_loop_result_inv
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap src_seg tgt_bytes (Exn sec) st"
+  using assms by (simp add: encode_window_c_loop_result_inv_def)
+
 lemma encode_window_c_loop_inv_entry:
   assumes sec: "sections_result sec 0 0 0 ENC_OK"
       and src_len: "length src_seg = unat src_len"
@@ -760,6 +956,132 @@ proof -
           data_disj_int inst_disj_int addr_disj_int])
   show ?thesis
     using step by (simp only: update_eq)
+qed
+
+lemma encode_window_pending_byte_branch_result_inv:
+  assumes inv: "encode_window_c_loop_cache_inv st
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out"
+      and ok: "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+      and tp_lt: "tp < tgt_len"
+      and pend_lt: "pend_len < pending_cap"
+  shows "(liftE (do {
+            guard (\<lambda>s. IS_VALID(8 word) s (pending +\<^sub>p uint pend_len));
+            guard (\<lambda>s. IS_VALID(8 word) s (tgt +\<^sub>p uint tp));
+            modify
+              (heap_w8_update
+                (\<lambda>h. h(pending +\<^sub>p uint pend_len :=
+                       h (tgt +\<^sub>p uint tp))));
+            return (pend_len + 1, sec, tp + 1)
+          }) :: (sections_t_C, 32 word \<times> sections_t_C \<times> 32 word,
+                 lifted_globals) exn_monad) \<bullet> st
+         \<lbrace> \<lambda>r t. encode_window_c_loop_result_inv
+              src src_len tgt tgt_len head_p next_p
+              data data_cap inst inst_cap addr addr_cap
+              pending pending_cap src_seg tgt_bytes r t \<rbrace>"
+proof -
+  have base: "encode_window_c_loop_inv st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out"
+    by (rule encode_window_c_loop_cache_invD(1)[OF inv])
+  have pending_ptr:
+    "ptr_valid (heap_typing st) (pending +\<^sub>p uint pend_len)"
+  proof -
+    have valid: "buf_valid st pending (unat pending_cap)"
+      using ok by (simp add: encode_window_buffers_ok_def)
+    have p_lt: "unat pend_len < unat pending_cap"
+      using pend_lt by (simp add: word_less_nat_alt)
+    have "ptr_valid (heap_typing st) (pending +\<^sub>p int (unat pend_len))"
+      by (rule buf_validD[OF valid p_lt])
+    thus ?thesis
+      by (subst uint_nat)
+  qed
+  have tgt_ptr: "ptr_valid (heap_typing st) (tgt +\<^sub>p uint tp)"
+  proof -
+    have valid: "buf_valid st tgt (unat tgt_len)"
+      using ok by (simp add: encode_window_buffers_ok_def)
+    have p_lt: "unat tp < unat tgt_len"
+      using tp_lt by (simp add: word_less_nat_alt)
+    have "ptr_valid (heap_typing st) (tgt +\<^sub>p int (unat tp))"
+      by (rule buf_validD[OF valid p_lt])
+    thus ?thesis
+      by (subst uint_nat)
+  qed
+  have pending_dist:
+    "ptr_range_distinct pending (Suc (unat pend_len))"
+    by (rule encode_window_buffers_ok_pending_dist[OF ok pend_lt])
+  have src_disj:
+    "\<forall>i < length src_seg. src +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+  proof (intro allI impI)
+    fix i
+    assume i_lt: "i < length src_seg"
+    have "i < unat src_len"
+      using i_lt encode_window_c_loop_invD(2)[OF base] by simp
+    thus "src +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      by (rule encode_window_buffers_ok_src_pending_disj[OF ok _ pend_lt])
+  qed
+  have tgt_disj:
+    "\<forall>i < length tgt_bytes. tgt +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+  proof (intro allI impI)
+    fix i
+    assume i_lt: "i < length tgt_bytes"
+    have "i < unat tgt_len"
+      using i_lt encode_window_c_loop_invD(3)[OF base] by simp
+    thus "tgt +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      by (rule encode_window_buffers_ok_tgt_pending_disj[OF ok _ pend_lt])
+  qed
+  have data_disj:
+    "\<forall>i < unat (sections_t_C.data_pos_C sec).
+       data +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+  proof (intro allI impI)
+    fix i
+    assume i_lt: "i < unat (sections_t_C.data_pos_C sec)"
+    show "data +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      by (rule encode_window_buffers_ok_data_pending_disj
+        [OF ok i_lt encode_window_c_loop_invD(9)[OF base] pend_lt])
+  qed
+  have inst_disj:
+    "\<forall>i < unat (sections_t_C.inst_pos_C sec).
+       inst +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+  proof (intro allI impI)
+    fix i
+    assume i_lt: "i < unat (sections_t_C.inst_pos_C sec)"
+    show "inst +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      by (rule encode_window_buffers_ok_inst_pending_disj
+        [OF ok i_lt encode_window_c_loop_invD(10)[OF base] pend_lt])
+  qed
+  have addr_disj:
+    "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+       addr +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+  proof (intro allI impI)
+    fix i
+    assume i_lt: "i < unat (sections_t_C.addr_pos_C sec)"
+    show "addr +\<^sub>p int i \<noteq> pending +\<^sub>p uint pend_len"
+      by (rule encode_window_buffers_ok_addr_pending_disj
+        [OF ok i_lt encode_window_c_loop_invD(11)[OF base] pend_lt])
+  qed
+  have step:
+    "encode_window_c_loop_cache_inv
+       (heap_w8_update
+          (\<lambda>h. h(pending +\<^sub>p uint pend_len := h (tgt +\<^sub>p uint tp))) st)
+       src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+       pending pending_cap sec (tp + 1) (pend_len + 1)
+       src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+       flushed (pending_bytes @ [tgt_bytes ! unat tp]) c_out"
+    by (rule encode_window_c_loop_cache_inv_pending_byte_step_c_update
+      [OF inv tp_lt pend_lt pending_dist src_disj tgt_disj data_disj
+          inst_disj addr_disj])
+  show ?thesis
+    apply runs_to_vcg
+      apply (rule pending_ptr)
+     apply (rule tgt_ptr)
+    by (rule encode_window_c_loop_result_inv_ResultI[OF step])
 qed
 
 lemma encode_window_c_loop_cache_inv_doneD:

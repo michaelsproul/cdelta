@@ -82,6 +82,14 @@
   `encode_window_c_loop_cache_inv_pending_byte_step_c_update`, which bridges
   the generated `uint` pointer arithmetic and source-target heap read back to
   the normalized invariant step.
+- The pending-byte branch is now proved at the generated monad level by
+  `encode_window_pending_byte_branch_result_inv`.  This establishes the
+  `liftE { guard; guard; heap update; return }` branch against the loop-result
+  invariant that the real `whileLoop` will use.
+- The window proof now carries an explicit `encode_window_buffers_ok`
+  precondition.  This is needed for target/pending pointer validity and for the
+  non-aliasing facts required to preserve the source, target, pending, and
+  emitted-section heap slices.
 - The completed-loop extraction is captured by
   `encode_window_c_loop_cache_inv_doneD`: at `tp = tgt_len` and `pend_len = 0`,
   the strengthened loop invariant yields the exact `enc_sections_inv` and cache
@@ -93,8 +101,8 @@ Remaining proof debt before `try_emit_add_copy`/window integration:
 - Prove `flush_pending` and fused ADD+COPY preservation over the same
   section/cache invariant shape.
 - Prove `encode_window'_after_cache_reset_success_enc_sections_cache_inv`
-  using `encode_window_c_loop_cache_inv`; reset/entry is no longer part of the
-  hole.
+  using `encode_window_c_loop_cache_inv`; reset/entry and the generated
+  pending-byte branch are no longer part of the hole.
 - Refine `vcdiff_encode'_success_serialized_sections` so it is proved by
   composing `encode_window'_success_enc_sections_cache_inv` with
   `serialize'_writes_serialize`.
@@ -148,7 +156,7 @@ Then compose that fact with `vcdiff_decode'_spec_inl`.
      COPY emission.
    - Branch slots:
      pending-byte branch uses
-     `encode_window_c_loop_cache_inv_pending_byte_step_c_update`.
+     `encode_window_pending_byte_branch_result_inv`.
      no-fusion branch uses non-empty `flush_pending'` preservation, then the
      appropriate `emit_copy'` section/cache wrapper.
      fused branch uses fused `try_emit_add_copy'` preservation, then an
