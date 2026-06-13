@@ -40,6 +40,20 @@ The final encoder theorem should avoid byte equality with
 `serialize_from_insts`; prove instead that successful C output decodes via
 `decode_spec`.
 
+## Current Frontier
+
+- `VcdiffEnc_Emit.thy` now proves emitted-section preservation for ADD, RUN,
+  and all COPY branches.
+- `VcdiffEnc_Emit.thy` also proves `enc_sections_inv` preservation for ADD,
+  RUN, and all COPY branches.  COPY varint branches currently expose explicit
+  assumptions equating C `varint_bytes32` output with pure `varint_encode`
+  bytes.
+- The next shared interface should combine `enc_sections_inv` with
+  `enc_cache_abs`/`enc_cache_wf` across COPY emission, then use that shape for
+  `flush_pending`, fused ADD+COPY, and the window loop.
+- The remaining arithmetic bridge is a reusable theorem of the form
+  `varint_size' v s = Some n ==> varint_bytes32 v n = varint_encode (unat v)`.
+
 ## Worktree Setup
 
 Create worktrees only after the split is committed or otherwise available at a

@@ -9,8 +9,35 @@
   refinement theorem `vcdiff_decode'_spec_inl`:
   if `decode_spec patch src = Inl tgt`, the lifted C decoder returns `0`,
   writes `length tgt` to `out_len`, and writes `tgt` to `out`.
-- `CdeltaEncoder` currently only installs and AutoCorres-lifts
-  `spec/cenc/vcdiff_enc.c`; there is no encoder correctness theorem yet.
+- `CdeltaEncoderCorrectness` now contains the encoder proof split and builds
+  cleanly.  The active frontier is `proof/encoder-correctness/VcdiffEnc_Emit.thy`
+  plus the window-loop integration.
+
+## Encoder proof progress
+
+- Writer helpers cover successful byte, byte-sequence, and varint writes while
+  preserving the relevant emitted-section buffers, heap typing, and cache
+  pointer fields needed by the emit proofs.
+- ADD and RUN emitted-section and `enc_sections_inv` preservation are proved,
+  including C-varint instruction-size forms.
+- COPY emitted-section preservation is proved for all four branches:
+  small/large COPY size crossed with one-byte/varint address emission.
+- COPY `enc_sections_inv` preservation is proved for all four branches.
+  The one-byte address branches are unconditional with respect to wire bytes;
+  the varint address and large-size branches currently take explicit
+  `varint_bytes32 ... = varint_encode ...` assumptions, matching the existing
+  serialization proof style.
+- `best_mode'_encode_address_correct` connects the C address cache choice to
+  the pure decoder cache predicate used by `section_decodes_append_copy`.
+
+Remaining proof debt before `try_emit_add_copy`/window integration:
+
+- Discharge or centralize the C-varint byte-equality assumptions.
+- Carry `enc_cache_abs` and `enc_cache_wf` through COPY emission alongside
+  `enc_sections_inv`, so later COPYs can reuse the updated pure cache.
+- Prove `flush_pending` and fused ADD+COPY preservation over the same
+  section/cache invariant shape.
+- Lift these helper facts into the `encode_window` loop invariant.
 
 ## Main proof shape
 
@@ -43,11 +70,10 @@ Then compose that fact with `vcdiff_decode'_spec_inl`.
      `write_bytes'` against the pure byte-list operations.
 
 3. Prove emitted-section correctness for encoder helpers.
-   - `emit_add`, `emit_run`, `emit_copy`, and `try_emit_add_copy` preserve the
-     invariant that emitted sections decode to the target prefix already
-     covered.
-   - Track the C address cache against the pure cache used by
-     `decode_address`.
+   - `emit_add`, `emit_run`, and `emit_copy` now preserve the invariant that
+     emitted sections decode to the target prefix already covered.
+   - Next, track the C address cache against the pure cache used by
+     `decode_address` through COPY-emitting helpers.
    - Account for fused ADD+COPY by proving the corresponding default-code-table
      opcode decodes as the two intended half-instructions.
 
