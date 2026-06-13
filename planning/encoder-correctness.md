@@ -106,6 +106,11 @@
   measure and proves the loop rule obligations.  The run invariant deliberately
   carries result correctness, byte-buffer validity, and matcher totality so the
   remaining preservation gaps are explicit.
+- `encode_window'_after_cache_reset_success_enc_sections_cache_inv` now folds
+  the generated loop body to `encode_window_c_loop_body` and invokes
+  `encode_window_c_loop_while_run_inv` after `cache_reset'`; the first top-level
+  `sorry` is therefore below the reset and loop-rule boundaries rather than
+  covering the whole generated loop.
 - The window proof now carries an explicit `encode_window_buffers_ok`
   precondition.  This is needed for target/pending pointer validity and for the
   non-aliasing facts required to preserve the source, target, pending, and
