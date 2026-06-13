@@ -59,6 +59,10 @@
   normal session rejects `sorry`: `encode_window'_success_enc_sections_cache_inv`
   and `vcdiff_encode'_success_decode_spec`.  These typecheck the proposed C
   decomposition without installing fake theorems.
+- The pending-byte branch now has a concrete invariant step:
+  `encode_window_c_loop_cache_inv_pending_byte_step`.  It advances `tp` and
+  `pend_len`, appends the target byte to the pending bytes, and preserves the
+  section/cache invariant under explicit buffer-disjointness premises.
 
 Remaining proof debt before `try_emit_add_copy`/window integration:
 
@@ -117,8 +121,7 @@ Then compose that fact with `vcdiff_decode'_spec_inl`.
      flushed prefix, and the cache abstraction/well-formedness facts needed by
      COPY emission.
    - Branch slots:
-     pending-byte branch uses `encoder_loop_inv_pending_step_word` plus a
-     pending-buffer write frame; no section/cache change.
+     pending-byte branch uses `encode_window_c_loop_cache_inv_pending_byte_step`.
      no-fusion branch uses non-empty `flush_pending'` preservation, then the
      appropriate `emit_copy'` section/cache wrapper.
      fused branch uses fused `try_emit_add_copy'` preservation, then an

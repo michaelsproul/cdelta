@@ -464,6 +464,91 @@ lemma encode_window_c_loop_cache_inv_entry:
         cache_abs cache_wf
   by (simp add: encode_window_c_loop_cache_inv_def)
 
+lemma encode_window_c_loop_cache_inv_pending_byte_step:
+  assumes inv: "encode_window_c_loop_cache_inv st
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out"
+      and tp_lt: "tp < tgt_len"
+      and pend_lt: "pend_len < pending_cap"
+      and pending_dist: "ptr_range_distinct pending (Suc (unat pend_len))"
+      and src_disj:
+        "\<forall>i < length src_seg.
+           src +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+      and tgt_disj:
+        "\<forall>i < length tgt_bytes.
+           tgt +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+      and data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+      and inst_disj:
+        "\<forall>i < unat (sections_t_C.inst_pos_C sec).
+           inst +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+      and addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> pending +\<^sub>p int (unat pend_len)"
+  shows "encode_window_c_loop_cache_inv
+     (heap_w8_update
+        (\<lambda>h. h(pending +\<^sub>p int (unat pend_len) := tgt_bytes ! unat tp)) st)
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec (tp + 1) (pend_len + 1)
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed (pending_bytes @ [tgt_bytes ! unat tp]) c_out"
+proof -
+  let ?st' = "heap_w8_update
+        (\<lambda>h. h(pending +\<^sub>p int (unat pend_len) := tgt_bytes ! unat tp)) st"
+  have base: "encode_window_c_loop_inv st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out"
+    by (rule encode_window_c_loop_cache_invD(1)[OF inv])
+  have abs: "enc_cache_abs st c_out"
+    by (rule encode_window_c_loop_cache_invD(2)[OF inv])
+  have cache_wf: "enc_cache_wf c_out"
+    by (rule encode_window_c_loop_cache_invD(3)[OF inv])
+  have pend_suc: "unat (pend_len + 1) = Suc (unat pend_len)"
+    using pend_lt by (rule unat_word_suc_of_less)
+  have pend_le: "unat (pend_len + 1) \<le> unat pending_cap"
+    using pend_lt by (rule unat_suc_le_of_word_less)
+  have src_heap:
+    "heap_bytes ?st' src (length src_seg) = src_seg"
+    using encode_window_c_loop_invD(4)[OF base] src_disj
+    by (simp add: heap_bytes_update_outside)
+  have tgt_heap:
+    "heap_bytes ?st' tgt (length tgt_bytes) = tgt_bytes"
+    using encode_window_c_loop_invD(5)[OF base] tgt_disj
+    by (simp add: heap_bytes_update_outside)
+  have pending_heap_suc:
+    "heap_bytes ?st' pending (Suc (unat pend_len)) =
+       heap_bytes st pending (unat pend_len) @ [tgt_bytes ! unat tp]"
+    using heap_bytes_extend_distinct
+      [OF pending_dist, of "tgt_bytes ! unat tp" st]
+    by simp
+  have pending_heap:
+    "heap_bytes ?st' pending (unat (pend_len + 1)) =
+       pending_bytes @ [tgt_bytes ! unat tp]"
+    using encode_window_c_loop_invD(6,7)[OF base] pending_heap_suc
+    by (simp add: pend_suc)
+  have loop:
+    "encoder_loop_inv tgt_bytes (unat (tp + 1)) flushed
+       (pending_bytes @ [tgt_bytes ! unat tp])"
+    using encoder_loop_inv_pending_step_word
+      [OF encode_window_c_loop_invD(12)[OF base] tp_lt
+          encode_window_c_loop_invD(3)[OF base]] .
+  have sections:
+    "enc_sections_inv ?st' data inst addr sec src_seg (length tgt_bytes)
+       data_bytes inst_bytes addr_bytes flushed c_out"
+    using encode_window_c_loop_invD(13)[OF base] data_disj inst_disj addr_disj
+    by (auto simp: enc_sections_inv_def emitted_sections_def
+        heap_bytes_update_outside)
+  show ?thesis
+    using base abs cache_wf pend_suc pend_le src_heap tgt_heap pending_heap loop sections
+    by (simp add: encode_window_c_loop_cache_inv_def
+        encode_window_c_loop_inv_def)
+qed
+
 end
 
 end
