@@ -912,6 +912,21 @@ lemma write_bytes'_success_preserves_enc_cache_abs:
       [OF abs dst_valid src_valid]])
   by auto
 
+lemma write_varint'_success_preserves_enc_cache_abs_bounded:
+  assumes abs: "enc_cache_abs s c"
+      and size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   enc_cache_abs t c \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF write_varint'_success_preserves_cache_fields_bounded
+      [OF size fits dst_valid]])
+  using abs by (auto simp: enc_cache_abs_def)
+
 lemma cache_update'_state:
   assumes near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
   shows "cache_update' addr \<bullet> s
@@ -992,6 +1007,24 @@ lemma emit_address'_success_byte_preserves_enc_cache_abs:
   using mode_ge
   apply simp
   by (rule write_byte'_success_preserves_enc_cache_abs[OF abs pos_lt ptr_ok])
+
+lemma emit_address'_success_varint_preserves_enc_cache_abs:
+  assumes abs: "enc_cache_abs s c"
+      and mode_lt: "mode_t_C.mode_C m < (6 :: 32 word)"
+      and size: "varint_size' (mode_t_C.arg_C m) s = Some n"
+      and fits: "\<not> addr_cap - addr_pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s)
+             (addr_buf +\<^sub>p uint (addr_pos + of_nat j))"
+  shows "emit_address' addr_buf addr_cap addr_pos m \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (addr_pos + n) ENC_OK) \<and>
+                   enc_cache_abs t c \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  unfolding emit_address'_def
+  using mode_lt
+  apply simp
+  by (rule write_varint'_success_preserves_enc_cache_abs_bounded
+      [OF abs size fits dst_valid])
 
 lemma cache_reset'_enc_cache_abs:
   shows "cache_reset' \<bullet> s

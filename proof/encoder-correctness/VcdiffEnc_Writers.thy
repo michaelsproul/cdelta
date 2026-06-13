@@ -2235,6 +2235,96 @@ lemma write_varint'_success_preserves_near_ptr_bounded:
     [OF size fits dst_valid _])
   using varint_size'_shift_ok[OF size] by auto
 
+lemma write_varint_loop_preserves_cache_fields:
+  fixes len pos :: "32 word"
+  assumes dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and shift_ok: "\<forall>i. i < len \<longrightarrow>
+           7 * len - 7 - 7 * i < (0x20 :: 32 word)"
+  shows "(whileLoop (\<lambda>(i :: 32 word) st. i < len)
+           (\<lambda>i. do {
+              guard (\<lambda>st. 7 * len - 7 - 7 * i < (0x20 :: 32 word));
+              guard (\<lambda>st. ptr_valid (heap_typing st) (buf +\<^sub>p uint (pos + i)));
+              modify (heap_w8_update
+                (\<lambda>h. h(buf +\<^sub>p uint (pos + i) :=
+                  if i + 1 < len
+                  then (ucast
+                    ((ucast
+                      (ucast ((v >> unat (7 * len - 7 - 7 * i)) && 0x7F)
+                        :: 8 word) :: 32 word) || 0x80) :: 8 word)
+                  else (ucast ((v >> unat (7 * len - 7 - 7 * i)) && 0x7F)
+                        :: 8 word))));
+              return (i + 1)
+           }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result len \<and>
+            near_ptr_'' t = near_ptr_'' s \<and>
+            near_arr_'' t = near_arr_'' s \<and>
+            same_arr_'' t = same_arr_'' s \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((i :: 32 word), _). unat len - unat i)"
+      and I = "\<lambda>i st. unat i \<le> unat len \<and>
+             near_ptr_'' st = near_ptr_'' s \<and>
+             near_arr_'' st = near_arr_'' s \<and>
+             same_arr_'' st = same_arr_'' s \<and>
+             heap_typing st = heap_typing s"])
+     subgoal by simp
+     subgoal by unat_arith
+    subgoal premises prems for i st
+    proof -
+      have len_le: "unat len \<le> unat i"
+        using prems(1) by (simp add: word_less_nat_alt)
+      have i_eq: "i = len"
+        using prems(2) len_le by (metis antisym_conv word_unat.Rep_inject)
+      show ?thesis
+        using prems(2) i_eq by simp
+    qed
+  subgoal for i st
+    using dst_valid[rule_format, of "unat i"]
+          shift_ok[rule_format, of i]
+    by (auto simp: runs_to.rep_eq run_bind run_guard run_modify
+                   word_less_nat_alt word_unat.Rep_inverse
+             intro: unat_suc_le_of_word_less
+                    unat_measure_decrease_of_word_less)
+  done
+
+lemma write_varint'_success_preserves_cache_fields:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and shift_ok: "\<forall>i. i < n \<longrightarrow>
+           7 * n - 7 - 7 * i < (0x20 :: 32 word)"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   near_ptr_'' t = near_ptr_'' s \<and>
+                   near_arr_'' t = near_arr_'' s \<and>
+                   same_arr_'' t = same_arr_'' s \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  unfolding write_varint'_def
+  apply runs_to_vcg
+  using size fits
+  apply simp
+  apply runs_to_vcg
+  apply (rule runs_to_weaken[
+    OF write_varint_loop_preserves_cache_fields[OF dst_valid shift_ok]])
+  by auto
+
+lemma write_varint'_success_preserves_cache_fields_bounded:
+  assumes size: "varint_size' v s = Some n"
+      and fits: "\<not> cap - pos < n"
+      and dst_valid: "\<forall>j < unat n.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   near_ptr_'' t = near_ptr_'' s \<and>
+                   near_arr_'' t = near_arr_'' s \<and>
+                   same_arr_'' t = same_arr_'' s \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule write_varint'_success_preserves_cache_fields
+    [OF size fits dst_valid _])
+  using varint_size'_shift_ok[OF size] by auto
+
 lemma write_bytes_loop_preserves_heap_bytes:
   fixes len pos src_off :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
