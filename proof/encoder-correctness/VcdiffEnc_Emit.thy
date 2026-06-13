@@ -2357,6 +2357,28 @@ lemma try_emit_add_copy'_pend_len_zero_noop:
   apply runs_to_vcg
   done
 
+lemma try_emit_add_copy'_pend_len_zero_enc_sections_cache_inv:
+  assumes inv:
+        "enc_sections_inv s data inst addr_buf sec src_seg tgt_len
+          data_bytes inst_bytes addr_bytes target c_out"
+      and abs: "enc_cache_abs s c_out"
+      and cache_wf: "enc_cache_wf c_out"
+  shows "try_emit_add_copy' sec data data_cap inst inst_cap addr_buf addr_cap
+            pending 0 copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>f.
+                r = Result f \<and>
+                fused_t_C.s_C f = sec \<and>
+                fused_t_C.fused_C f = 0 \<and>
+                enc_sections_inv t data inst addr_buf (fused_t_C.s_C f)
+                  src_seg tgt_len data_bytes inst_bytes addr_bytes target c_out \<and>
+                enc_cache_abs t c_out \<and>
+                enc_cache_wf c_out) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF try_emit_add_copy'_pend_len_zero_noop])
+  using inv abs cache_wf by auto
+
 (* Nontrivial COPY/flush/fused preservation needs these shared facts:
    best_mode'_encode_address_correct for the C cache state,
    section_decodes_copy_append,
