@@ -55,10 +55,19 @@
   `encoder_sections_serialize_decode`.  Thus a proved window postcondition of
   `enc_sections_inv ... tgt ...` plus the existing serialize bridge is enough
   to conclude `decode_spec (serialize src tgt data inst addr) src = Inl tgt`.
-- `VcdiffEnc_Correct.thy` also contains two checked `oops` targets, because the
-  normal session rejects `sorry`: `encode_window'_success_enc_sections_cache_inv`
-  and `vcdiff_encode'_success_decode_spec`.  These typecheck the proposed C
-  decomposition without installing fake theorems.
+- `CdeltaEncoderCorrectness` is temporarily in `quick_and_dirty` mode so the
+  decomposition can install `sorry` lemmas and check how they compose.
+- `VcdiffEnc_Correct.thy` has two installed `sorry` C-glue lemmas:
+  `encode_window'_success_enc_sections_cache_inv` and
+  `vcdiff_encode'_success_serialized_sections`.  The public
+  `vcdiff_encode'_success_decode_spec` theorem is no longer a stub: it is
+  proved from the serialized-sections glue lemma and the pure
+  `section_decodes_serialize_decode` bridge.
+- The `vcdiff_encode'_success_serialized_sections` scaffold explicitly invokes
+  `encode_window'_success_enc_sections_cache_inv`, so the proposed window
+  postcondition is checked at the C top-level boundary.  The remaining `sorry`
+  there is the build-index/serialize glue, including the large
+  `serialize'_writes_serialize` premise package.
 - The pending-byte branch now has a concrete invariant step:
   `encode_window_c_loop_cache_inv_pending_byte_step`.  It advances `tp` and
   `pend_len`, appends the target byte to the pending bytes, and preserves the
@@ -75,9 +84,11 @@ Remaining proof debt before `try_emit_add_copy`/window integration:
   section/cache invariant shape.
 - Prove the `encode_window'_success_enc_sections_cache_inv` target using
   `encode_window_c_loop_cache_inv`.
-- Compose `encode_window'_success_enc_sections_cache_inv`,
-  `serialize'_writes_serialize`, and `encoder_sections_serialize_decode` into
-  the public `vcdiff_encode'_success_decode_spec` target.
+- Refine `vcdiff_encode'_success_serialized_sections` so it is proved by
+  composing `encode_window'_success_enc_sections_cache_inv` with
+  `serialize'_writes_serialize`.
+- Once the two installed `sorry` lemmas are discharged, turn
+  `CdeltaEncoderCorrectness` back to `quick_and_dirty = false`.
 
 ## Main proof shape
 
