@@ -1501,7 +1501,6 @@ lemma emit_copy'_small_addr_byte_success_enc_sections_inv:
       and addr_ok: "unat copy_addr < length src_seg + length target"
       and target_room: "length target + unat copy_len \<le> tgt_len"
       and sec_ok: "sections_t_C.err_C sec = ENC_OK"
-      and near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
       and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
       and inst_byte_ptr:
         "ptr_valid (heap_typing s)
@@ -1546,6 +1545,8 @@ lemma emit_copy'_small_addr_byte_success_enc_sections_inv:
               heap_typing t = heap_typing s \<rbrace>"
 proof -
   let ?op = "single_copy_opcode' copy_len (mode_t_C.mode_C m)"
+  have near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
+    by (rule enc_cache_abs_near_ptr_lt_word[OF abs])
   have mode_wf:
     "enc_mode_arg_wf c_out copy_addr here m"
     by (rule best_mode'_encode_address_correct[OF abs cache_wf bm])
@@ -1618,7 +1619,6 @@ lemma emit_copy'_small_addr_byte_success_enc_sections_cache_inv:
       and addr_ok: "unat copy_addr < length src_seg + length target"
       and target_room: "length target + unat copy_len \<le> tgt_len"
       and sec_ok: "sections_t_C.err_C sec = ENC_OK"
-      and near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
       and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
       and inst_byte_ptr:
         "ptr_valid (heap_typing s)
@@ -1685,10 +1685,9 @@ proof -
           heap_typing t = heap_typing s \<rbrace>"
     by (rule emit_copy'_small_addr_byte_success_enc_sections_inv
       [OF inv abs cache_wf bm sz_ge sz_le mode_ge here_eq addr_ok
-          target_room sec_ok near_ptr_lt inst_byte_fits inst_byte_ptr
-          inst_byte_dist inst_byte_data_disj inst_byte_addr_disj
-          addr_byte_fits addr_byte_ptr addr_byte_dist addr_byte_data_disj
-          addr_byte_inst_disj])
+          target_room sec_ok inst_byte_fits inst_byte_ptr inst_byte_dist
+          inst_byte_data_disj inst_byte_addr_disj addr_byte_fits
+          addr_byte_ptr addr_byte_dist addr_byte_data_disj addr_byte_inst_disj])
   have cache:
     "emit_copy' sec inst inst_cap addr_buf addr_cap copy_addr here copy_len \<bullet> s
        \<lbrace> \<lambda>r t.
