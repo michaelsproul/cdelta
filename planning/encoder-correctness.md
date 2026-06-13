@@ -29,12 +29,18 @@
   serialization proof style.
 - `best_mode'_encode_address_correct` connects the C address cache choice to
   the pure decoder cache predicate used by `section_decodes_append_copy`.
-- Cache abstraction preservation is now proved for successful byte writes and
-  byte-form `emit_address'`.
+- Cache abstraction preservation is now proved for successful byte writes,
+  byte-sequence writes, and byte-form `emit_address'`.
+- The small ADD branch has a combined
+  `enc_sections_inv` + `enc_cache_abs` + `enc_cache_wf` success wrapper:
+  `emit_add'_small_success_enc_sections_cache_inv`.
 - The small COPY / one-byte-address branch has a combined
   `enc_sections_inv` + `enc_cache_abs` + `enc_cache_wf` success wrapper:
   `emit_copy'_small_addr_byte_success_enc_sections_cache_inv`.
   Its near-pointer bound is derived from `enc_cache_abs`.
+- The `try_emit_add_copy'` pending-length-zero path has a no-op combined
+  invariant wrapper:
+  `try_emit_add_copy'_pend_len_zero_enc_sections_cache_inv`.
 
 Remaining proof debt before `try_emit_add_copy`/window integration:
 
@@ -83,9 +89,10 @@ Then compose that fact with `vcdiff_decode'_spec_inl`.
 3. Prove emitted-section correctness for encoder helpers.
    - `emit_add`, `emit_run`, and `emit_copy` now preserve the invariant that
      emitted sections decode to the target prefix already covered.
-   - The small COPY / one-byte-address branch now tracks the C address cache
-     against the pure cache used by `decode_address`; extend this to branches
-     that write varints after adding a cheap varint-write cache frame.
+   - Small ADD and small COPY / one-byte-address branches now track the C
+     address cache against the pure cache used by `decode_address`; extend this
+     to branches that write varints after adding a cheap varint-write cache
+     frame.
    - Account for fused ADD+COPY by proving the corresponding default-code-table
      opcode decodes as the two intended half-instructions.
 

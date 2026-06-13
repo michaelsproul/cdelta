@@ -48,9 +48,12 @@ The final encoder theorem should avoid byte equality with
   RUN, and all COPY branches.  COPY varint branches currently expose explicit
   assumptions equating C `varint_bytes32` output with pure `varint_encode`
   bytes.
-- The small COPY / one-byte-address branch now has a combined
-  `enc_sections_inv` + `enc_cache_abs` + `enc_cache_wf` success wrapper, and
-  byte writes/byte-form `emit_address'` have cache-frame lemmas.
+- Byte writes, byte-sequence writes, and byte-form `emit_address'` now have
+  cache-frame lemmas.
+- The small ADD branch and the small COPY / one-byte-address branch now have
+  combined `enc_sections_inv` + `enc_cache_abs` + `enc_cache_wf` success
+  wrappers.  The pending-length-zero `try_emit_add_copy'` path has a no-op
+  combined wrapper as well.
 - The next shared interface should extend that combined shape to the remaining
   COPY branches, then use it for `flush_pending`, fused ADD+COPY, and the
   window loop.  Avoid broad direct `write_varint'` loop cache-invariant proofs:
