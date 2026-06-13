@@ -1002,6 +1002,132 @@ lemma section_decodes_append_copy_add_fused:
 
 context vcdiff_enc_global_addresses begin
 
+lemma section_decodes_prefix_add_cvarint:
+  assumes size: "varint_size' sz s = Some n"
+      and bs_len: "length bs = unat sz"
+      and tgt_ok: "length tgt + unat sz \<le> tgt_len"
+  shows
+    "section_decodes_prefix src_seg tgt_len
+       bs ([1] @ varint_bytes32 sz n) [] c tgt (tgt @ bs) c"
+proof -
+  let ?st =
+    "\<lparr> ds_data_rem = undefined, ds_inst_rem = undefined,
+       ds_addr_rem = undefined, ds_cache = c, ds_tgt = tgt \<rparr>"
+  have vdec:
+    "varint_decode (varint_bytes32 sz n @ []) = Some (unat sz, [])"
+    using varint_decode_varint_bytes32[OF size, of "[]"] by simp
+  have raw:
+    "decode_one src_seg (length src_seg) tgt_len
+       (?st \<lparr> ds_data_rem := bs, ds_inst_rem := (1 :: byte) # varint_bytes32 sz n @ [],
+              ds_addr_rem := [] \<rparr>) =
+     Inl (?st \<lparr> ds_data_rem := [], ds_inst_rem := [], ds_addr_rem := [],
+              ds_tgt := ds_tgt ?st @ bs \<rparr>)"
+    unfolding decode_one_def pop_byte_def Let_def
+    using bs_len tgt_ok vdec
+    by (simp add: default_entry_def resolve_size_def exec_half_def
+                  add_hi_def noop_hi_def)
+  let ?st_done =
+    "\<lparr> ds_data_rem = [], ds_inst_rem = [], ds_addr_rem = [],
+       ds_cache = c, ds_tgt = tgt @ bs \<rparr>"
+  have loop_done:
+    "decode_loop (length (varint_bytes32 sz n)) src_seg (length src_seg)
+       tgt_len ?st_done = Inl ?st_done"
+    by (rule decode_loop_fuel_empty) simp
+  show ?thesis
+    using raw loop_done
+    by (simp add: section_decodes_prefix_def)
+qed
+
+lemma section_decodes_prefix_append_add_cvarint:
+  assumes old:
+    "section_decodes_prefix src_seg tgt_len data inst addr c0 tgt0 tgt c"
+      and size: "varint_size' sz s = Some n"
+      and bs_len: "length bs = unat sz"
+      and tgt_ok: "length tgt + unat sz \<le> tgt_len"
+  shows
+    "section_decodes_prefix src_seg tgt_len
+       (data @ bs) (inst @ [1] @ varint_bytes32 sz n) addr
+       c0 tgt0 (tgt @ bs) c"
+  using section_decodes_prefix_append
+        [OF old section_decodes_prefix_add_cvarint[OF size bs_len tgt_ok]]
+  by simp
+
+lemma section_decodes_append_add_cvarint:
+  assumes old: "section_decodes src_seg tgt_len data inst addr tgt c"
+      and size: "varint_size' sz s = Some n"
+      and bs_len: "length bs = unat sz"
+      and tgt_ok: "length tgt + unat sz \<le> tgt_len"
+  shows
+    "section_decodes src_seg tgt_len
+       (data @ bs) (inst @ [1] @ varint_bytes32 sz n) addr
+       (tgt @ bs) c"
+  by (rule section_decodesI,
+      rule section_decodes_prefix_append_add_cvarint
+        [OF section_decodesD[OF old] size bs_len tgt_ok])
+
+lemma section_decodes_prefix_run_cvarint:
+  assumes size: "varint_size' sz s = Some n"
+      and sz_pos: "0 < unat sz"
+      and tgt_ok: "length tgt + unat sz \<le> tgt_len"
+  shows
+    "section_decodes_prefix src_seg tgt_len
+       [b] ([0] @ varint_bytes32 sz n) [] c tgt
+       (tgt @ replicate (unat sz) b) c"
+proof -
+  let ?st =
+    "\<lparr> ds_data_rem = undefined, ds_inst_rem = undefined,
+       ds_addr_rem = undefined, ds_cache = c, ds_tgt = tgt \<rparr>"
+  have vdec:
+    "varint_decode (varint_bytes32 sz n @ []) = Some (unat sz, [])"
+    using varint_decode_varint_bytes32[OF size, of "[]"] by simp
+  have raw:
+    "decode_one src_seg (length src_seg) tgt_len
+       (?st \<lparr> ds_data_rem := b # [], ds_inst_rem := (0 :: byte) # varint_bytes32 sz n @ [],
+              ds_addr_rem := [] \<rparr>) =
+     Inl (?st \<lparr> ds_data_rem := [], ds_inst_rem := [], ds_addr_rem := [],
+              ds_tgt := ds_tgt ?st @ replicate (unat sz) b \<rparr>)"
+    unfolding decode_one_def pop_byte_def Let_def
+    using sz_pos tgt_ok vdec
+    by (simp add: default_entry_def resolve_size_def exec_half_def
+                  run_hi_def noop_hi_def pop_byte_def)
+  let ?st_done =
+    "\<lparr> ds_data_rem = [], ds_inst_rem = [], ds_addr_rem = [],
+       ds_cache = c, ds_tgt = tgt @ replicate (unat sz) b \<rparr>"
+  have loop_done:
+    "decode_loop (length (varint_bytes32 sz n)) src_seg (length src_seg)
+       tgt_len ?st_done = Inl ?st_done"
+    by (rule decode_loop_fuel_empty) simp
+  show ?thesis
+    using raw loop_done
+    by (simp add: section_decodes_prefix_def)
+qed
+
+lemma section_decodes_prefix_append_run_cvarint:
+  assumes old:
+    "section_decodes_prefix src_seg tgt_len data inst addr c0 tgt0 tgt c"
+      and size: "varint_size' sz s = Some n"
+      and sz_pos: "0 < unat sz"
+      and tgt_ok: "length tgt + unat sz \<le> tgt_len"
+  shows
+    "section_decodes_prefix src_seg tgt_len
+       (data @ [b]) (inst @ [0] @ varint_bytes32 sz n) addr
+       c0 tgt0 (tgt @ replicate (unat sz) b) c"
+  using section_decodes_prefix_append
+        [OF old section_decodes_prefix_run_cvarint[OF size sz_pos tgt_ok]]
+  by simp
+
+lemma section_decodes_append_run_cvarint:
+  assumes old: "section_decodes src_seg tgt_len data inst addr tgt c"
+      and size: "varint_size' sz s = Some n"
+      and sz_pos: "0 < unat sz"
+      and tgt_ok: "length tgt + unat sz \<le> tgt_len"
+  shows
+    "section_decodes src_seg tgt_len
+       (data @ [b]) (inst @ [0] @ varint_bytes32 sz n) addr
+       (tgt @ replicate (unat sz) b) c"
+  by (rule section_decodesI,
+      rule section_decodes_prefix_append_run_cvarint
+        [OF section_decodesD[OF old] size sz_pos tgt_ok])
 
 definition enc_sections_inv ::
   "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow> sections_t_C \<Rightarrow>

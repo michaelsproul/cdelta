@@ -398,15 +398,14 @@ lemma emit_run'_success_emitted_sections:
     apply (clarsimp simp: sections_result_def emitted_sections_def sec_ok emitted)
   done
 
-(* Needed wire facts to remove the explicit post-decode premises below:
-   section_decodes_add_append and section_decodes_run_append. *)
-
 lemma emit_add'_small_success_enc_sections_inv:
   assumes inv:
         "enc_sections_inv s data inst addr sec src_seg tgt_len
           data_bytes inst_bytes addr_bytes target c_out"
       and sz_ge: "(1 :: 32 word) \<le> sz"
       and sz_le: "sz \<le> (17 :: 32 word)"
+      and target_room:
+        "length target + unat sz \<le> tgt_len"
       and sec_ok: "sections_t_C.err_C sec = ENC_OK"
       and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
       and inst_byte_ptr:
@@ -450,11 +449,6 @@ lemma emit_add'_small_success_enc_sections_inv:
       and data_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
         i < sz \<longrightarrow>
         addr +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
-      and decodes_post:
-        "section_decodes src_seg tgt_len
-          (data_bytes @ heap_bytes_word s pending off sz)
-          (inst_bytes @ [ucast (1 + sz)])
-          addr_bytes target c_out"
   shows "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
            \<lbrace> \<lambda>r t.
               (\<exists>sec'.
@@ -467,8 +461,50 @@ lemma emit_add'_small_success_enc_sections_inv:
                 enc_sections_inv t data inst addr sec' src_seg tgt_len
                   (data_bytes @ heap_bytes_word s pending off sz)
                   (inst_bytes @ [ucast (1 + sz)])
-                  addr_bytes target c_out) \<and>
+                  addr_bytes (target @ heap_bytes_word s pending off sz) c_out) \<and>
               heap_typing t = heap_typing s \<rbrace>"
+proof -
+  let ?bs = "heap_bytes_word s pending off sz"
+  have len32: "length ?bs < 2 ^ 32"
+    using unat_lt2p[of sz] by simp
+  have sz_nat_ge: "1 \<le> unat sz"
+    using sz_ge by (simp add: word_le_nat_alt)
+  have sz_nat_le: "unat sz \<le> 17"
+    using sz_le by (simp add: word_le_nat_alt)
+  have cast_eq: "(1 + word_of_nat (unat sz) :: byte) = ucast (1 + sz)"
+  proof -
+    have no32: "unat (1 + sz :: 32 word) = 1 + unat sz"
+      using sz_nat_le by (simp add: unat_word_ariths)
+    have ucast_unat: "unat (ucast (1 + sz) :: byte) = 1 + unat sz"
+      using no32 sz_nat_le by (simp add: unat_ucast)
+    have byte_unat: "unat ((1 :: byte) + word_of_nat (unat sz)) = 1 + unat sz"
+    proof -
+      have sz_lt256: "unat sz < 256"
+        using sz_nat_le by simp
+      have word_unat: "unat (word_of_nat (unat sz) :: byte) = unat sz"
+        using sz_lt256 by (simp add: unat_ucast)
+      have sum_lt: "1 + unat sz < 256"
+        using sz_nat_le by simp
+      show ?thesis
+        using word_unat sum_lt by (simp add: unat_word_ariths)
+    qed
+    show ?thesis
+      using byte_unat ucast_unat by (metis word_unat.Rep_inject)
+  qed
+  have inst_bytes_eq:
+    "add_inst_bytes (length ?bs) = [ucast (1 + sz)]"
+    using sz_nat_ge sz_nat_le cast_eq
+    by (simp add: add_inst_bytes_def find_single_add_opcode_def)
+  have decodes_post:
+    "section_decodes src_seg tgt_len
+      (data_bytes @ ?bs)
+      (inst_bytes @ [ucast (1 + sz)])
+      addr_bytes (target @ ?bs) c_out"
+    using section_decodes_append_add
+      [OF enc_sections_invD(2)[OF inv] len32]
+          target_room inst_bytes_eq
+    by simp
+  show ?thesis
   apply (rule runs_to_weaken[
     OF emit_add'_small_success_emitted_sections
       [OF enc_sections_invD(1)[OF inv] sz_ge sz_le sec_ok inst_byte_fits
@@ -477,12 +513,16 @@ lemma emit_add'_small_success_enc_sections_inv:
           data_pending_disj data_inj data_prefix_disj data_no_overflow
           data_inst_disj data_addr_disj]])
   using decodes_post by (auto simp: enc_sections_inv_def)
+qed
 
 lemma emit_run'_success_enc_sections_inv:
   assumes inv:
         "enc_sections_inv s data inst addr sec src_seg tgt_len
           data_bytes inst_bytes addr_bytes target c_out"
       and size: "varint_size' sz s = Some n"
+      and sz_pos: "0 < unat sz"
+      and target_room:
+        "length target + unat sz \<le> tgt_len"
       and sec_ok: "sections_t_C.err_C sec = ENC_OK"
       and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
       and inst_byte_ptr:
@@ -528,11 +568,6 @@ lemma emit_run'_success_enc_sections_inv:
       and data_byte_addr_disj:
         "\<forall>i < unat (sections_t_C.addr_pos_C sec).
            addr +\<^sub>p int i \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec)"
-      and decodes_post:
-        "section_decodes src_seg tgt_len
-          (data_bytes @ [fill])
-          (inst_bytes @ [0] @ varint_bytes32 sz n)
-          addr_bytes target c_out"
   shows "emit_run' sec data data_cap inst inst_cap fill sz \<bullet> s
            \<lbrace> \<lambda>r t.
               (\<exists>sec'.
@@ -545,8 +580,17 @@ lemma emit_run'_success_enc_sections_inv:
                 enc_sections_inv t data inst addr sec' src_seg tgt_len
                   (data_bytes @ [fill])
                   (inst_bytes @ [0] @ varint_bytes32 sz n)
-                  addr_bytes target c_out) \<and>
+                  addr_bytes (target @ replicate (unat sz) fill) c_out) \<and>
               heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have decodes_post:
+    "section_decodes src_seg tgt_len
+      (data_bytes @ [fill])
+      (inst_bytes @ [0] @ varint_bytes32 sz n)
+      addr_bytes (target @ replicate (unat sz) fill) c_out"
+    by (rule section_decodes_append_run_cvarint
+      [OF enc_sections_invD(2)[OF inv] size sz_pos target_room])
+  show ?thesis
   apply (rule runs_to_weaken[
     OF emit_run'_success_emitted_sections
       [OF enc_sections_invD(1)[OF inv] size sec_ok inst_byte_fits
@@ -557,6 +601,7 @@ lemma emit_run'_success_enc_sections_inv:
           data_byte_ptr data_byte_dist data_byte_inst_disj
           data_byte_addr_disj]])
   using decodes_post by (auto simp: enc_sections_inv_def)
+qed
 
 lemma try_emit_add_copy'_pend_len_zero_noop:
   shows "try_emit_add_copy' sec data data_cap inst inst_cap addr_buf addr_cap
