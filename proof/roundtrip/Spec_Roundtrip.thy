@@ -3402,6 +3402,83 @@ proof -
                   pending_scan_init_def)
 qed
 
+fun raw_inst_no_copy :: "raw_inst \<Rightarrow> bool" where
+  "raw_inst_no_copy (RAdd _) = True"
+| "raw_inst_no_copy (RRun _ _) = True"
+| "raw_inst_no_copy (RCopy _ _) = False"
+
+lemma append_add_inst_no_copy:
+  assumes "\<forall>i \<in> set out. raw_inst_no_copy i"
+  shows "\<forall>i \<in> set (append_add_inst bs out). raw_inst_no_copy i"
+  using assms by (auto simp: append_add_inst_def)
+
+lemma close_pending_run_no_copy:
+  assumes "\<forall>i \<in> set (ps_out s). raw_inst_no_copy i"
+  shows "\<forall>i \<in> set (ps_out (close_pending_run s)). raw_inst_no_copy i"
+  using assms append_add_inst_no_copy[of "ps_out s" "ps_add s"]
+  by (cases "ps_run_byte s")
+     (auto simp: close_pending_run_def split: if_splits)
+
+lemma pending_scan_step_no_copy:
+  assumes "\<forall>i \<in> set (ps_out s). raw_inst_no_copy i"
+  shows "\<forall>i \<in> set (ps_out (pending_scan_step s b)). raw_inst_no_copy i"
+  using assms close_pending_run_no_copy[of s]
+  by (cases "ps_run_byte s") (auto simp: pending_scan_step_def split: if_splits)
+
+lemma pending_scan_fold_no_copy:
+  assumes "\<forall>i \<in> set (ps_out s). raw_inst_no_copy i"
+  shows "\<forall>i \<in> set (ps_out (foldl pending_scan_step s bs)). raw_inst_no_copy i"
+  using assms
+proof (induction bs arbitrary: s)
+  case Nil
+  then show ?case by simp
+next
+  case (Cons b bs)
+  have step: "\<forall>i \<in> set (ps_out (pending_scan_step s b)). raw_inst_no_copy i"
+    by (rule pending_scan_step_no_copy[OF Cons.prems])
+  show ?case
+    using Cons.IH[OF step] by simp
+qed
+
+lemma flush_pending_insts_no_copy:
+  "\<forall>i \<in> set (flush_pending_insts pending). raw_inst_no_copy i"
+proof -
+  let ?s = "close_pending_run (foldl pending_scan_step pending_scan_init pending)"
+  have fold: "\<forall>i \<in> set (ps_out (foldl pending_scan_step pending_scan_init pending)).
+      raw_inst_no_copy i"
+    by (rule pending_scan_fold_no_copy) (simp add: pending_scan_init_def)
+  have close: "\<forall>i \<in> set (ps_out ?s). raw_inst_no_copy i"
+    by (rule close_pending_run_no_copy[OF fold])
+  show ?thesis
+    using append_add_inst_no_copy[OF close]
+    by (simp add: flush_pending_insts_def Let_def)
+qed
+
+lemma exec_inst_list_no_copy_append_ex:
+  assumes "\<forall>i \<in> set insts. raw_inst_no_copy i"
+  shows "\<exists>bs. exec_inst_list src insts acc = acc @ bs"
+  using assms
+proof (induction insts arbitrary: acc)
+  case Nil
+  then show ?case by simp
+next
+  case (Cons i insts)
+  show ?case
+  proof (cases i)
+    case (RAdd bs)
+    then show ?thesis
+      using Cons.IH[of "acc @ bs"] Cons.prems by auto
+  next
+    case (RRun b n)
+    then show ?thesis
+      using Cons.IH[of "acc @ replicate n b"] Cons.prems by auto
+  next
+    case (RCopy a n)
+    then show ?thesis
+      using Cons.prems by simp
+  qed
+qed
+
 lemma fused_copy_len_spec_le:
   assumes "fused_copy_len_spec mode copy_len = Some csz"
   shows "csz \<le> copy_len"
@@ -3691,6 +3768,112 @@ lemma buffer_pending_byte_spec_sections_decode_inv:
   using inv
   by (auto simp: full_state_sections_decode_inv_def
                  buffer_pending_byte_spec_def)
+
+lemma full_state_sections_decode_inv_append_decode_one:
+  assumes inv: "full_state_sections_decode_inv src tgt st"
+      and step:
+        "\<And>data_tail inst_tail addr_tail.
+        decode_one src (length src) (length tgt)
+           \<lparr> ds_data_rem = data @ data_tail
+           , ds_inst_rem = inst @ inst_tail
+           , ds_addr_rem = addr @ addr_tail
+           , ds_cache = enc_cache st
+           , ds_tgt = take (enc_flushed st) tgt \<rparr>
+         = Inl \<lparr> ds_data_rem = data_tail
+                , ds_inst_rem = inst_tail
+                , ds_addr_rem = addr_tail
+                , ds_cache = cache'
+                , ds_tgt = take flushed' tgt \<rparr>"
+      and inst_ne: "inst \<noteq> []"
+      and data_eq: "enc_data st' = enc_data st @ data"
+      and inst_eq: "enc_inst st' = enc_inst st @ inst"
+      and addr_eq: "enc_addr st' = enc_addr st @ addr"
+      and cache_eq: "enc_cache st' = cache'"
+      and flushed_eq: "enc_flushed st' = flushed'"
+  shows "full_state_sections_decode_inv src tgt st'"
+proof -
+  obtain fuel where fuel_le: "fuel \<le> length (enc_inst st)"
+    and dec: "\<And>data_tail inst_tail addr_tail.
+          decode_prefix_steps fuel src (length src) (length tgt)
+            \<lparr> ds_data_rem = enc_data st @ data_tail
+            , ds_inst_rem = enc_inst st @ inst_tail
+            , ds_addr_rem = enc_addr st @ addr_tail
+            , ds_cache = cache_init
+            , ds_tgt = [] \<rparr>
+          = Inl \<lparr> ds_data_rem = data_tail
+                  , ds_inst_rem = inst_tail
+                  , ds_addr_rem = addr_tail
+                  , ds_cache = enc_cache st
+                  , ds_tgt = take (enc_flushed st) tgt \<rparr>"
+    using inv by (auto simp: full_state_sections_decode_inv_def)
+  have fuel'_le: "Suc fuel \<le> length (enc_inst st')"
+    using fuel_le inst_ne inst_eq by (cases inst) auto
+  have dec':
+    "\<And>data_tail inst_tail addr_tail.
+      decode_prefix_steps (Suc fuel) src (length src) (length tgt)
+        \<lparr> ds_data_rem = enc_data st' @ data_tail
+        , ds_inst_rem = enc_inst st' @ inst_tail
+        , ds_addr_rem = enc_addr st' @ addr_tail
+        , ds_cache = cache_init
+        , ds_tgt = [] \<rparr>
+      = Inl \<lparr> ds_data_rem = data_tail
+              , ds_inst_rem = inst_tail
+              , ds_addr_rem = addr_tail
+              , ds_cache = enc_cache st'
+              , ds_tgt = take (enc_flushed st') tgt \<rparr>"
+  proof -
+    fix data_tail inst_tail addr_tail
+    let ?mid =
+      "\<lparr> ds_data_rem = data @ data_tail
+       , ds_inst_rem = inst @ inst_tail
+       , ds_addr_rem = addr @ addr_tail
+       , ds_cache = enc_cache st
+       , ds_tgt = take (enc_flushed st) tgt \<rparr>"
+    let ?out =
+      "\<lparr> ds_data_rem = data_tail
+       , ds_inst_rem = inst_tail
+       , ds_addr_rem = addr_tail
+       , ds_cache = cache'
+       , ds_tgt = take flushed' tgt \<rparr>"
+    have old:
+      "decode_prefix_steps fuel src (length src) (length tgt)
+        \<lparr> ds_data_rem = enc_data st @ (data @ data_tail)
+        , ds_inst_rem = enc_inst st @ (inst @ inst_tail)
+        , ds_addr_rem = enc_addr st @ (addr @ addr_tail)
+        , ds_cache = cache_init
+        , ds_tgt = [] \<rparr> = Inl ?mid"
+      using dec[of "data @ data_tail" "inst @ inst_tail" "addr @ addr_tail"]
+      by simp
+    have one:
+      "decode_prefix_steps 1 src (length src) (length tgt) ?mid = Inl ?out"
+      using step[of data_tail inst_tail addr_tail] by simp
+    have combined:
+      "decode_prefix_steps (fuel + 1) src (length src) (length tgt)
+        \<lparr> ds_data_rem = enc_data st @ (data @ data_tail)
+        , ds_inst_rem = enc_inst st @ (inst @ inst_tail)
+        , ds_addr_rem = enc_addr st @ (addr @ addr_tail)
+        , ds_cache = cache_init
+        , ds_tgt = [] \<rparr> = Inl ?out"
+      by (rule decode_prefix_steps_append[OF old one])
+    show
+      "decode_prefix_steps (Suc fuel) src (length src) (length tgt)
+        \<lparr> ds_data_rem = enc_data st' @ data_tail
+        , ds_inst_rem = enc_inst st' @ inst_tail
+        , ds_addr_rem = enc_addr st' @ addr_tail
+        , ds_cache = cache_init
+        , ds_tgt = [] \<rparr>
+      = Inl \<lparr> ds_data_rem = data_tail
+              , ds_inst_rem = inst_tail
+              , ds_addr_rem = addr_tail
+              , ds_cache = enc_cache st'
+              , ds_tgt = take (enc_flushed st') tgt \<rparr>"
+      using combined data_eq inst_eq addr_eq cache_eq flushed_eq
+      by (simp add: add.commute add.left_commute)
+  qed
+  show ?thesis
+    using fuel'_le dec'
+    by (auto simp: full_state_sections_decode_inv_def)
+qed
 
 lemma emit_inst_spec_sections_decode_inv:
   assumes inv: "full_state_sections_decode_inv src tgt st"
@@ -4015,6 +4198,132 @@ next
     by (simp add: emit_insts_spec_def)
 qed
 
+lemma emit_insts_spec_no_copy_sections_decode_inv:
+  assumes inv: "full_state_sections_decode_inv src tgt st"
+      and src_len: "src_len = length src"
+      and old_tgt: "enc_flushed st \<le> length tgt"
+      and final_exec:
+        "exec_inst_list src insts (take (enc_flushed st) tgt) =
+         take final_tp tgt"
+      and final_tgt: "final_tp \<le> length tgt"
+      and len32: "length tgt < 2 ^ 32"
+      and wf: "wf_insts_aux src insts (take (enc_flushed st) tgt)"
+      and nocopy: "\<forall>i \<in> set insts. raw_inst_no_copy i"
+  shows "full_state_sections_decode_inv src tgt
+           (emit_insts_spec src_len insts st)"
+  using inv old_tgt final_exec wf nocopy
+proof (induction insts arbitrary: st)
+  case Nil
+  then show ?case
+    by (simp add: emit_insts_spec_def)
+next
+  case (Cons i insts)
+  let ?old = "take (enc_flushed st) tgt"
+  let ?mid = "exec_inst src i ?old"
+  let ?st1 = "emit_inst_spec src_len i st"
+  have nocopy_i: "raw_inst_no_copy i"
+    using Cons.prems(5) by simp
+  have nocopy_rest: "\<forall>j \<in> set insts. raw_inst_no_copy j"
+    using Cons.prems(5) by simp
+  obtain rest_bytes where rest_append:
+    "exec_inst_list src insts ?mid = ?mid @ rest_bytes"
+    using exec_inst_list_no_copy_append_ex[OF nocopy_rest, of src ?mid]
+    by blast
+  have final_mid:
+    "?mid @ rest_bytes = take final_tp tgt"
+    using Cons.prems(3) rest_append by simp
+  have mid_len_le: "length ?mid \<le> final_tp"
+  proof -
+    have "length (?mid @ rest_bytes) = length (take final_tp tgt)"
+      using final_mid by simp
+    hence "length ?mid + length rest_bytes = length (take final_tp tgt)"
+      by simp
+    hence "length ?mid \<le> length (take final_tp tgt)"
+      by linarith
+    also have "\<dots> = final_tp"
+      using final_tgt by simp
+    finally show ?thesis .
+  qed
+  have mid_tgt: "?mid = take (length ?mid) tgt"
+  proof -
+    have "?mid = take (length ?mid) (?mid @ rest_bytes)"
+      by simp
+    also have "\<dots> = take (length ?mid) (take final_tp tgt)"
+      using final_mid by simp
+    also have "\<dots> = take (length ?mid) tgt"
+      using mid_len_le by simp
+    finally show ?thesis .
+  qed
+  have old_len: "length ?old = enc_flushed st"
+    using Cons.prems(2) by simp
+  have st1_flushed: "enc_flushed ?st1 = length ?mid"
+    by (rule emit_inst_spec_enc_flushed_exec[OF old_len])
+  have new_tgt: "enc_flushed ?st1 \<le> length tgt"
+    using st1_flushed mid_len_le final_tgt by simp
+  have exec:
+    "exec_inst src i (take (enc_flushed st) tgt) =
+     take (enc_flushed ?st1) tgt"
+    using mid_tgt st1_flushed by simp
+  have wf32:
+    "case i of
+       RAdd bs \<Rightarrow> length bs > 0 \<and> length bs < 2 ^ 32
+     | RRun _ n \<Rightarrow> n > 0 \<and> n < 2 ^ 32
+     | RCopy a n \<Rightarrow>
+         n > 0 \<and> n < 2 ^ 32 \<and> a < 2 ^ 32
+         \<and> a < length src + enc_flushed st
+         \<and> length src + enc_flushed st < 2 ^ 32"
+  proof (cases i)
+    case (RAdd bs)
+    have pos: "length bs > 0"
+      using Cons.prems(4) RAdd by simp
+    have "length bs \<le> length ?mid"
+      using RAdd by simp
+    also have "\<dots> \<le> final_tp"
+      by (rule mid_len_le)
+    also have "\<dots> \<le> length tgt"
+      by (rule final_tgt)
+    finally have "length bs < 2 ^ 32"
+      using len32 by linarith
+    with pos RAdd show ?thesis
+      by simp
+  next
+    case (RRun b n)
+    have pos: "n > 0"
+      using Cons.prems(4) RRun by simp
+    have "n \<le> length ?mid"
+      using RRun by simp
+    also have "\<dots> \<le> final_tp"
+      by (rule mid_len_le)
+    also have "\<dots> \<le> length tgt"
+      by (rule final_tgt)
+    finally have "n < 2 ^ 32"
+      using len32 by linarith
+    with pos RRun show ?thesis
+      by simp
+  next
+    case (RCopy a n)
+    then show ?thesis
+      using nocopy_i by simp
+  qed
+  have one:
+    "full_state_sections_decode_inv src tgt ?st1"
+    by (rule emit_inst_spec_sections_decode_inv
+        [OF Cons.prems(1) src_len Cons.prems(2) new_tgt exec wf32])
+  have rest_exec:
+    "exec_inst_list src insts (take (enc_flushed ?st1) tgt) =
+     take final_tp tgt"
+    using Cons.prems(3) exec by simp
+  have wf_rest_mid: "wf_insts_aux src insts ?mid"
+    using Cons.prems(4) nocopy_i
+    by (cases i) simp_all
+  have wf_rest:
+    "wf_insts_aux src insts (take (enc_flushed ?st1) tgt)"
+    using wf_rest_mid exec by simp
+  show ?case
+    using Cons.IH[OF one new_tgt rest_exec wf_rest nocopy_rest]
+    by (simp add: emit_insts_spec_def)
+qed
+
 lemma flush_pending_spec_sections_decode_inv:
   assumes inv:
     "full_state_sections_decode_inv src tgt
@@ -4023,6 +4332,62 @@ lemma flush_pending_spec_sections_decode_inv:
            (flush_pending_spec src_len st)"
   using inv
   by (auto simp: flush_pending_spec_def full_state_sections_decode_inv_def)
+
+lemma flush_pending_insts_sections_decode_inv:
+  assumes trace_inv: "encode_window_full_trace_inv src tgt st"
+      and sections_inv: "full_state_sections_decode_inv src tgt st"
+      and src_len: "src_len = length src"
+      and len32: "length src + length tgt < 2 ^ 32"
+  shows "full_state_sections_decode_inv src tgt
+           (emit_insts_spec src_len (flush_pending_insts (enc_pending st)) st)"
+proof -
+  have tp: "enc_tp st \<le> length tgt"
+    and fl: "enc_flushed st \<le> enc_tp st"
+    and pending: "enc_pending st =
+      take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt)"
+    using encode_window_full_trace_invD[OF trace_inv] by simp_all
+  have old_tgt: "enc_flushed st \<le> length tgt"
+    using fl tp by simp
+  have tgt32: "length tgt < 2 ^ 32"
+    using len32 by linarith
+  have final_exec:
+    "exec_inst_list src (flush_pending_insts (enc_pending st))
+       (take (enc_flushed st) tgt) =
+     take (enc_tp st) tgt"
+  proof -
+    have "exec_inst_list src (flush_pending_insts (enc_pending st))
+       (take (enc_flushed st) tgt) =
+      take (enc_flushed st) tgt @ enc_pending st"
+      by (simp add: flush_pending_insts_exec)
+    also have "\<dots> = take (enc_tp st) tgt"
+    proof -
+      have "take (enc_flushed st) tgt
+          @ take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt) =
+        take (enc_flushed st + (enc_tp st - enc_flushed st)) tgt"
+        by (simp add: take_add)
+      also have "\<dots> = take (enc_tp st) tgt"
+        using fl by simp
+      finally show ?thesis
+        using pending by simp
+    qed
+    finally show ?thesis .
+  qed
+  show ?thesis
+    by (rule emit_insts_spec_no_copy_sections_decode_inv
+        [OF sections_inv src_len old_tgt final_exec tp tgt32
+            flush_pending_insts_wf_aux flush_pending_insts_no_copy])
+qed
+
+lemma flush_pending_spec_full_sections_decode_inv:
+  assumes trace_inv: "encode_window_full_trace_inv src tgt st"
+      and sections_inv: "full_state_sections_decode_inv src tgt st"
+      and src_len: "src_len = length src"
+      and len32: "length src + length tgt < 2 ^ 32"
+  shows "full_state_sections_decode_inv src tgt
+           (flush_pending_spec src_len st)"
+  by (rule flush_pending_spec_sections_decode_inv
+      [OF flush_pending_insts_sections_decode_inv
+          [OF trace_inv sections_inv src_len len32]])
 
 lemma emit_copy_spec_sections_decode_inv:
   assumes inv: "full_state_sections_decode_inv src tgt st"
@@ -4363,6 +4728,177 @@ proof -
   show ?thesis
     using tp'_bound fl'_eq tp'_eq exec' wf' st'_eq
     by (simp add: encode_window_full_trace_inv_def)
+qed
+
+lemma try_emit_add_copy_spec_sections_decode_inv:
+  assumes try_some:
+        "try_emit_add_copy_spec (length src) copy_addr copy_len st = Some st'"
+      and sec_inv: "full_state_sections_decode_inv src tgt st"
+      and trace_inv: "encode_window_full_trace_inv src tgt st"
+      and src_bd: "length src < 2 ^ 32"
+      and combined_bd: "length src + length tgt < 2 ^ 32"
+      and addr_bound: "copy_addr + copy_len \<le> length src"
+      and tgt_bound: "enc_tp st + copy_len \<le> length tgt"
+      and match: "\<forall>k < copy_len.
+            src ! (copy_addr + k) = tgt ! (enc_tp st + k)"
+  shows "full_state_sections_decode_inv src tgt st'"
+proof -
+  obtain mode abytes cache' where ea:
+    "encode_address (enc_cache st) copy_addr (length src + enc_tp st) =
+      (mode, abytes, cache')"
+    by (cases "encode_address (enc_cache st) copy_addr (length src + enc_tp st)")
+       auto
+  from try_some ea obtain csz op where
+      add_pos: "1 \<le> length (enc_pending st)"
+      and min_copy: "min_match \<le> copy_len"
+      and fused: "fused_copy_len_spec mode copy_len = Some csz"
+      and opcode:
+        "find_add_copy_opcode (length (enc_pending st)) csz mode = Some op"
+      and st'_eq:
+        "st' =
+          st \<lparr> enc_tp := enc_tp st + csz
+             , enc_flushed := enc_flushed st + length (enc_pending st) + csz
+             , enc_pending := []
+             , enc_data := enc_data st @ enc_pending st
+             , enc_inst := enc_inst st @ [word_of_nat op]
+             , enc_addr := enc_addr st @ abytes
+             , enc_cache := cache'
+             , enc_trace := enc_trace st
+                 @ [RAdd (enc_pending st), RCopy copy_addr csz] \<rparr>"
+    by (auto simp: try_emit_add_copy_spec_def Let_def
+        split: option.splits if_splits)
+  have tp: "enc_tp st \<le> length tgt"
+    and fl: "enc_flushed st \<le> enc_tp st"
+    and pending: "enc_pending st =
+      take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt)"
+    using encode_window_full_trace_invD[OF trace_inv] by simp_all
+  have pending_len: "length (enc_pending st) = enc_tp st - enc_flushed st"
+    by (rule encode_window_full_trace_inv_pending_len[OF trace_inv])
+  have csz_le: "csz \<le> copy_len"
+    by (rule fused_copy_len_spec_le[OF fused])
+  have csz_pos: "0 < csz"
+    using fused min_copy
+    by (auto simp: fused_copy_len_spec_def min_match_def split: if_splits)
+  have add_prefix:
+    "take (enc_flushed st) tgt @ enc_pending st = take (enc_tp st) tgt"
+  proof -
+    have "take (enc_tp st) tgt =
+        take (enc_flushed st + (enc_tp st - enc_flushed st)) tgt"
+      using fl by simp
+    also have "\<dots> =
+        take (enc_flushed st) tgt
+        @ take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt)"
+      by (simp add: take_add)
+    also have "\<dots> = take (enc_flushed st) tgt @ enc_pending st"
+      using pending by simp
+    finally show ?thesis by simp
+  qed
+  have copy_addr32: "copy_addr < 2 ^ 32"
+    using addr_bound src_bd by linarith
+  have here_eq:
+    "length src + length (take (enc_flushed st) tgt) + length (enc_pending st)
+     = length src + enc_tp st"
+    using fl tp pending_len by simp
+  have here32:
+    "length src + length (take (enc_flushed st) tgt)
+       + length (enc_pending st) < 2 ^ 32"
+    using here_eq combined_bd tp by linarith
+  have addr_ok:
+    "copy_addr < length src + length (take (enc_flushed st) tgt)
+       + length (enc_pending st)"
+    using addr_bound csz_pos csz_le here_eq by linarith
+  have tgt_ok:
+    "length (take (enc_flushed st) tgt) + length (enc_pending st) + csz
+       \<le> length tgt"
+    using fl tp pending_len tgt_bound csz_le by simp
+  have wf:
+    "wf_encoding (enc_cache st) copy_addr
+       (length src + length (take (enc_flushed st) tgt)
+          + length (enc_pending st)) mode abytes"
+    and cache'_eq: "cache' = cache_update (enc_cache st) copy_addr"
+  proof -
+    have take_fl: "length (take (enc_flushed st) tgt) = enc_flushed st"
+      using fl tp by simp
+    have enc_wf:
+      "wf_encoding (enc_cache st) copy_addr
+         (length src + enc_tp st) mode abytes"
+      and enc_cache:
+        "cache' = cache_update (enc_cache st) copy_addr"
+      using encode_address_wf[of copy_addr "length src + enc_tp st"
+            "enc_cache st"] ea copy_addr32 combined_bd tp
+      by auto
+    show "wf_encoding (enc_cache st) copy_addr
+       (length src + length (take (enc_flushed st) tgt)
+          + length (enc_pending st)) mode abytes"
+      using enc_wf take_fl pending_len fl by simp
+    show "cache' = cache_update (enc_cache st) copy_addr"
+      by (rule enc_cache)
+  qed
+  have copy_addr_bound: "copy_addr + csz \<le> length src"
+    using addr_bound csz_le by linarith
+  have copy_tgt_bound: "enc_tp st + csz \<le> length tgt"
+    using tgt_bound csz_le by linarith
+  have copy_match:
+    "\<forall>k < csz. src ! (copy_addr + k) = tgt ! (enc_tp st + k)"
+    using match csz_le by auto
+  have copy_exec:
+    "copy_loop src (take (enc_tp st) tgt) copy_addr csz =
+      take (enc_tp st + csz) tgt"
+    by (rule copy_loop_source_match_take
+        [OF copy_addr_bound copy_tgt_bound copy_match])
+  have flushed'_eq: "enc_flushed st' = enc_tp st + csz"
+    using st'_eq pending_len fl by simp
+  have step:
+    "\<And>data_tail inst_tail addr_tail.
+     decode_one src (length src) (length tgt)
+       \<lparr> ds_data_rem = enc_pending st @ data_tail
+       , ds_inst_rem = [word_of_nat op] @ inst_tail
+       , ds_addr_rem = abytes @ addr_tail
+       , ds_cache = enc_cache st
+       , ds_tgt = take (enc_flushed st) tgt \<rparr>
+     = Inl \<lparr> ds_data_rem = data_tail
+            , ds_inst_rem = inst_tail
+            , ds_addr_rem = addr_tail
+            , ds_cache = cache'
+            , ds_tgt = take (enc_flushed st') tgt \<rparr>"
+  proof -
+    fix data_tail inst_tail addr_tail
+    let ?dst =
+      "\<lparr> ds_data_rem = undefined, ds_inst_rem = undefined,
+         ds_addr_rem = undefined, ds_cache = enc_cache st,
+         ds_tgt = take (enc_flushed st) tgt \<rparr>"
+    have raw:
+      "decode_one src (length src) (length tgt)
+         (?dst \<lparr> ds_data_rem := enc_pending st @ data_tail
+             , ds_inst_rem := word_of_nat op # inst_tail
+             , ds_addr_rem := abytes @ addr_tail \<rparr>) =
+       Inl (?dst \<lparr> ds_data_rem := data_tail
+               , ds_inst_rem := inst_tail
+               , ds_addr_rem := addr_tail
+               , ds_cache := cache_update (ds_cache ?dst) copy_addr
+               , ds_tgt := copy_loop src (ds_tgt ?dst @ enc_pending st)
+                    copy_addr csz \<rparr>)"
+      by (rule decode_one_add_copy_fused_suffix
+          [where copy_sz = csz and mode = mode])
+         (use opcode copy_addr32 here32 addr_ok tgt_ok wf in simp_all)
+    show "decode_one src (length src) (length tgt)
+       \<lparr> ds_data_rem = enc_pending st @ data_tail
+       , ds_inst_rem = [word_of_nat op] @ inst_tail
+       , ds_addr_rem = abytes @ addr_tail
+       , ds_cache = enc_cache st
+       , ds_tgt = take (enc_flushed st) tgt \<rparr>
+     = Inl \<lparr> ds_data_rem = data_tail
+            , ds_inst_rem = inst_tail
+            , ds_addr_rem = addr_tail
+            , ds_cache = cache'
+            , ds_tgt = take (enc_flushed st') tgt \<rparr>"
+      using raw add_prefix copy_exec cache'_eq flushed'_eq
+      by simp
+  qed
+  show ?thesis
+    by (rule full_state_sections_decode_inv_append_decode_one
+        [OF sec_inv step])
+       (use st'_eq in simp_all)
 qed
 
 lemma try_emit_add_copy_spec_progress:
