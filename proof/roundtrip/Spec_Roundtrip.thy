@@ -2831,13 +2831,207 @@ proof -
   qed
 qed
 
+lemma exec_inst_list_append:
+  "exec_inst_list src (xs @ ys) acc =
+     exec_inst_list src ys (exec_inst_list src xs acc)"
+  by (induction xs arbitrary: acc) simp_all
+
+lemma wf_insts_aux_append:
+  "wf_insts_aux src (xs @ ys) acc =
+     (wf_insts_aux src xs acc \<and>
+      wf_insts_aux src ys (exec_inst_list src xs acc))"
+proof (induction xs arbitrary: acc)
+  case Nil
+  then show ?case by simp
+next
+  case (Cons i xs)
+  show ?case
+  proof (cases i)
+    case (RAdd bs)
+    then show ?thesis
+      using Cons.IH[of "acc @ bs"] by simp
+  next
+    case (RCopy a n)
+    then show ?thesis
+      using Cons.IH[of "copy_loop src acc a n"] by simp
+  next
+    case (RRun b n)
+    then show ?thesis
+      using Cons.IH[of "acc @ replicate n b"] by simp
+  qed
+qed
+
+definition pending_scan_tail :: "pending_scan \<Rightarrow> byte list" where
+  "pending_scan_tail s =
+     ps_add s @
+       (case ps_run_byte s of
+          None \<Rightarrow> []
+        | Some b \<Rightarrow> replicate (ps_run_len s) b)"
+
+lemma append_add_inst_exec:
+  "exec_inst_list src (append_add_inst bs out) acc =
+     exec_inst_list src out acc @ bs"
+  by (simp add: append_add_inst_def exec_inst_list_append)
+
+lemma close_pending_run_exec_tail:
+  "exec_inst_list src (ps_out (close_pending_run s)) acc
+     @ pending_scan_tail (close_pending_run s) =
+   exec_inst_list src (ps_out s) acc @ pending_scan_tail s"
+  by (cases "ps_run_byte s")
+     (auto simp: close_pending_run_def pending_scan_tail_def
+                 append_add_inst_exec exec_inst_list_append
+           split: if_splits)
+
+lemma close_pending_run_no_run:
+  "ps_run_byte (close_pending_run s) = None"
+  by (cases "ps_run_byte s")
+     (auto simp: close_pending_run_def split: if_splits)
+
+lemma pending_scan_step_exec_tail:
+  "exec_inst_list src (ps_out (pending_scan_step s b)) acc
+     @ pending_scan_tail (pending_scan_step s b) =
+   exec_inst_list src (ps_out s) acc @ pending_scan_tail s @ [b]"
+proof (cases "ps_run_byte s")
+  case None
+  then show ?thesis
+    by (simp add: pending_scan_step_def pending_scan_tail_def)
+next
+  case (Some rb)
+  show ?thesis
+  proof (cases "b = rb")
+    case True
+    with Some show ?thesis
+      by (simp add: pending_scan_step_def pending_scan_tail_def
+                    replicate_append_same)
+  next
+    case False
+    have tail_close: "pending_scan_tail (close_pending_run s) =
+        ps_add (close_pending_run s)"
+      by (simp add: pending_scan_tail_def close_pending_run_no_run)
+    from Some False show ?thesis
+      using close_pending_run_exec_tail[of src s acc] tail_close
+      by (simp add: pending_scan_step_def pending_scan_tail_def)
+  qed
+qed
+
+lemma pending_scan_fold_exec_tail:
+  "exec_inst_list src (ps_out (foldl pending_scan_step s bs)) acc
+     @ pending_scan_tail (foldl pending_scan_step s bs) =
+   exec_inst_list src (ps_out s) acc @ pending_scan_tail s @ bs"
+proof (induction bs arbitrary: s acc)
+  case Nil
+  then show ?case by simp
+next
+  case (Cons b bs)
+  have step:
+    "exec_inst_list src (ps_out (pending_scan_step s b)) acc
+       @ pending_scan_tail (pending_scan_step s b) =
+     exec_inst_list src (ps_out s) acc @ pending_scan_tail s @ [b]"
+    by (rule pending_scan_step_exec_tail)
+  show ?case
+    using Cons.IH[of "pending_scan_step s b" acc] step by simp
+qed
+
+lemma pending_scan_init_tail:
+  "pending_scan_tail pending_scan_init = []"
+  by (simp add: pending_scan_tail_def pending_scan_init_def)
+
 lemma flush_pending_insts_exec:
   "exec_inst_list src (flush_pending_insts pending) acc = acc @ pending"
-  sorry
+proof -
+  let ?s0 = "pending_scan_init"
+  let ?s1 = "foldl pending_scan_step ?s0 pending"
+  let ?s2 = "close_pending_run ?s1"
+  have fold:
+    "exec_inst_list src (ps_out ?s1) acc @ pending_scan_tail ?s1 =
+     acc @ pending"
+    using pending_scan_fold_exec_tail[of src ?s0 pending acc]
+    by (simp add: pending_scan_init_def pending_scan_tail_def)
+  have close:
+    "exec_inst_list src (ps_out ?s2) acc @ pending_scan_tail ?s2 =
+     acc @ pending"
+    using close_pending_run_exec_tail[of src ?s1 acc] fold by simp
+  have tail: "pending_scan_tail ?s2 = ps_add ?s2"
+    by (simp add: pending_scan_tail_def close_pending_run_no_run)
+  show ?thesis
+    using close tail
+    by (simp add: flush_pending_insts_def append_add_inst_exec Let_def)
+qed
 
 lemma flush_pending_insts_wf_aux:
   "wf_insts_aux src (flush_pending_insts pending) acc"
-  sorry
+proof -
+  have add: "\<And>bs out acc.
+      wf_insts_aux src out acc \<Longrightarrow>
+      wf_insts_aux src (append_add_inst bs out) acc"
+    by (simp add: append_add_inst_def wf_insts_aux_append)
+  have close: "\<And>(s::pending_scan) acc.
+      wf_insts_aux src (ps_out s) acc \<Longrightarrow>
+      wf_insts_aux src (ps_out (close_pending_run s)) acc"
+  proof -
+    fix s :: pending_scan
+    fix acc
+    assume wf: "wf_insts_aux src (ps_out s) acc"
+    show "wf_insts_aux src (ps_out (close_pending_run s)) acc"
+    proof (cases "ps_run_byte s")
+      case None
+      then show ?thesis
+        using wf by (simp add: close_pending_run_def)
+    next
+      case (Some b)
+      show ?thesis
+      proof (cases "min_run \<le> ps_run_len s")
+        case True
+        hence len_pos: "0 < ps_run_len s"
+          by (simp add: min_run_def)
+        have wf_add:
+          "wf_insts_aux src (append_add_inst (ps_add s) (ps_out s)) acc"
+          using wf by (rule add)
+        from Some True len_pos wf_add show ?thesis
+          by (simp add: close_pending_run_def wf_insts_aux_append
+                        append_add_inst_exec)
+      next
+        case False
+        with Some wf show ?thesis
+          by (simp add: close_pending_run_def)
+      qed
+    qed
+  qed
+  have step: "\<And>b (s::pending_scan) acc.
+      wf_insts_aux src (ps_out s) acc \<Longrightarrow>
+      wf_insts_aux src (ps_out (pending_scan_step s b)) acc"
+  proof -
+    fix b
+    fix s :: pending_scan
+    fix acc
+    assume wf: "wf_insts_aux src (ps_out s) acc"
+    show "wf_insts_aux src (ps_out (pending_scan_step s b)) acc"
+    proof (cases "ps_run_byte s")
+      case None
+      with wf show ?thesis
+        by (simp add: pending_scan_step_def)
+    next
+      case (Some rb)
+      show ?thesis
+      proof (cases "b = rb")
+        case True
+        with Some wf show ?thesis
+          by (simp add: pending_scan_step_def)
+      next
+        case False
+        with Some close[OF wf] show ?thesis
+          by (simp add: pending_scan_step_def)
+      qed
+    qed
+  qed
+  have fold: "\<And>(s::pending_scan) acc.
+      wf_insts_aux src (ps_out s) acc \<Longrightarrow>
+      wf_insts_aux src (ps_out (foldl pending_scan_step s pending)) acc"
+    by (induction pending arbitrary: s acc) (auto intro: step)
+  show ?thesis
+    by (simp add: flush_pending_insts_def Let_def add close fold
+                  pending_scan_init_def)
+qed
 
 lemma try_emit_add_copy_spec_trace_exec:
   assumes "try_emit_add_copy_spec src_len copy_addr copy_len st = Some st'"
@@ -2854,9 +3048,38 @@ lemma flush_pending_spec_trace_exec:
   assumes "exec_inst_list src (enc_trace st) [] = take (enc_flushed st) tgt"
       and "enc_pending st = take (enc_tp st - enc_flushed st)
             (drop (enc_flushed st) tgt)"
+      and "enc_flushed st \<le> enc_tp st"
   shows "exec_inst_list src (enc_trace (flush_pending_spec src_len st)) []
        = take (enc_tp st) tgt"
-  sorry
+proof -
+  have emit_trace:
+    "enc_trace (emit_insts_spec src_len insts st) = enc_trace st @ insts"
+    for insts
+    by (induction insts arbitrary: st)
+       (simp_all add: emit_insts_spec_def emit_inst_spec_def
+                      split: prod.splits)
+  have trace:
+    "enc_trace (flush_pending_spec src_len st) =
+     enc_trace st @ flush_pending_insts (enc_pending st)"
+    by (simp add: flush_pending_spec_def emit_trace)
+  have exec:
+    "exec_inst_list src (enc_trace (flush_pending_spec src_len st)) [] =
+     take (enc_flushed st) tgt @ enc_pending st"
+    using assms(1)
+    by (simp add: trace exec_inst_list_append flush_pending_insts_exec)
+  also have "\<dots> = take (enc_tp st) tgt"
+  proof -
+    have "take (enc_flushed st) tgt
+        @ take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt) =
+      take (enc_flushed st + (enc_tp st - enc_flushed st)) tgt"
+      by (simp add: take_add)
+    also have "\<dots> = take (enc_tp st) tgt"
+      using assms(3) by simp
+    finally show ?thesis
+      using assms(2) by simp
+  qed
+  finally show ?thesis .
+qed
 
 lemma encode_window_full_spec_trace_valid:
   assumes "length src < 2 ^ 32"
