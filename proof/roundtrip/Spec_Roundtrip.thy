@@ -1755,6 +1755,103 @@ next
     by (simp add: op_eq)
 qed
 
+lemma find_add_copy_opcode_less_256:
+  assumes "find_add_copy_opcode add_sz copy_sz mode = Some op"
+  shows "op < 256"
+  using assms
+  by (auto simp: find_add_copy_opcode_def split: if_splits)
+
+lemma find_add_copy_opcode_ranges:
+  assumes fop: "find_add_copy_opcode add_sz copy_sz mode = Some op"
+  shows "1 \<le> add_sz" "add_sz \<le> 4" "mode \<le> 8" "4 \<le> copy_sz"
+        "((mode \<le> 5 \<and> copy_sz \<le> 6) \<or>
+          (6 \<le> mode \<and> mode \<le> 8 \<and> copy_sz = 4))"
+  using fop
+  by (auto simp: find_add_copy_opcode_def split: if_splits)
+
+lemma find_add_copy_opcode_default_entry:
+  assumes fop: "find_add_copy_opcode add_sz copy_sz mode = Some op"
+  shows "default_entry op = (add_hi add_sz, copy_hi copy_sz mode)"
+proof -
+  have add_ge: "1 \<le> add_sz" and add_le: "add_sz \<le> 4"
+    using fop by (auto simp: find_add_copy_opcode_def split: if_splits)
+  have repr:
+    "(mode \<le> 5 \<and> 4 \<le> copy_sz \<and> copy_sz \<le> 6) \<or>
+     (6 \<le> mode \<and> mode \<le> 8 \<and> copy_sz = 4)"
+    using fop by (auto simp: find_add_copy_opcode_def split: if_splits)
+  obtain op' where
+    fop': "find_add_copy_opcode add_sz copy_sz mode = Some op'"
+    and entry: "default_entry op' = (add_hi add_sz, copy_hi copy_sz mode)"
+    using default_entry_add_copy[OF add_ge add_le repr] by auto
+  have "op' = op"
+    using fop fop' by simp
+  then show ?thesis using entry by simp
+qed
+
+lemma decode_one_add_copy_fused_suffix:
+  assumes fop: "find_add_copy_opcode (length add_bs) copy_sz mode = Some op"
+      and addr32: "copy_addr < 2 ^ 32"
+      and here32:
+        "src_seg_len + length (ds_tgt st) + length add_bs < 2 ^ 32"
+      and addr_ok:
+        "copy_addr < src_seg_len + length (ds_tgt st) + length add_bs"
+      and tgt_ok:
+        "length (ds_tgt st) + length add_bs + copy_sz \<le> tgt_len"
+      and wf:
+        "wf_encoding (ds_cache st) copy_addr
+           (src_seg_len + length (ds_tgt st) + length add_bs) mode abytes"
+  shows
+    "decode_one src_seg src_seg_len tgt_len
+       (st \<lparr> ds_data_rem := add_bs @ data_rest
+           , ds_inst_rem := word_of_nat op # inst_rest
+           , ds_addr_rem := abytes @ addr_rest \<rparr>) =
+     Inl (st \<lparr> ds_data_rem := data_rest
+             , ds_inst_rem := inst_rest
+             , ds_addr_rem := addr_rest
+             , ds_cache := cache_update (ds_cache st) copy_addr
+             , ds_tgt := copy_loop src_seg (ds_tgt st @ add_bs) copy_addr copy_sz \<rparr>)"
+proof -
+  have op_unat: "unat (word_of_nat op :: byte) = op"
+    using find_add_copy_opcode_less_256[OF fop]
+    by (simp add: unat_of_nat_eq)
+  have entry: "default_entry op =
+        (add_hi (length add_bs), copy_hi copy_sz mode)"
+    by (rule find_add_copy_opcode_default_entry[OF fop])
+  have add_pos: "length add_bs > 0"
+    using fop by (auto simp: find_add_copy_opcode_def split: if_splits)
+  have copy_pos: "copy_sz > 0"
+    using fop by (auto simp: find_add_copy_opcode_def split: if_splits)
+  let ?here = "src_seg_len + length (ds_tgt st) + length add_bs"
+  have dec: "decode_address (ds_cache st) mode ?here (abytes @ addr_rest) =
+      Some (copy_addr, addr_rest, cache_update (ds_cache st) copy_addr)"
+    using wf_encoding_decodes[OF wf addr32 here32] .
+  have dec_after_add:
+    "decode_address (ds_cache st) mode
+       (src_seg_len + length (ds_tgt st @ add_bs)) (abytes @ addr_rest) =
+     Some (copy_addr, addr_rest, cache_update (ds_cache st) copy_addr)"
+    using dec by (simp add: add.assoc)
+  have add_tgt_ok: "length (ds_tgt st) + length add_bs \<le> tgt_len"
+    using tgt_ok by simp
+  have copy_tgt_ok: "length (ds_tgt st @ add_bs) + copy_sz \<le> tgt_len"
+    using tgt_ok by simp
+  have copy_tgt_not_bad:
+    "\<not> tgt_len < length (ds_tgt st @ add_bs) + copy_sz"
+    using copy_tgt_ok by simp
+  have src_ok:
+    "\<not> (copy_addr + copy_sz > src_seg_len + length (ds_tgt st @ add_bs) + copy_sz
+        \<or> copy_addr \<ge> src_seg_len + length (ds_tgt st @ add_bs))"
+    using addr_ok by simp
+  have src_not_bad:
+    "\<not> (src_seg_len + length (ds_tgt st @ add_bs) + copy_sz < copy_addr + copy_sz
+        \<or> src_seg_len + length (ds_tgt st @ add_bs) \<le> copy_addr)"
+    using addr_ok by simp
+  show ?thesis
+    unfolding decode_one_def pop_byte_def Let_def
+    using op_unat entry add_pos copy_pos dec dec_after_add add_tgt_ok
+          copy_tgt_ok copy_tgt_not_bad src_ok src_not_bad
+    by (simp add: resolve_size_def exec_half_def add_hi_def copy_hi_def)
+qed
+
 (* ---------- Unified encode_one / decode_one roundtrip ---------- *)
 
 lemma encode_one_decode_one_add:
