@@ -3033,11 +3033,6 @@ proof -
                   pending_scan_init_def)
 qed
 
-lemma exec_inst_list_append:
-  "exec_inst_list src (xs @ ys) acc =
-     exec_inst_list src ys (exec_inst_list src xs acc)"
-  by (induction xs arbitrary: acc) simp_all
-
 lemma fused_copy_len_spec_le:
   assumes "fused_copy_len_spec mode copy_len = Some csz"
   shows "csz \<le> copy_len"
