@@ -1,5 +1,16 @@
 # Encoder Correctness Parallel Proof Split
 
+## 2026-06-14 status
+
+This document records the old parallelization plan for the direct
+`section_decodes` encoder proof. The active plan is now to prove a
+non-degenerate pure encoder spec and then prove that the C encoder refines that
+spec. See `planning/encoder-refinement-strategy.md`.
+
+The theory split and helper ownership are still useful as an implementation
+map, but the final shared interface should move from direct decode correctness
+to C-vs-pure encoder simulation.
+
 ## Status
 
 `proof/encoder-correctness/VcdiffEnc_Correct.thy` has been split into
@@ -30,15 +41,20 @@ rg -n "^\s*(sorry|oops)\b" proof spec
 
 ## Shared Interfaces
 
-- `section_decodes_prefix` and `section_decodes` are the pure wire boundary.
-- `enc_sections_inv` connects emitted heap sections to `section_decodes`.
+- Historical direct-proof interface:
+  `section_decodes_prefix`, `section_decodes`, and `enc_sections_inv` connect
+  emitted heap sections to decode correctness.
+- New refinement interface:
+  emitted C section prefixes should equal the corresponding fields of a pure
+  encoder state (`data_sec`, `inst_sec`, `addr_sec`, `pending`, `cache`,
+  `index`, and cursors).
 - `match_valid` is the target shape for match-finder correctness.
 - `encoder_loop_inv` is the pure prefix/pending split used by the future C
   loop invariant.
 
-The final encoder theorem should avoid byte equality with
-`serialize_from_insts`; prove instead that successful C output decodes via
-`decode_spec`.
+The final encoder theorem should prove byte equality with the non-degenerate
+pure `encode_spec` on success. The `decode_spec` result is then obtained by
+the spec roundtrip theorem, not by the C encoder proof itself.
 
 ## Current Frontier
 

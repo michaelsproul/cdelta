@@ -1,8 +1,10 @@
-# Pure-spec layer: Phase A COMPLETE
+# Pure-spec layer: Phase A baseline complete
 
 ## Status
 
-All eight theories in `spec/` build sorry-free under `quick_and_dirty = false`:
+All eight current theories in `spec/` build sorry-free under
+`quick_and_dirty = false`. This is the baseline pure-spec milestone, not the
+final encoder spec needed for C encoder refinement.
 
 | Theory | Status |
 |--------|--------|
@@ -44,14 +46,36 @@ same size as the target — no actual delta compression. A realistic
 matcher would emit COPY/RUN instructions against the source and within
 the target.
 
-**Why this is OK for Phase A:** The roundtrip theorem captures the
-wire-format + instruction-dispatch plumbing, which is the hardest part
-to get right. A smarter matcher is a refinement of the current
-degenerate one: any new matcher that satisfies `generates_target` would
-slot in at the same call site, and the downstream refinement in Layer
-B (AutoCorres) consumes the pure encoder as an oracle anyway. The
-proof effort to upgrade to a real matcher is a separate project and is
-orthogonal to the refinement proof structure.
+**Why this was OK for the baseline:** The theorem validates the
+wire-format, parser, instruction-dispatch, and serialization plumbing. It is a
+useful executable sanity check and should be kept as a small corollary.
+
+**Why it is not enough now:** The C encoder should refine the encoder spec in
+the same sense that the C decoder refines the decoder spec. A single-ADD
+encoder cannot be that target, because the C encoder emits RUN, COPY,
+ADD+COPY-fused opcodes, and cache-selected address modes. The next pure-spec
+phase is therefore to replace the main encoder spec with a non-degenerate,
+deterministic model of the C encoder.
+
+## Next: Phase A.7 non-degenerate encoder spec
+
+Add a realistic pure encoder spec before resuming the C encoder proof:
+
+1. Define pure counterparts for source indexing, match search, RUN detection,
+   pending ADD buffering, `flush_pending`, COPY emission, address-cache mode
+   selection, opcode fusion, window section construction, and serialization.
+2. Make `encode_spec` call that non-degenerate encoder. Keep the current
+   single-ADD encoder under a separate name such as `encode_spec_degenerate`.
+3. Prove the non-degenerate spec roundtrip theorem:
+
+   ```isabelle
+   encode_spec src tgt = Inl patch
+     ==> decode_spec patch src = Inl tgt
+   ```
+
+4. Prove any target-prefix, COPY-validity, RUN-validity, and cache
+   synchronization lemmas entirely in the spec layer.
+5. Use the resulting `encode_spec` as the C encoder refinement target.
 
 ## Size (spec/)
 

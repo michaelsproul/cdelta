@@ -1,4 +1,15 @@
-# Step 1: Matcher-Parametric Spec Refactor — Progress
+# Step 1: Matcher-Parametric Spec Refactor — Historical Progress
+
+## 2026-06-14 status
+
+This was progress on the previous matcher-parametric plan. The active plan has
+changed: build a non-degenerate deterministic encoder spec, prove its
+roundtrip theorem at the pure spec layer, and then prove the C encoder refines
+that spec. See `planning/encoder-refinement-strategy.md`.
+
+The lemmas listed here may still be useful as support for the pure roundtrip
+proof, but `roundtrip_generic` and `valid_insts` are no longer the main path to
+C encoder correctness.
 
 ## Status: Structure complete, needs build verification + sorry discharge
 

@@ -1,5 +1,17 @@
 # Encoder Correctness and C Roundtrip Plan
 
+## 2026-06-14 architecture update
+
+The active direction has changed. The C encoder should refine a
+non-degenerate pure encoder spec, and all roundtrip properties should be proved
+at the spec layer. See `planning/encoder-refinement-strategy.md` for the
+current plan.
+
+The detailed direct proof work below is still useful as a record of helper
+lemmas and generated AutoCorres structure. It is no longer the top-level plan:
+we should not keep pushing `section_decodes` and final-target correctness
+through low-level C helpers such as `flush_pending'`.
+
 ## Current status
 
 - `CdeltaSpecRoundtrip` builds and contains the pure success theorem
@@ -139,7 +151,7 @@
   the strengthened loop invariant yields the exact `enc_sections_inv` and cache
   facts needed by the `encode_window'` success target.
 
-Remaining proof debt before `try_emit_add_copy`/window integration:
+Remaining proof debt on the now-suspended direct proof path:
 
 - Discharge or centralize the C-varint byte-equality assumptions.
 - Prove nonzero `flush_pending` and fused ADD+COPY preservation over the same
@@ -163,76 +175,58 @@ Remaining proof debt before `try_emit_add_copy`/window integration:
 - Once the two installed `sorry` lemmas are discharged, turn
   `CdeltaEncoderCorrectness` back to `quick_and_dirty = false`.
 
-## Main proof shape
+## Active proof shape
 
-The C encoder should not initially be proved byte-identical to
-`encode_spec`.  The current C encoder emits RUNs, COPYs, and fused ADD+COPY
-opcodes, while the pure `encode_window` in `Encoder_Spec.thy` emits only
-standalone opcodes.  The lower-friction target is therefore:
+The pure encoder spec should be upgraded so that byte-level refinement from the
+C encoder is true. The roundtrip theorem then belongs entirely in the spec
+layer:
 
 ```isabelle
-vcdiff_encode' returns patch_len > 0
-  ==> decode_spec emitted_patch source = Inl target
+encode_spec src tgt = Inl patch
+  ==> decode_spec patch src = Inl tgt
 ```
 
-Then compose that fact with `vcdiff_decode'_spec_inl`.
+The C encoder theorem should state that, under buffer validity, disjointness,
+capacity, and size preconditions, a successful `vcdiff_encode'` call writes the
+same bytes as `encode_spec src tgt`:
+
+```isabelle
+vcdiff_encode' ... returns length patch
+  ==> heap_bytes out (length patch) = patch
+```
+
+Then compose this with the existing decoder refinement theorem
+`vcdiff_decode'_spec_inl`. The C encoder proof should carry a simulation
+relation to pure encoder state, not a direct `section_decodes` invariant.
 
 ## Implementation steps
 
-1. Add a pure bridge theorem in `proof/roundtrip/Spec_Roundtrip.thy`.
-   - Reuse `serialize_parse_roundtrip`.
-   - State that if the serialized sections' parsed window succeeds via
-     `apply_window`, then `decode_spec (serialize src tgt data inst addr) src
-     = Inl tgt`.
-   - This avoids re-proving header and window parsing in the encoder proof.
+1. Refactor `spec/pure/Encoder_Spec.thy` into a non-degenerate deterministic
+   encoder spec that models source indexing, greedy matching, RUN detection,
+   pending flushes, COPY emission, address-cache mode choice, opcode fusion,
+   window section construction, and serialization.
 
-2. Add encoder refinement scaffolding.
-   - Create a new proof theory/session for encoder correctness.
-   - Define encoder-side `heap_bytes` and `buf_valid` helpers in the
-     `vcdiff_enc_global_addresses` context.
-   - Prove leaf helper specs for `write_byte'`, `write_varint'`, and
-     `write_bytes'` against the pure byte-list operations.
+2. Prove the non-degenerate spec roundtrip theorem in
+   `proof/roundtrip/Spec_Roundtrip.thy`. The target-prefix, COPY-validity,
+   RUN-validity, and cache synchronization arguments should live here.
 
-3. Prove emitted-section correctness for encoder helpers.
-   - `emit_add`, `emit_run`, and `emit_copy` now preserve the invariant that
-     emitted sections decode to the target prefix already covered.
-   - Small ADD and small COPY / one-byte-address branches now track the C
-     address cache against the pure cache used by `decode_address`; extend this
-     to branches that write varints after adding a cheap varint-write cache
-     frame.
-   - Account for fused ADD+COPY by proving the corresponding default-code-table
-     opcode decodes as the two intended half-instructions.
+3. Retarget existing writer and emitter C lemmas so they prove refinement to
+   pure section-builder functions. They should still preserve buffer, cursor,
+   and cache facts, but they should not be responsible for global decode
+   correctness.
 
-4. Prove `encode_window` success correctness.
-   - Invariant: `encode_window_c_loop_cache_inv`.
-   - It bundles the old heap/capacity/prefix facts, `enc_sections_inv` for the
-     flushed prefix, and the cache abstraction/well-formedness facts needed by
-     COPY emission.
-   - Branch slots:
-     pending-byte branch uses
-     `encode_window_pending_byte_branch_result_inv`.
-     no-fusion branch uses non-empty `flush_pending'` preservation, then the
-     appropriate `emit_copy'` section/cache wrapper.
-     fused branch uses fused `try_emit_add_copy'` preservation, then an
-     optional remainder `emit_copy'` wrapper.
-     final flush uses non-empty `flush_pending'` preservation and
-     `encoder_loop_inv_doneD`.
-   - On success, `encode_window_c_loop_cache_inv_doneD` extracts the full-target
-     section/cache postcondition.
+4. Prove `flush_pending'` refines `flush_pending_spec`. This replaces the
+   old nonzero final-flush `section_decodes` target with a local simulation
+   theorem.
 
-5. Prove top-level encoder success theorem.
-   - `serialize'` writes bytes equal to pure `serialize src tgt data inst addr`.
-   - `encoder_sections_serialize_decode` turns the window postcondition into
-     pure `decode_spec` success.
-   - `vcdiff_encode'` returning nonzero implies the produced patch bytes
-     satisfy `decode_spec patch src = Inl tgt`.
+5. Prove `build_index'`, `find_best_match'`, and the main `encode_window'`
+   loop refine their pure spec counterparts.
 
-6. Compose C roundtrip.
-   - First theorem should be relational over produced bytes, because encoder
-     and decoder are AutoCorres-lifted from separate C files with separate
-     `lifted_globals`.
-   - If a same-state `do encode; decode` theorem is later required, introduce a
-     combined C translation after resolving static-name conflicts.
+6. Prove `serialize'` writes the bytes produced by pure serialization, then
+   prove `vcdiff_encode'` writes `encode_spec src tgt` on success.
+
+7. Compose encoder refinement, decoder refinement, and the spec roundtrip
+   theorem into the C roundtrip theorem.
 
 ## Build checks
 

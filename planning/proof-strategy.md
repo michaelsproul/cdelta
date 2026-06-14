@@ -48,6 +48,20 @@ Layer B│  AutoCorres-lifted monadic    │   vcdiff_encode' / vcdiff_decode'
        Theorem: running C encoder then C decoder recovers the target.
 ```
 
+## 2026-06-14 encoder update
+
+The encoder should follow the same refinement architecture as the decoder:
+
+1. The pure encoder spec becomes non-degenerate and deterministic enough to
+   match the C encoder's emitted bytes.
+2. All roundtrip properties are proved at Layer A.
+3. Layer B proves that `vcdiff_encode'` writes `encode_spec src tgt` on
+   success, rather than proving `decode_spec` success directly inside the C
+   encoder proof.
+
+The old single-ADD encoder remains useful as a baseline theorem, but it is not
+the final refinement target.
+
 **Why two layers and not a direct proof on the monadic form?** Three reasons:
 
 1. The C uses file-scope arrays (`near_arr`, `same_arr`, `code_tbl`,
@@ -139,31 +153,36 @@ The intermediate representation between encoder and decoder:
 ### 6. `Encoder_Spec.thy` / `Decoder_Spec.thy`
 Top-level pure functions:
 
-    encode_spec :: "byte list ⇒ byte list ⇒ byte list option"
+    encode_spec :: "byte list ⇒ byte list ⇒ byte list + encode_error"
     decode_spec :: "byte list ⇒ byte list ⇒ byte list + decode_error"
 
 The shapes mirror the C entry points but return pure values. They're thin
-orchestrators on top of the helpers above. Crucially: they must be
-**executable** — use Isabelle's `code_generator` so we can `value "decode_spec
-(encode_spec src tgt) src = Inl tgt"` on concrete inputs *before* investing
-proof effort, to catch spec bugs.
+orchestrators on top of the helpers above. For the encoder, this now means a
+realistic C-shaped spec: source index construction, greedy match search, RUN
+detection, pending ADD buffering, COPY emission, address-cache mode choice,
+opcode fusion, window section construction, and serialization.
+
+Crucially, the specs must be **executable** — use Isabelle's `code_generator`
+so we can test that `encode_spec src tgt = Inl patch` and
+`decode_spec patch src = Inl tgt` on concrete inputs before investing proof
+effort, and so we can compare pure encoder output against C encoder output.
 
 ### 7. `Spec_Roundtrip.thy`
-The main pure-level theorem, ported from `lean-bdiff/…/GenerateInstructions`:
+The main pure-level theorem:
 
-    theorem spec_roundtrip:
-      assumes "length src < 2^31" "length tgt < 2^31"
-      shows   "∃ patch. encode_spec src tgt = Some patch
-                     ∧ decode_spec patch src = Inl tgt"
+    theorem encode_spec_roundtrip:
+      assumes "length src < 2^32" "length tgt < 2^32"
+              "encode_spec src tgt = Inl patch"
+      shows   "decode_spec patch src = Inl tgt"
 
-Proof decomposition follows Lean's Phases B–G:
+Proof decomposition:
 1. Cache roundtrip (§4 lemma above).
 2. Code-table exhaustion (§3 lemmas).
 3. Varint roundtrip (§2 lemma).
-4. `exec_inst` correctness: for any list of instructions the encoder produces,
-   executing them against `src` reproduces `tgt`. Proved by induction on
-   matches, using `extend_match_bytes_eq` (byte-for-byte equality of matched
-   regions).
+4. Encoder-spec correctness: every instruction or section emitted by the
+   non-degenerate spec covers exactly the next target prefix. COPY correctness
+   comes from the pure matcher; RUN correctness comes from pure run scanning;
+   pending ADD correctness comes from the pure pending-buffer invariant.
 5. Wire-format roundtrip: header + window serialization parses back.
 6. Compose.
 
@@ -205,7 +224,7 @@ Key obstacles and how we address them:
   already written to `out[0..tgt_pos)` equal the prefix of `decode_spec`'s
   output so far." The encoder's main loop is analogous.
 
-The refinement targets:
+The decoder refinement target:
 
     lemma vcdiff_decode_refine:
       "...preconditions... ⟹
@@ -216,10 +235,18 @@ The refinement targets:
                ∧ rv = 0 ⟶ heap_bytes s' out (length tgt) = tgt
                          ∧ heap_uint32 s' out_len_ptr = length tgt⦄"
 
-Same shape for `vcdiff_encode_refine`.
+The encoder refinement target is byte equality with the non-degenerate pure
+encoder spec on success:
+
+    lemma vcdiff_encode_refine:
+      "...preconditions... ⟹ encode_spec src_bytes tgt_bytes = Inl patch ⟹
+       vcdiff_encode' out out_cap src src_len tgt tgt_len scratch ⦃s⦄
+        ⦃λrv s'. rv = length patch
+               ∧ heap_bytes s' out (length patch) = patch⦄"
 
 ### Composition: `Roundtrip.thy`
-Combines `vcdiff_decode_refine`, `vcdiff_encode_refine`, and `spec_roundtrip`:
+Combines `vcdiff_decode_refine`, `vcdiff_encode_refine`, and
+`encode_spec_roundtrip`:
 
     theorem c_roundtrip:
       assumes preconds   -- buffer validity, disjointness, capacity bounds
@@ -245,13 +272,16 @@ starts with a `sorry` upstream.
 | A.2 | `AddressCache.thy` + encode/decode inversion | 1–3 days | A.1 |
 | A.3 | `CodeTable.thy` + exhaustion lemmas via `eval` | 1–2 days | — |
 | A.4 | `Instructions.thy` + `exec_inst` correctness | 2–4 days | A.2, A.3 |
-| A.5 | `Encoder_Spec.thy`, `Decoder_Spec.thy`, executable via `code_generator`; sanity-check with `value` against test corpus | 1–3 days | A.4 |
-| A.6 | `Spec_Roundtrip.thy` — the big pure theorem | 1–2 weeks | A.5 |
+| A.5 | Baseline `Encoder_Spec.thy`, `Decoder_Spec.thy`, executable via `code_generator`; sanity-check with `value` against test corpus | done | A.4 |
+| A.6 | Baseline `Spec_Roundtrip.thy` for the single-ADD encoder | done | A.5 |
+| A.7 | Non-degenerate pure encoder spec matching the C algorithm | 1–2 weeks | A.1–A.6 |
+| A.8 | Non-degenerate spec roundtrip theorem | 1–3 weeks | A.7 |
 | B.1 | Refine all leaf helpers in `vcdiff_dec.c` (read_byte, read_varint, decode_address) | 3–5 days | A.1, A.2 |
 | B.2 | Refine `vcdiff_decode'` main loop (the instruction-dispatch invariant) | 1–2 weeks | A.4, B.1 |
-| B.3 | Refine leaf helpers + `encode_window` in `vcdiff_enc.c` (varint writes, hash index, best_mode, emit_*) | 1–2 weeks | A.1–A.5, Memcpy patterns |
-| B.4 | Refine `vcdiff_encode'` main loop | 1–2 weeks | B.3 |
-| C | Compose refinements with `spec_roundtrip` into `c_roundtrip` | 2–4 days | A.6, B.2, B.4 |
+| B.3 | Retarget encoder leaf helpers to pure section builders; refine hash index, matcher, best_mode, and emit helpers | 1–2 weeks | A.7, Memcpy patterns |
+| B.4 | Refine `encode_window'` to `encode_window_spec` | 1–2 weeks | A.7, B.3 |
+| B.5 | Refine `vcdiff_encode'` top-level serialization to `encode_spec` bytes | 3–5 days | B.4 |
+| C | Compose refinements with `encode_spec_roundtrip` into `c_roundtrip` | 2–4 days | A.8, B.2, B.5 |
 
 Realistic total: **6–12 weeks** depending on how much AutoCorres-specific
 automation we have to hand-build vs. reuse. Bulk of the time is B.2 + B.4 +
