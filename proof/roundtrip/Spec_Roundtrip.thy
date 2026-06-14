@@ -2591,17 +2591,205 @@ qed
 (* Part 3: Full C-shaped encoder proof obligations                    *)
 (* ================================================================== *)
 
+lemma source_positions_spec_sound:
+  assumes "p \<in> set (source_positions_spec src)"
+  shows "p + min_match \<le> length src"
+proof (cases "length src < min_match")
+  case True
+  with assms show ?thesis by (simp add: source_positions_spec_def)
+next
+  case False
+  with assms have "p < length src - min_match + 1"
+    by (auto simp: source_positions_spec_def)
+  then have "p \<le> length src - min_match"
+    by linarith
+  with False show ?thesis
+    by linarith
+qed
+
 lemma build_index_spec_bucket_sound:
   assumes "p \<in> set (index_bucket_spec (build_index_spec src) h)"
   shows "p + min_match \<le> length src \<and> hash_bucket_spec src p = h"
-  sorry
+  using assms source_positions_spec_sound[of p src]
+  by (auto simp: index_bucket_spec_def build_index_spec_def)
+
+lemma common_prefix_fuel_le_fuel:
+  "common_prefix_fuel fuel a apos b bpos \<le> fuel"
+  by (induction fuel arbitrary: apos bpos) auto
+
+lemma common_prefix_spec_le_left:
+  "common_prefix_spec a apos aend b bpos bend \<le> aend - apos"
+  unfolding common_prefix_spec_def
+  using common_prefix_fuel_le_fuel[of "min (aend - apos) (bend - bpos)"
+        "take aend a" apos "take bend b" bpos]
+  by linarith
+
+lemma common_prefix_spec_le_right:
+  "common_prefix_spec a apos aend b bpos bend \<le> bend - bpos"
+  unfolding common_prefix_spec_def
+  using common_prefix_fuel_le_fuel[of "min (aend - apos) (bend - bpos)"
+        "take aend a" apos "take bend b" bpos]
+  by linarith
+
+lemma common_prefix_fuel_sound:
+  assumes "k < common_prefix_fuel fuel a apos b bpos"
+  shows "apos + k < length a \<and> bpos + k < length b
+       \<and> a ! (apos + k) = b ! (bpos + k)"
+  using assms
+proof (induction fuel arbitrary: apos bpos k)
+  case 0
+  then show ?case by simp
+next
+  case (Suc fuel)
+  show ?case
+  proof (cases "apos < length a \<and> bpos < length b \<and> a ! apos = b ! bpos")
+    case False
+    with Suc.prems show ?thesis by simp
+  next
+    case True
+    show ?thesis
+    proof (cases k)
+      case 0
+      with True show ?thesis by simp
+    next
+      case (Suc k')
+      with Suc.prems True have k'_lt:
+        "k' < common_prefix_fuel fuel a (apos + 1) b (bpos + 1)"
+        by simp
+      have rec:
+        "(apos + 1) + k' < length a \<and> (bpos + 1) + k' < length b
+       \<and> a ! ((apos + 1) + k') = b ! ((bpos + 1) + k')"
+        by (rule Suc.IH[OF k'_lt])
+      with Suc show ?thesis by simp
+    qed
+  qed
+qed
 
 lemma common_prefix_spec_sound:
   assumes "k < common_prefix_spec a apos aend b bpos bend"
   shows "apos + k < aend \<and> bpos + k < bend
        \<and> apos + k < length a \<and> bpos + k < length b
        \<and> a ! (apos + k) = b ! (bpos + k)"
-  sorry
+proof -
+  have fuel:
+    "apos + k < length (take aend a) \<and> bpos + k < length (take bend b)
+       \<and> take aend a ! (apos + k) = take bend b ! (bpos + k)"
+    using assms
+    unfolding common_prefix_spec_def
+    by (rule common_prefix_fuel_sound)
+  then show ?thesis
+    by (auto simp: nth_take)
+qed
+
+lemma choose_match_spec_sound:
+  assumes cand_valid: "cand + min_match \<le> length src"
+      and best_sound:
+        "min_match \<le> em_len best \<Longrightarrow>
+          em_pos best + em_len best \<le> length src
+          \<and> tp + em_len best \<le> length tgt
+          \<and> (\<forall>k < em_len best.
+                src ! (em_pos best + k) = tgt ! (tp + k))"
+      and match: "min_match \<le> em_len (choose_match_spec src tgt tp cand best)"
+  shows "em_pos (choose_match_spec src tgt tp cand best)
+          + em_len (choose_match_spec src tgt tp cand best) \<le> length src
+       \<and> tp + em_len (choose_match_spec src tgt tp cand best) \<le> length tgt
+       \<and> (\<forall>k < em_len (choose_match_spec src tgt tp cand best).
+             src ! (em_pos (choose_match_spec src tgt tp cand best) + k)
+             = tgt ! (tp + k))"
+proof -
+  let ?l = "common_prefix_spec src cand (length src) tgt tp (length tgt)"
+  show ?thesis
+  proof (cases "cand + min_match \<le> length src \<and> min_match \<le> ?l \<and> em_len best < ?l")
+    case False
+    have not_choose:
+      "\<not> (cand + min_match \<le> length src \<and> min_match \<le> ?l \<and> em_len best < ?l)"
+      using False by blast
+    have choose_eq: "choose_match_spec src tgt tp cand best = best"
+      using not_choose by (auto simp: choose_match_spec_def Let_def)
+    with match best_sound show ?thesis
+      by simp
+  next
+    case True
+    have choose_eq:
+      "choose_match_spec src tgt tp cand best =
+        \<lparr> em_pos = cand, em_len = ?l \<rparr>"
+      using True by (simp add: choose_match_spec_def Let_def)
+    have min_l: "min_match \<le> ?l"
+      using True by simp
+    have cand_le: "cand \<le> length src"
+      using cand_valid by linarith
+    have l_src: "?l \<le> length src - cand"
+      by (rule common_prefix_spec_le_left)
+    have src_bound: "cand + ?l \<le> length src"
+      using cand_le l_src by linarith
+    have l_tgt: "?l \<le> length tgt - tp"
+      by (rule common_prefix_spec_le_right)
+    have tp_le: "tp \<le> length tgt"
+    proof (rule ccontr)
+      assume "\<not> tp \<le> length tgt"
+      with l_tgt have "?l = 0" by simp
+      with min_l show False by (simp add: min_match_def)
+    qed
+    have tgt_bound: "tp + ?l \<le> length tgt"
+      using tp_le l_tgt by linarith
+    have bytes:
+      "\<forall>k < ?l. src ! (cand + k) = tgt ! (tp + k)"
+      using common_prefix_spec_sound[of _ src cand "length src" tgt tp "length tgt"]
+      by blast
+    show ?thesis
+      using choose_eq src_bound tgt_bound bytes by simp
+  qed
+qed
+
+lemma foldl_choose_match_spec_sound:
+  assumes cands_valid: "\<forall>cand \<in> set cands. cand + min_match \<le> length src"
+      and best_sound:
+        "min_match \<le> em_len best \<Longrightarrow>
+          em_pos best + em_len best \<le> length src
+          \<and> tp + em_len best \<le> length tgt
+          \<and> (\<forall>k < em_len best.
+                src ! (em_pos best + k) = tgt ! (tp + k))"
+      and match:
+        "min_match \<le> em_len
+          (foldl (\<lambda>best cand. choose_match_spec src tgt tp cand best)
+            best cands)"
+  shows "em_pos (foldl (\<lambda>best cand. choose_match_spec src tgt tp cand best)
+            best cands)
+          + em_len (foldl (\<lambda>best cand. choose_match_spec src tgt tp cand best)
+            best cands) \<le> length src
+       \<and> tp + em_len (foldl (\<lambda>best cand. choose_match_spec src tgt tp cand best)
+            best cands) \<le> length tgt
+       \<and> (\<forall>k < em_len
+              (foldl (\<lambda>best cand. choose_match_spec src tgt tp cand best)
+                best cands).
+             src ! (em_pos
+               (foldl (\<lambda>best cand. choose_match_spec src tgt tp cand best)
+                 best cands) + k)
+             = tgt ! (tp + k))"
+  using cands_valid best_sound match
+proof (induction cands arbitrary: best)
+  case Nil
+  then show ?case by simp
+next
+  case (Cons cand cands)
+  let ?best' = "choose_match_spec src tgt tp cand best"
+  have best'_sound:
+    "min_match \<le> em_len ?best' \<Longrightarrow>
+      em_pos ?best' + em_len ?best' \<le> length src
+      \<and> tp + em_len ?best' \<le> length tgt
+      \<and> (\<forall>k < em_len ?best'. src ! (em_pos ?best' + k) = tgt ! (tp + k))"
+  proof -
+    assume match': "min_match \<le> em_len ?best'"
+    have cand_valid: "cand + min_match \<le> length src"
+      using Cons.prems(1) by simp
+    show "em_pos ?best' + em_len ?best' \<le> length src
+      \<and> tp + em_len ?best' \<le> length tgt
+      \<and> (\<forall>k < em_len ?best'. src ! (em_pos ?best' + k) = tgt ! (tp + k))"
+      by (rule choose_match_spec_sound[OF cand_valid Cons.prems(2) match'])
+  qed
+  show ?case
+    using Cons.IH[of ?best'] Cons.prems(1,3) best'_sound by simp
+qed
 
 lemma find_best_match_spec_sound:
   fixes m :: enc_match
@@ -2610,7 +2798,38 @@ lemma find_best_match_spec_sound:
   shows "em_pos m + em_len m \<le> length src
        \<and> tp + em_len m \<le> length tgt
        \<and> (\<forall>k < em_len m. src ! (em_pos m + k) = tgt ! (tp + k))"
-  sorry
+proof -
+  show ?thesis
+  proof (cases "length src < min_match \<or> length tgt - tp < min_match")
+    case True
+    with m_def match show ?thesis
+      by (simp add: find_best_match_spec_def no_match_def min_match_def)
+  next
+    case False
+    let ?h = "hash_bucket_spec tgt tp"
+    let ?candidates = "take max_chain (index_bucket_spec (build_index_spec src) ?h)"
+    have cands_valid:
+      "\<forall>cand \<in> set ?candidates. cand + min_match \<le> length src"
+      using build_index_spec_bucket_sound[of _ src ?h]
+      by (auto dest!: in_set_takeD)
+    have folded:
+      "m = foldl (\<lambda>best cand. choose_match_spec src tgt tp cand best)
+             no_match ?candidates"
+      using m_def False
+      by (simp add: find_best_match_spec_def Let_def)
+    have no_match_sound:
+      "min_match \<le> em_len no_match \<Longrightarrow>
+        em_pos no_match + em_len no_match \<le> length src
+        \<and> tp + em_len no_match \<le> length tgt
+        \<and> (\<forall>k < em_len no_match.
+              src ! (em_pos no_match + k) = tgt ! (tp + k))"
+      by (simp add: no_match_def min_match_def)
+    show ?thesis
+      using foldl_choose_match_spec_sound[OF cands_valid no_match_sound]
+        folded match
+      by simp
+  qed
+qed
 
 lemma flush_pending_insts_exec:
   "exec_inst_list src (flush_pending_insts pending) acc = acc @ pending"
