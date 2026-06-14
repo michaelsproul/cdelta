@@ -516,10 +516,18 @@ definition encode_window_full_spec ::
           st = encode_window_full_loop (length tgt + 1) src tgt index enc_full_init
       in enc_full_result_of_state st)"
 
-definition encode_spec_full :: "byte list \<Rightarrow> byte list \<Rightarrow> byte list" where
-  "encode_spec_full src tgt =
-     (let r = encode_window_full_spec src tgt
-      in serialize src tgt (efr_data r) (efr_inst r) (efr_addr r))"
+definition sections_fit_32 ::
+    "byte list \<Rightarrow> byte list \<Rightarrow> enc_full_result \<Rightarrow> bool" where
+  "sections_fit_32 src tgt r \<longleftrightarrow>
+     length (efr_data r) < 2 ^ 32
+   \<and> length (efr_inst r) < 2 ^ 32
+   \<and> length (efr_addr r) < 2 ^ 32
+   \<and> varint_size (length tgt) + 1
+       + varint_size (length (efr_data r))
+       + varint_size (length (efr_inst r))
+       + varint_size (length (efr_addr r))
+       + length (efr_data r) + length (efr_inst r) + length (efr_addr r)
+       < 2 ^ 32"
 
 (* ---------- Top-level ---------- *)
 
@@ -540,6 +548,13 @@ definition encode_spec_run :: "byte list \<Rightarrow> byte list \<Rightarrow> b
   "encode_spec_run src tgt =
      serialize_from_insts src tgt (generate_instructions src tgt)"
 
+definition encode_spec_full :: "byte list \<Rightarrow> byte list \<Rightarrow> byte list" where
+  "encode_spec_full src tgt =
+     (let r = encode_window_full_spec src tgt
+      in if sections_fit_32 src tgt r
+         then serialize src tgt (efr_data r) (efr_inst r) (efr_addr r)
+         else encode_spec_run src tgt)"
+
 definition encode_spec :: "byte list \<Rightarrow> byte list \<Rightarrow> byte list" where
   "encode_spec src tgt = encode_spec_full src tgt"
 
@@ -556,7 +571,9 @@ lemma encode_spec_run_alt:
 lemma encode_spec_alt:
   "encode_spec src tgt =
      (let r = encode_window_full_spec src tgt
-      in serialize src tgt (efr_data r) (efr_inst r) (efr_addr r))"
+      in if sections_fit_32 src tgt r
+         then serialize src tgt (efr_data r) (efr_inst r) (efr_addr r)
+         else encode_spec_run src tgt)"
   by (simp add: encode_spec_def encode_spec_full_def)
 
 end

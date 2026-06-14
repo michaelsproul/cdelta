@@ -4104,6 +4104,7 @@ lemma encode_window_full_spec_sections_decode:
   assumes "length src < 2 ^ 32"
       and "length tgt < 2 ^ 32 - 32"
       and "length src + length tgt < 2 ^ 32"
+      and "sections_fit_32 src tgt (encode_window_full_spec src tgt)"
   shows "decode_spec
            (serialize src tgt
              (efr_data (encode_window_full_spec src tgt))
@@ -4117,8 +4118,21 @@ theorem encode_spec_full_roundtrip:
       and "length tgt < 2 ^ 32 - 32"
       and "length src + length tgt < 2 ^ 32"
   shows "decode_spec (encode_spec_full src tgt) src = Inl tgt"
-  using encode_window_full_spec_sections_decode[OF assms]
-  by (simp add: encode_spec_full_def Let_def)
+proof -
+  let ?r = "encode_window_full_spec src tgt"
+  show ?thesis
+  proof (cases "sections_fit_32 src tgt ?r")
+    case True
+    show ?thesis
+      using encode_window_full_spec_sections_decode[OF assms True]
+      by (simp add: encode_spec_full_def Let_def True)
+  next
+    case False
+    show ?thesis
+      using spec_roundtrip_run[OF assms]
+      by (simp add: encode_spec_full_def Let_def False)
+  qed
+qed
 
 theorem spec_roundtrip:
   assumes "length src < 2 ^ 32"
