@@ -1143,6 +1143,41 @@ lemma enc_sections_invD:
         "section_decodes src_seg tgt_len data_bytes inst_bytes addr_bytes target c_out"
   using assms by (simp_all add: enc_sections_inv_def)
 
+definition enc_sections_state_rel ::
+  "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow>
+   sections_t_C \<Rightarrow> enc_full_state \<Rightarrow> bool" where
+  "enc_sections_state_rel s data inst addr sec st \<longleftrightarrow>
+     emitted_sections s data inst addr sec
+       (enc_data st) (enc_inst st) (enc_addr st)"
+
+lemma enc_sections_state_relI:
+  assumes "emitted_sections s data inst addr sec
+        (enc_data st) (enc_inst st) (enc_addr st)"
+  shows "enc_sections_state_rel s data inst addr sec st"
+  using assms by (simp add: enc_sections_state_rel_def)
+
+lemma enc_sections_state_relD:
+  assumes "enc_sections_state_rel s data inst addr sec st"
+  shows "emitted_sections s data inst addr sec
+        (enc_data st) (enc_inst st) (enc_addr st)"
+    and "heap_bytes s data (unat (sections_t_C.data_pos_C sec)) =
+        enc_data st"
+    and "heap_bytes s inst (unat (sections_t_C.inst_pos_C sec)) =
+        enc_inst st"
+    and "heap_bytes s addr (unat (sections_t_C.addr_pos_C sec)) =
+        enc_addr st"
+  using assms
+  by (simp_all add: enc_sections_state_rel_def emitted_sections_def)
+
+lemma enc_sections_state_rel_empty:
+  assumes "sections_t_C.data_pos_C sec = 0"
+      and "sections_t_C.inst_pos_C sec = 0"
+      and "sections_t_C.addr_pos_C sec = 0"
+  shows "enc_sections_state_rel s data inst addr sec enc_full_init"
+  using assms
+  by (simp add: enc_sections_state_rel_def emitted_sections_def
+                enc_full_init_def heap_bytes_def)
+
 end
 
 end
