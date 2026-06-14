@@ -5127,6 +5127,165 @@ proof -
     using encode_window_full_trace_invD(1)[OF inv_step] .
 qed
 
+lemma encode_window_full_step_sections_decode_inv:
+  assumes sections_inv: "full_state_sections_decode_inv src tgt st"
+      and trace_inv: "encode_window_full_trace_inv src tgt st"
+      and src_bd: "length src < 2 ^ 32"
+      and tgt32: "length tgt < 2 ^ 32"
+      and combined_bd: "length src + length tgt < 2 ^ 32"
+      and tp_lt: "enc_tp st < length tgt"
+      and index: "index = build_index_spec src"
+  shows "full_state_sections_decode_inv src tgt
+           (encode_window_full_step src tgt index st)"
+proof -
+  let ?m = "find_best_match_spec src tgt (enc_tp st) index"
+  show ?thesis
+  proof (cases "em_len ?m < min_match")
+    case True
+    then show ?thesis
+      using buffer_pending_byte_spec_sections_decode_inv[OF sections_inv]
+      by (simp add: encode_window_full_step_def Let_def)
+  next
+    case False
+    note match_branch = False
+    hence match_min: "min_match \<le> em_len ?m"
+      by simp
+    have len_pos: "0 < em_len ?m"
+      using match_min by (simp add: min_match_def)
+    have m_def: "?m = find_best_match_spec src tgt (enc_tp st) (build_index_spec src)"
+      using index by simp
+    have sound:
+      "em_pos ?m + em_len ?m \<le> length src
+       \<and> enc_tp st + em_len ?m \<le> length tgt
+       \<and> (\<forall>k < em_len ?m.
+             src ! (em_pos ?m + k) = tgt ! (enc_tp st + k))"
+      by (rule find_best_match_spec_sound[OF m_def match_min])
+    have len32: "em_len ?m < 2 ^ 32"
+      using sound tgt32 by linarith
+    show ?thesis
+    proof (cases "try_emit_add_copy_spec (length src) (em_pos ?m) (em_len ?m) st")
+      case None
+      let ?st0 = "if enc_pending st = [] then st
+                  else flush_pending_spec (length src) st"
+      have inv0: "full_state_sections_decode_inv src tgt ?st0"
+      proof (cases "enc_pending st = []")
+        case True
+        then show ?thesis
+          using sections_inv by simp
+      next
+        case False
+        then show ?thesis
+          using flush_pending_spec_full_sections_decode_inv
+            [OF trace_inv sections_inv refl combined_bd]
+          by simp
+      qed
+      have trace0: "encode_window_full_trace_inv src tgt ?st0"
+      proof (cases "enc_pending st = []")
+        case True
+        then show ?thesis
+          using trace_inv by simp
+      next
+        case False
+        then show ?thesis
+          using flush_pending_spec_trace_inv[OF trace_inv] by simp
+      qed
+      have pending0: "enc_pending ?st0 = []"
+        by (cases "enc_pending st = []") (simp_all add: flush_pending_spec_def)
+      have flushed0: "enc_flushed ?st0 = enc_tp ?st0"
+        by (rule encode_window_full_trace_inv_pending_empty_flushed
+            [OF trace0 pending0])
+      have tp0: "enc_tp ?st0 = enc_tp st"
+        by (cases "enc_pending st = []")
+           (simp_all add: flush_pending_spec_def emit_insts_spec_enc_tp)
+      have tgt0: "enc_tp ?st0 + em_len ?m \<le> length tgt"
+        using sound tp0 by simp
+      have match0:
+        "\<forall>k < em_len ?m.
+          src ! (em_pos ?m + k) = tgt ! (enc_tp ?st0 + k)"
+        using sound tp0 by simp
+      have here32: "length src + enc_flushed ?st0 < 2 ^ 32"
+        using combined_bd encode_window_full_trace_invD(1)[OF trace0] flushed0
+        by linarith
+      show ?thesis
+        using flush_then_emit_copy_spec_sections_decode_inv
+          [OF inv0 refl flushed0 len_pos len32 _ tgt0 match0 here32]
+          sound None match_branch
+        by (simp add: encode_window_full_step_def Let_def)
+    next
+      case (Some fused)
+      have inv_fused: "full_state_sections_decode_inv src tgt fused"
+        by (rule try_emit_add_copy_spec_sections_decode_inv
+            [OF Some sections_inv trace_inv src_bd combined_bd])
+           (use sound in simp_all)
+      have trace_fused:
+        "encode_window_full_trace_inv src tgt fused"
+        using try_emit_add_copy_spec_trace_inv[OF Some trace_inv] sound by simp
+      have tp_fused_gt: "enc_tp st < enc_tp fused"
+        by (rule try_emit_add_copy_spec_progress(1)[OF Some])
+      have tp_fused_le: "enc_tp fused \<le> enc_tp st + em_len ?m"
+        by (rule try_emit_add_copy_spec_progress(2)[OF Some])
+      have pending_fused: "enc_pending fused = []"
+        by (rule try_emit_add_copy_spec_progress(3)[OF Some])
+      have flushed_fused: "enc_flushed fused = enc_tp fused"
+        by (rule encode_window_full_trace_inv_pending_empty_flushed
+            [OF trace_fused pending_fused])
+      let ?consumed = "enc_tp fused - enc_tp st"
+      have consumed_le: "?consumed \<le> em_len ?m"
+        using tp_fused_gt tp_fused_le by simp
+      show ?thesis
+      proof (cases "?consumed < em_len ?m")
+        case True
+        have rest_pos: "0 < em_len ?m - ?consumed"
+          using True by simp
+        have rest_len32: "em_len ?m - ?consumed < 2 ^ 32"
+          using len32 by simp
+        have addr_rest:
+          "em_pos ?m + ?consumed + (em_len ?m - ?consumed) \<le> length src"
+          using sound consumed_le by simp
+        have tp_fused_eq: "enc_tp fused = enc_tp st + ?consumed"
+          using tp_fused_gt by simp
+        have tgt_rest:
+          "enc_tp fused + (em_len ?m - ?consumed) \<le> length tgt"
+          using sound consumed_le tp_fused_eq by simp
+        have match_rest:
+          "\<forall>k < em_len ?m - ?consumed.
+             src ! (em_pos ?m + ?consumed + k) =
+             tgt ! (enc_tp fused + k)"
+        proof (intro allI impI)
+          fix k
+          assume k_lt: "k < em_len ?m - ?consumed"
+          have idx_lt: "?consumed + k < em_len ?m"
+            using k_lt consumed_le by linarith
+          have "src ! (em_pos ?m + (?consumed + k)) =
+              tgt ! (enc_tp st + (?consumed + k))"
+            using sound idx_lt by blast
+          moreover have
+            "em_pos ?m + (?consumed + k) = em_pos ?m + ?consumed + k"
+            by simp
+          moreover have "enc_tp st + (?consumed + k) = enc_tp fused + k"
+            using tp_fused_eq by simp
+          ultimately show "src ! (em_pos ?m + ?consumed + k) =
+              tgt ! (enc_tp fused + k)"
+            by simp
+        qed
+        have here32: "length src + enc_flushed fused < 2 ^ 32"
+          using combined_bd flushed_fused tp_fused_le sound by linarith
+        show ?thesis
+          using emit_copy_spec_sections_decode_inv
+            [OF inv_fused refl flushed_fused rest_pos rest_len32
+                addr_rest tgt_rest match_rest here32]
+            Some match_branch True
+          by (simp add: encode_window_full_step_def Let_def)
+      next
+        case False
+        then show ?thesis
+          using inv_fused Some match_branch False
+          by (simp add: encode_window_full_step_def Let_def)
+      qed
+    qed
+  qed
+qed
+
 lemma encode_window_full_loop_trace_complete:
   assumes inv: "encode_window_full_trace_inv src tgt st"
       and index: "index = build_index_spec src"
@@ -5217,6 +5376,193 @@ proof -
     by (simp add: valid_insts_def)
 qed
 
+lemma full_state_sections_decode_inv_no_tails:
+  assumes inv: "full_state_sections_decode_inv src tgt st"
+  shows "decode_loop (length (enc_inst st)) src (length src) (length tgt)
+           \<lparr> ds_data_rem = enc_data st
+           , ds_inst_rem = enc_inst st
+           , ds_addr_rem = enc_addr st
+           , ds_cache = cache_init
+           , ds_tgt = [] \<rparr>
+         = Inl \<lparr> ds_data_rem = []
+                , ds_inst_rem = []
+                , ds_addr_rem = []
+                , ds_cache = enc_cache st
+                , ds_tgt = take (enc_flushed st) tgt \<rparr>"
+proof -
+  obtain fuel where
+      fuel_le: "fuel \<le> length (enc_inst st)"
+      and dec:
+        "\<And>data_tail inst_tail addr_tail.
+          decode_prefix_steps fuel src (length src) (length tgt)
+            \<lparr> ds_data_rem = enc_data st @ data_tail
+            , ds_inst_rem = enc_inst st @ inst_tail
+            , ds_addr_rem = enc_addr st @ addr_tail
+            , ds_cache = cache_init
+            , ds_tgt = [] \<rparr>
+          = Inl \<lparr> ds_data_rem = data_tail
+                 , ds_inst_rem = inst_tail
+                 , ds_addr_rem = addr_tail
+                 , ds_cache = enc_cache st
+                 , ds_tgt = take (enc_flushed st) tgt \<rparr>"
+    using inv by (auto simp: full_state_sections_decode_inv_def)
+  have pref:
+    "decode_prefix_steps fuel src (length src) (length tgt)
+      \<lparr> ds_data_rem = enc_data st
+      , ds_inst_rem = enc_inst st
+      , ds_addr_rem = enc_addr st
+      , ds_cache = cache_init
+      , ds_tgt = [] \<rparr>
+    = Inl \<lparr> ds_data_rem = []
+           , ds_inst_rem = []
+           , ds_addr_rem = []
+           , ds_cache = enc_cache st
+           , ds_tgt = take (enc_flushed st) tgt \<rparr>"
+    using dec[of "[]" "[]" "[]"] by simp
+  show ?thesis
+    by (rule decode_prefix_steps_decode_loop[OF pref _ fuel_le]) simp
+qed
+
+lemma full_state_sections_decode_inv_apply_window:
+  assumes inv: "full_state_sections_decode_inv src tgt st"
+      and flushed: "enc_flushed st = length tgt"
+  shows "apply_window
+           \<lparr> pw_src_seg_len = (if length src > 0 then length src else 0)
+           , pw_src_seg_off = 0
+           , pw_tgt_len = length tgt
+           , pw_data = enc_data st
+           , pw_inst = enc_inst st
+           , pw_addr = enc_addr st \<rparr>
+           src = Inl tgt"
+proof (cases "length src > 0")
+  case True
+  then show ?thesis
+    using full_state_sections_decode_inv_no_tails[OF inv] flushed
+    by (simp add: apply_window_def Let_def)
+next
+  case False
+  then have src_nil: "src = []"
+    by simp
+  show ?thesis
+    using full_state_sections_decode_inv_no_tails[OF inv] flushed src_nil
+    by (simp add: apply_window_def Let_def)
+qed
+
+lemma encode_window_full_loop_sections_complete:
+  assumes src_bd: "length src < 2 ^ 32"
+      and tgt32: "length tgt < 2 ^ 32"
+      and combined_bd: "length src + length tgt < 2 ^ 32"
+      and index: "index = build_index_spec src"
+      and fuel: "length tgt - enc_tp st < fuel"
+      and trace_inv: "encode_window_full_trace_inv src tgt st"
+      and sections_inv: "full_state_sections_decode_inv src tgt st"
+  shows "let st' = encode_window_full_loop fuel src tgt index st in
+          encode_window_full_trace_inv src tgt st'
+        \<and> full_state_sections_decode_inv src tgt st'
+        \<and> enc_tp st' = length tgt
+        \<and> enc_flushed st' = length tgt
+        \<and> enc_pending st' = []"
+  using fuel trace_inv sections_inv
+proof (induction fuel arbitrary: st)
+  case 0
+  then show ?case by simp
+next
+  case (Suc fuel)
+  show ?case
+  proof (cases "enc_tp st \<ge> length tgt")
+    case True
+    have tp_eq: "enc_tp st = length tgt"
+      using True encode_window_full_trace_invD(1)[OF Suc.prems(2)]
+      by simp
+    let ?st' = "flush_pending_spec (length src) st"
+    have trace': "encode_window_full_trace_inv src tgt ?st'"
+      by (rule flush_pending_spec_trace_inv[OF Suc.prems(2)])
+    have sections': "full_state_sections_decode_inv src tgt ?st'"
+      by (rule flush_pending_spec_full_sections_decode_inv
+          [OF Suc.prems(2) Suc.prems(3) refl combined_bd])
+    have tp': "enc_tp ?st' = length tgt"
+      using tp_eq by (simp add: flush_pending_spec_def emit_insts_spec_enc_tp)
+    have pending': "enc_pending ?st' = []"
+      by (simp add: flush_pending_spec_def)
+    have flushed': "enc_flushed ?st' = length tgt"
+      using encode_window_full_trace_inv_pending_empty_flushed[OF trace' pending']
+            tp'
+      by simp
+    show ?thesis
+      using trace' sections' tp' flushed' pending' True
+      by simp
+  next
+    case False
+    hence tp_lt: "enc_tp st < length tgt"
+      by simp
+    let ?st' = "encode_window_full_step src tgt index st"
+    have trace': "encode_window_full_trace_inv src tgt ?st'"
+      by (rule encode_window_full_step_trace_inv(1)
+          [OF Suc.prems(2) tp_lt index])
+    have sections': "full_state_sections_decode_inv src tgt ?st'"
+      by (rule encode_window_full_step_sections_decode_inv
+          [OF Suc.prems(3) Suc.prems(2) src_bd tgt32 combined_bd tp_lt index])
+    have tp'_gt: "enc_tp st < enc_tp ?st'"
+      by (rule encode_window_full_step_trace_inv(2)
+          [OF Suc.prems(2) tp_lt index])
+    have tp'_le: "enc_tp ?st' \<le> length tgt"
+      by (rule encode_window_full_step_trace_inv(3)
+          [OF Suc.prems(2) tp_lt index])
+    have fuel': "length tgt - enc_tp ?st' < fuel"
+      using Suc.prems(1) tp'_gt tp'_le by linarith
+    show ?thesis
+      using Suc.IH[OF fuel' trace' sections'] False
+      by (simp only: encode_window_full_loop_Suc False if_False Let_def)
+  qed
+qed
+
+lemma encode_window_full_spec_sections_apply_window:
+  assumes "length src < 2 ^ 32"
+      and "length tgt < 2 ^ 32"
+      and "length src + length tgt < 2 ^ 32"
+  shows "apply_window
+           \<lparr> pw_src_seg_len = (if length src > 0 then length src else 0)
+           , pw_src_seg_off = 0
+           , pw_tgt_len = length tgt
+           , pw_data = efr_data (encode_window_full_spec src tgt)
+           , pw_inst = efr_inst (encode_window_full_spec src tgt)
+           , pw_addr = efr_addr (encode_window_full_spec src tgt) \<rparr>
+           src = Inl tgt"
+proof -
+  let ?index = "build_index_spec src"
+  let ?st = "encode_window_full_loop (length tgt + 1) src tgt ?index enc_full_init"
+  have init_trace: "encode_window_full_trace_inv src tgt enc_full_init"
+    by (rule encode_window_full_trace_inv_init)
+  have init_sections: "full_state_sections_decode_inv src tgt enc_full_init"
+    by (rule full_state_sections_decode_inv_init)
+  have fuel: "length tgt - enc_tp enc_full_init < length tgt + 1"
+    by (simp add: enc_full_init_def)
+  have complete:
+    "encode_window_full_trace_inv src tgt ?st
+   \<and> full_state_sections_decode_inv src tgt ?st
+   \<and> enc_tp ?st = length tgt
+   \<and> enc_flushed ?st = length tgt
+   \<and> enc_pending ?st = []"
+    using encode_window_full_loop_sections_complete
+      [OF assms refl fuel init_trace init_sections]
+    by (simp only: Let_def)
+  have aw:
+    "apply_window
+       \<lparr> pw_src_seg_len = (if length src > 0 then length src else 0)
+       , pw_src_seg_off = 0
+       , pw_tgt_len = length tgt
+       , pw_data = enc_data ?st
+       , pw_inst = enc_inst ?st
+       , pw_addr = enc_addr ?st \<rparr>
+       src = Inl tgt"
+    by (rule full_state_sections_decode_inv_apply_window)
+       (use complete in simp_all)
+  show ?thesis
+    using aw
+    by (simp only: encode_window_full_spec_def enc_full_result_of_state_def
+                   Let_def enc_full_result.select_convs)
+qed
+
 
 lemma encode_window_full_spec_sections_decode:
   assumes "length src < 2 ^ 32"
@@ -5229,7 +5575,34 @@ lemma encode_window_full_spec_sections_decode:
              (efr_inst (encode_window_full_spec src tgt))
              (efr_addr (encode_window_full_spec src tgt)))
            src = Inl tgt"
-  sorry
+proof -
+  let ?r = "encode_window_full_spec src tgt"
+  have fit:
+    "length (efr_data ?r) < 2 ^ 32"
+    "length (efr_inst ?r) < 2 ^ 32"
+    "length (efr_addr ?r) < 2 ^ 32"
+    "varint_size (length tgt) + 1
+       + varint_size (length (efr_data ?r))
+       + varint_size (length (efr_inst ?r))
+       + varint_size (length (efr_addr ?r))
+       + length (efr_data ?r) + length (efr_inst ?r) + length (efr_addr ?r)
+       < 2 ^ 32"
+    using assms(4) by (simp_all add: sections_fit_32_def)
+  have aw:
+    "apply_window
+       \<lparr> pw_src_seg_len = (if length src > 0 then length src else 0)
+       , pw_src_seg_off = 0
+       , pw_tgt_len = length tgt
+       , pw_data = efr_data ?r
+       , pw_inst = efr_inst ?r
+       , pw_addr = efr_addr ?r \<rparr>
+       src = Inl tgt"
+    by (rule encode_window_full_spec_sections_apply_window)
+       (use assms in simp_all)
+  show ?thesis
+    by (rule serialize_apply_window_roundtrip
+        [OF assms(1,2) fit aw])
+qed
 
 theorem encode_spec_full_roundtrip:
   assumes "length src < 2 ^ 32"
