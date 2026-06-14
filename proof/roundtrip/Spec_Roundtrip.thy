@@ -2,10 +2,11 @@
   Top-level roundtrip theorem: decoding what the encoder produced recovers
   the target.
 
-  The spec encoder uses a degenerate `generate_instructions` that emits a
-  single RAdd covering the whole target. That's enough for the theorem —
-  a smarter matcher is a refinement — but it keeps the proof tractable at
-  the Phase A layer.
+  The old single-ADD encoder is retained as `encode_spec_degenerate`. The
+  public `encode_spec` now uses the RUN-aware generator in Encoder_Spec.
+  The direct lemmas in the first half of this file document and preserve the
+  degenerate proof; the public theorem is proved later via the generic
+  instruction-stream theorem.
 
   Proof decomposition:
     1. encode_one inverts resolve-and-exec for each instruction form.
@@ -123,7 +124,7 @@ proof -
                   resolve_noop exec_half_noop)
 qed
 
-(* ---------- encode_spec for a target of length 1..17 and empty source ---------- *)
+(* ---------- encode_spec_degenerate for a target of length 1..17 and empty source ---------- *)
 (*
   For very small cases we can show decode inverts encode by direct
   computation. This is a sanity check that the pipeline composes.
@@ -228,9 +229,9 @@ qed
   NB: for this lemma we only need the list-shape equation; the varint
   roundtrip is exercised transitively by parse_window.
 *)
-lemma encode_spec_small_empty_shape:
+lemma encode_spec_degenerate_small_empty_shape:
   assumes "1 \<le> length tgt" "length tgt \<le> 17"
-  shows "encode_spec [] tgt =
+  shows "encode_spec_degenerate [] tgt =
            magic_bytes @ [0x00, 0x00]
          @ varint_encode (1 + varint_size (length tgt) + varint_size (length tgt)
                          + varint_size 1 + varint_size 0
@@ -243,7 +244,7 @@ lemma encode_spec_small_empty_shape:
          @ tgt
          @ [word_of_nat (1 + length tgt) :: byte]"
   using encode_window_small_empty_src[OF assms]
-  by (simp add: encode_spec_def serialize_from_insts_def generate_instructions_def serialize_def Let_def
+  by (simp add: encode_spec_degenerate_def serialize_from_insts_def generate_instructions_degenerate_def serialize_def Let_def
                 split_def magic_bytes_def add.commute add.left_commute)
 
 (* apply_window on the parsed_window for a small-ADD + empty source. *)
@@ -284,12 +285,12 @@ qed
 theorem spec_roundtrip_small:
   assumes "1 \<le> length tgt" "length tgt \<le> 17"
           "length tgt < 2 ^ 32"
-  shows   "decode_spec (encode_spec [] tgt) [] = Inl tgt"
+  shows   "decode_spec (encode_spec_degenerate [] tgt) [] = Inl tgt"
 proof -
   let ?op = "word_of_nat (1 + length tgt) :: byte"
   let ?dlen = "1 + varint_size (length tgt) + varint_size (length tgt)
               + varint_size 1 + varint_size 0 + length tgt + 1"
-  have shape: "encode_spec [] tgt =
+  have shape: "encode_spec_degenerate [] tgt =
                  magic_bytes @ [0x00, 0x00]
                @ varint_encode ?dlen
                @ varint_encode (length tgt)
@@ -299,9 +300,9 @@ proof -
                @ varint_encode 0
                @ tgt
                @ [?op]"
-    using encode_spec_small_empty_shape[OF assms(1,2)] by simp
+    using encode_spec_degenerate_small_empty_shape[OF assms(1,2)] by simp
 
-  have ph: "parse_header (encode_spec [] tgt)
+  have ph: "parse_header (encode_spec_degenerate [] tgt)
              = Inl (0x00 # varint_encode ?dlen @ varint_encode (length tgt)
                     @ [0x00] @ varint_encode (length tgt)
                     @ varint_encode 1 @ varint_encode 0 @ tgt @ [?op])"
@@ -482,7 +483,7 @@ proof -
                   resolve_noop exec_half_noop)
 qed
 
-(* ---------- encode_window / encode_spec for the general case ---------- *)
+(* ---------- encode_window / encode_spec_degenerate for the general case ---------- *)
 
 lemma encode_window_general_empty_src:
   assumes "length tgt > 17 \<or> length tgt = 0"
@@ -552,9 +553,9 @@ proof -
   thus ?thesis by (simp add: apply_window_def Let_def)
 qed
 
-lemma encode_spec_general_empty_shape:
+lemma encode_spec_degenerate_general_empty_shape:
   assumes "length tgt > 17 \<or> length tgt = 0"
-  shows "encode_spec [] tgt =
+  shows "encode_spec_degenerate [] tgt =
            magic_bytes @ [0x00, 0x00]
          @ varint_encode (1 + varint_size (length tgt) + varint_size (length tgt)
                          + varint_size (1 + length (varint_encode (length tgt)))
@@ -569,7 +570,7 @@ lemma encode_spec_general_empty_shape:
          @ [1 :: byte]
          @ varint_encode (length tgt)"
   using encode_window_general_empty_src[OF assms]
-  by (simp add: encode_spec_def serialize_from_insts_def generate_instructions_def serialize_def Let_def
+  by (simp add: encode_spec_degenerate_def serialize_from_insts_def generate_instructions_degenerate_def serialize_def Let_def
                 split_def magic_bytes_def add.commute add.left_commute)
 
 (* Parse_window + apply_window for the general case. *)
@@ -577,7 +578,7 @@ lemma encode_spec_general_empty_shape:
 lemma spec_roundtrip_empty_src_large:
   assumes "length tgt > 17 \<or> length tgt = 0"
           "length tgt < 2 ^ 32 - 32"
-  shows   "decode_spec (encode_spec [] tgt) [] = Inl tgt"
+  shows   "decode_spec (encode_spec_degenerate [] tgt) [] = Inl tgt"
 proof -
   let ?inst = "(1 :: byte) # varint_encode (length tgt)"
   let ?tlen_sz = "varint_size (length tgt)"
@@ -589,7 +590,7 @@ proof -
   have inst_len_eq: "length ?inst = 1 + length (varint_encode (length tgt))"
     by simp
 
-  have shape: "encode_spec [] tgt =
+  have shape: "encode_spec_degenerate [] tgt =
                  magic_bytes @ [0x00, 0x00]
                @ varint_encode ?dlen
                @ varint_encode (length tgt)
@@ -600,10 +601,10 @@ proof -
                @ tgt
                @ ?inst"
     using encode_window_general_empty_src[OF assms(1)]
-    by (simp add: encode_spec_def serialize_from_insts_def generate_instructions_def serialize_def Let_def
+    by (simp add: encode_spec_degenerate_def serialize_from_insts_def generate_instructions_degenerate_def serialize_def Let_def
                   split_def magic_bytes_def add.commute add.left_commute)
 
-  have ph: "parse_header (encode_spec [] tgt)
+  have ph: "parse_header (encode_spec_degenerate [] tgt)
              = Inl (0x00 # varint_encode ?dlen @ varint_encode (length tgt)
                     @ [0x00] @ varint_encode (length tgt)
                     @ varint_encode (length ?inst) @ varint_encode 0 @ tgt @ ?inst)"
@@ -691,7 +692,7 @@ qed
 
 theorem spec_roundtrip_empty_src:
   assumes "length tgt < 2 ^ 32 - 32"
-  shows   "decode_spec (encode_spec [] tgt) [] = Inl tgt"
+  shows   "decode_spec (encode_spec_degenerate [] tgt) [] = Inl tgt"
 proof (cases "length tgt = 0")
   case True
   then have "length tgt > 17 \<or> length tgt = 0" by simp
@@ -762,12 +763,12 @@ proof -
     by (simp add: dlen_eq)
 qed
 
-(* ---------- encode_spec for non-empty source (small/large tgt) ---------- *)
+(* ---------- encode_spec_degenerate for non-empty source (small/large tgt) ---------- *)
 
-lemma encode_spec_nonempty_src_shape_small:
+lemma encode_spec_degenerate_nonempty_src_shape_small:
   assumes "1 \<le> length tgt" "length tgt \<le> 17"
           "length src > 0"
-  shows "encode_spec src tgt =
+  shows "encode_spec_degenerate src tgt =
            magic_bytes @ [0x00, 0x01]
          @ varint_encode (length src)
          @ varint_encode 0
@@ -781,13 +782,13 @@ lemma encode_spec_nonempty_src_shape_small:
          @ tgt
          @ [word_of_nat (1 + length tgt) :: byte]"
   using encode_window_small_empty_src[OF assms(1,2)] assms(3)
-  by (simp add: encode_spec_def serialize_from_insts_def generate_instructions_def serialize_def Let_def
+  by (simp add: encode_spec_degenerate_def serialize_from_insts_def generate_instructions_degenerate_def serialize_def Let_def
                 split_def magic_bytes_def add.commute add.left_commute)
 
-lemma encode_spec_nonempty_src_shape_large:
+lemma encode_spec_degenerate_nonempty_src_shape_large:
   assumes "length tgt > 17 \<or> length tgt = 0"
           "length src > 0"
-  shows "encode_spec src tgt =
+  shows "encode_spec_degenerate src tgt =
            magic_bytes @ [0x00, 0x01]
          @ varint_encode (length src)
          @ varint_encode 0
@@ -804,7 +805,7 @@ lemma encode_spec_nonempty_src_shape_large:
          @ [1 :: byte]
          @ varint_encode (length tgt)"
   using encode_window_general_empty_src[OF assms(1)] assms(2)
-  by (simp add: encode_spec_def serialize_from_insts_def generate_instructions_def serialize_def Let_def
+  by (simp add: encode_spec_degenerate_def serialize_from_insts_def generate_instructions_degenerate_def serialize_def Let_def
                 split_def magic_bytes_def add.commute add.left_commute)
 
 (* apply_window when the source segment is non-empty but the instruction
@@ -908,7 +909,7 @@ qed
 theorem spec_roundtrip_nonempty_src_small:
   assumes "1 \<le> length tgt" "length tgt \<le> 17"
           "length tgt < 2 ^ 32" "length src > 0" "length src < 2 ^ 32"
-  shows   "decode_spec (encode_spec src tgt) src = Inl tgt"
+  shows   "decode_spec (encode_spec_degenerate src tgt) src = Inl tgt"
 proof -
   let ?op = "word_of_nat (1 + length tgt) :: byte"
   let ?dlen = "1 + varint_size (length tgt) + varint_size (length tgt)
@@ -943,7 +944,7 @@ proof -
   have op_bd: "length ([?op]) < 2 ^ 32" by simp
   have empty_bd: "length ([] :: byte list) < 2 ^ 32" by simp
 
-  have shape: "encode_spec src tgt =
+  have shape: "encode_spec_degenerate src tgt =
                  magic_bytes @ [0x00, 0x01]
                @ varint_encode (length src)
                @ varint_encode 0
@@ -955,9 +956,9 @@ proof -
                @ varint_encode 0
                @ tgt
                @ [?op]"
-    using encode_spec_nonempty_src_shape_small[OF assms(1,2,4)] by simp
+    using encode_spec_degenerate_nonempty_src_shape_small[OF assms(1,2,4)] by simp
 
-  have ph: "parse_header (encode_spec src tgt)
+  have ph: "parse_header (encode_spec_degenerate src tgt)
              = Inl (0x01 # varint_encode (length src) @ varint_encode 0
                     @ varint_encode ?dlen @ varint_encode (length tgt)
                     @ [0x00] @ varint_encode (length tgt)
@@ -1036,7 +1037,7 @@ qed
 theorem spec_roundtrip_nonempty_src_large:
   assumes "length tgt > 17 \<or> length tgt = 0"
           "length tgt < 2 ^ 32 - 32" "length src > 0" "length src < 2 ^ 32"
-  shows   "decode_spec (encode_spec src tgt) src = Inl tgt"
+  shows   "decode_spec (encode_spec_degenerate src tgt) src = Inl tgt"
 proof -
   let ?inst = "(1 :: byte) # varint_encode (length tgt)"
   let ?tlen_sz = "varint_size (length tgt)"
@@ -1069,7 +1070,7 @@ proof -
   have inst_bd: "length ?inst < 2 ^ 32" using inst_len_bd by simp
   have empty_bd: "length ([] :: byte list) < 2 ^ 32" by simp
 
-  have shape: "encode_spec src tgt =
+  have shape: "encode_spec_degenerate src tgt =
                  magic_bytes @ [0x00, 0x01]
                @ varint_encode (length src)
                @ varint_encode 0
@@ -1081,9 +1082,9 @@ proof -
                @ varint_encode 0
                @ tgt
                @ ?inst"
-    using encode_spec_nonempty_src_shape_large[OF assms(1,3)] by simp
+    using encode_spec_degenerate_nonempty_src_shape_large[OF assms(1,3)] by simp
 
-  have ph: "parse_header (encode_spec src tgt)
+  have ph: "parse_header (encode_spec_degenerate src tgt)
              = Inl (0x01 # varint_encode (length src) @ varint_encode 0
                     @ varint_encode ?dlen @ varint_encode (length tgt)
                     @ [0x00] @ varint_encode (length tgt)
@@ -1157,10 +1158,10 @@ proof -
     using ph pw aw by (simp add: decode_spec_def)
 qed
 
-theorem spec_roundtrip:
+theorem spec_roundtrip_degenerate:
   assumes "length src < 2 ^ 32"
           "length tgt < 2 ^ 32 - 32"
-  shows   "decode_spec (encode_spec src tgt) src = Inl tgt"
+  shows   "decode_spec (encode_spec_degenerate src tgt) src = Inl tgt"
 proof (cases "length src = 0")
   case True
   then have "src = []" by simp
@@ -1979,6 +1980,39 @@ definition bounded_insts :: "raw_inst list \<Rightarrow> bool" where
       | RRun _ n \<Rightarrow> n < 2 ^ 32
       | RCopy a n \<Rightarrow> n < 2 ^ 32 \<and> a < 2 ^ 32)"
 
+lemma generate_run_instructions_bounded:
+  assumes "length tgt < 2 ^ 32"
+  shows "bounded_insts (generate_run_instructions tgt)"
+  using assms
+  by (cases tgt) (auto simp: generate_run_instructions_def bounded_insts_def)
+
+lemma encode_window_generate_run_instructions_bounds:
+  assumes ew:
+    "encode_window (generate_run_instructions tgt) (length src) = (data, inst, addr, c)"
+  shows "length data \<le> length tgt
+       \<and> length inst \<le> 1 + varint_size (length tgt)
+       \<and> addr = []"
+proof (cases tgt)
+  case Nil
+  then show ?thesis using ew by (simp add: encode_window_def generate_run_instructions_def)
+next
+  case (Cons b bs)
+  show ?thesis
+  proof (cases "4 \<le> length tgt \<and> all_bytes_eq b bs")
+    case True
+    then show ?thesis
+      using ew Cons
+      by (auto simp: encode_window_def generate_run_instructions_def
+                    find_single_run_opcode_def varint_size_lengths Let_def split_def)
+  next
+    case False
+    then show ?thesis
+      using ew Cons
+      by (auto simp: encode_window_def generate_run_instructions_def
+                     find_single_add_opcode_def Let_def split_def)
+  qed
+qed
+
 lemma encode_window_loop_decode_loop:
   assumes ewl: "encode_window_loop insts src_len tgt_pos c [] [] [] = (data, inst, addr, c')"
       and wf: "wf_insts_aux src_seg insts tgt_so_far"
@@ -2458,16 +2492,99 @@ proof -
     using spr aw by (simp add: Let_def)
 qed
 
-(* The matcher-parametric corollary. With the degenerate matcher
-   generate_instructions src tgt = [RAdd tgt], this coincides with
-   spec_roundtrip above when length tgt > 0. For length tgt = 0, the
-   degenerate [RAdd []] fails wf_insts, so we delegate to spec_roundtrip
-   unconditionally since it handles the empty case directly. *)
-corollary spec_roundtrip':
+(* The historical degenerate corollary. *)
+corollary spec_roundtrip_degenerate':
   assumes "length src < 2 ^ 32"
           "length tgt < 2 ^ 32 - 32"
-          "length src + length tgt < 2 ^ 32"
-  shows   "decode_spec (encode_spec src tgt) src = Inl tgt"
-  using spec_roundtrip[OF assms(1,2)] .
+  shows   "decode_spec (encode_spec_degenerate src tgt) src = Inl tgt"
+  using spec_roundtrip_degenerate[OF assms] .
+
+lemma varint_size_le_5_32:
+  assumes "n < 2 ^ 32"
+  shows "varint_size n \<le> 5"
+proof -
+  have "n < 2 ^ 35" using assms by simp
+  hence "num_digits n \<le> 5" by (rule num_digits_le_5)
+  thus ?thesis by (simp add: varint_size_def)
+qed
+
+theorem spec_roundtrip:
+  assumes src_bd: "length src < 2 ^ 32"
+      and tgt_bd: "length tgt < 2 ^ 32 - 32"
+      and combined_bd: "length src + length tgt < 2 ^ 32"
+  shows "decode_spec (encode_spec src tgt) src = Inl tgt"
+proof -
+  let ?insts = "generate_instructions src tgt"
+
+  have vi: "valid_insts src tgt ?insts"
+    by (simp add: generate_instructions_def generate_run_instructions_valid)
+
+  have tgt_bd32: "length tgt < 2 ^ 32"
+    using tgt_bd by simp
+  have tgt_bd32_slack: "length tgt < 2 ^ 32 - 32"
+    using tgt_bd .
+
+  have bi: "bounded_insts ?insts"
+    using generate_run_instructions_bounded[OF tgt_bd32]
+    by (simp add: generate_instructions_def)
+
+  have ew_bd:
+    "let (data, inst, addr, _) = encode_window ?insts (length src)
+     in length data < 2 ^ 32 \<and> length inst < 2 ^ 32
+      \<and> length addr < 2 ^ 32
+      \<and> varint_size (length tgt) + 1 + varint_size (length data)
+        + varint_size (length inst) + varint_size (length addr)
+        + length data + length inst + length addr < 2 ^ 32"
+  proof -
+    obtain data inst addr c where
+      ew: "encode_window ?insts (length src) = (data, inst, addr, c)"
+      by (cases "encode_window ?insts (length src)") auto
+    have ew_run:
+      "encode_window (generate_run_instructions tgt) (length src) =
+        (data, inst, addr, c)"
+      using ew by (simp add: generate_instructions_def)
+    have lens:
+      "length data \<le> length tgt"
+      "length inst \<le> 1 + varint_size (length tgt)"
+      "addr = []"
+      using encode_window_generate_run_instructions_bounds[OF ew_run] by auto
+    have data_bd: "length data < 2 ^ 32"
+      using lens(1) tgt_bd32 by linarith
+    have addr_bd: "length addr < 2 ^ 32"
+      using lens(3) by simp
+    have vsz_tgt: "varint_size (length tgt) \<le> 5"
+      by (rule varint_size_le_5_32[OF tgt_bd32])
+    have inst_bd: "length inst < 2 ^ 32"
+    proof -
+      have "length inst \<le> 6"
+        using lens(2) vsz_tgt by linarith
+      thus ?thesis by simp
+    qed
+    have vsz_data: "varint_size (length data) \<le> 5"
+      by (rule varint_size_le_5_32[OF data_bd])
+    have vsz_inst: "varint_size (length inst) \<le> 5"
+      by (rule varint_size_le_5_32[OF inst_bd])
+    have vsz_addr: "varint_size (length addr) \<le> 1"
+      using lens(3) by (simp add: varint_size_def)
+    have addr_len: "length addr = 0"
+      using lens(3) by simp
+    have dlen_le:
+      "varint_size (length tgt) + 1 + varint_size (length data)
+       + varint_size (length inst) + varint_size (length addr)
+       + length data + length inst + length addr
+       \<le> 23 + length tgt"
+      using lens addr_len vsz_tgt vsz_data vsz_inst vsz_addr by linarith
+    have dlen_bd:
+      "23 + length tgt < 2 ^ 32"
+      using tgt_bd by simp
+    show ?thesis
+      using ew data_bd inst_bd addr_bd dlen_le dlen_bd by simp
+  qed
+
+  have "decode_spec (serialize_from_insts src tgt ?insts) src = Inl tgt"
+    by (rule roundtrip_generic[OF vi bi src_bd tgt_bd32_slack combined_bd ew_bd])
+  thus ?thesis
+    by (simp add: encode_spec_def)
+qed
 
 end

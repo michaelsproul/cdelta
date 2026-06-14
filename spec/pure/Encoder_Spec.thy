@@ -1,7 +1,7 @@
 (*
   Pure VCDIFF encoder spec.
 
-  Mirrors encoder/vcdiff_enc.c at the functional level. The structure is:
+  Mirrors spec/cenc/vcdiff_enc.c at the functional level. The structure is:
 
     encode_spec src tgt
       = let insts = generate_instructions src tgt   -- match finder
@@ -9,13 +9,12 @@
               = encode_window insts (length src)
         in serialize src tgt data inst_bytes addr_bytes
 
-  The matcher is non-deterministic in the sense that any `raw_inst list`
-  that reproduces `tgt` when executed against `src` is a valid output; we
-  specify the *output format* here and defer the matching algorithm to a
-  concrete function whose only required property is "exec_inst_list src
-  insts [] = tgt". That loose coupling is what lets us prove roundtrip
-  correctness without having to mirror the exact greedy-matcher details
-  of the C.
+  The current concrete generator is the first non-degenerate step: it emits a
+  RUN when the whole target is one repeated byte of length at least four,
+  otherwise it emits one ADD. This is intentionally smaller than the C matcher,
+  but it breaks the old single-ADD spec shape and gives the pure roundtrip
+  theorem a real RUN path to compose through. COPY matching and opcode fusion
+  can be added behind the same `generate_instructions` boundary.
 *)
 theory Encoder_Spec
   imports
@@ -28,28 +27,83 @@ begin
 
 unbundle bit_operations_syntax
 
-(* ---------- Instruction generation (abstract) ---------- *)
-(*
-  Any function satisfying `generate_instructions_valid` is acceptable for
-  the spec. We expose a constant that's fixed later by a concrete
-  algorithm; the correctness statement is independent.
-*)
+(* ---------- Instruction generation ---------- *)
+
 definition generates_target :: "byte list \<Rightarrow> byte list \<Rightarrow> raw_inst list \<Rightarrow> bool" where
   "generates_target src tgt insts = (exec_inst_list src insts [] = tgt)"
 
 (*
-  Concrete matcher: produce a single `RAdd tgt` instruction for the
-  entire target. This is a degenerate but valid matcher — it satisfies
-  generates_target for any (src, tgt) pair. A smarter matcher with COPY
-  and RUN instructions would refine this but the roundtrip theorem holds
-  for any matcher satisfying `generates_target`.
+  Baseline matcher retained for regression tests and the old proof notes. It
+  is no longer the main `encode_spec` path.
 *)
+definition generate_instructions_degenerate ::
+    "byte list \<Rightarrow> byte list \<Rightarrow> raw_inst list" where
+  "generate_instructions_degenerate src tgt = [RAdd tgt]"
+
+lemma generate_instructions_degenerate_correct:
+  "generates_target src tgt (generate_instructions_degenerate src tgt)"
+  by (simp add: generates_target_def generate_instructions_degenerate_def)
+
+(*
+  First non-degenerate generator. If the whole target is one byte repeated at
+  least four times, emit a RUN. Otherwise emit a single ADD. This deliberately
+  starts smaller than the C matcher while changing the public spec away from
+  the old always-ADD encoder.
+*)
+definition all_bytes_eq :: "byte \<Rightarrow> byte list \<Rightarrow> bool" where
+  "all_bytes_eq b bs = list_all (\<lambda>x. x = b) bs"
+
+definition generate_run_instructions :: "byte list \<Rightarrow> raw_inst list" where
+  "generate_run_instructions tgt =
+     (case tgt of
+        [] \<Rightarrow> []
+      | b # bs \<Rightarrow>
+          if 4 \<le> length tgt \<and> all_bytes_eq b bs
+          then [RRun b (length tgt)]
+          else [RAdd tgt])"
+
 definition generate_instructions :: "byte list \<Rightarrow> byte list \<Rightarrow> raw_inst list" where
-  "generate_instructions src tgt = [RAdd tgt]"
+  "generate_instructions src tgt = generate_run_instructions tgt"
+
+lemma generate_run_instructions_exec:
+  "exec_inst_list src (generate_run_instructions tgt) acc = acc @ tgt"
+proof (cases tgt)
+  case Nil
+  then show ?thesis by (simp add: generate_run_instructions_def)
+next
+  case (Cons b bs)
+  show ?thesis
+  proof (cases "4 \<le> length tgt \<and> all_bytes_eq b bs")
+    case True
+    have bs_rep: "bs = replicate (length bs) b"
+      using True by (induction bs) (auto simp: all_bytes_eq_def)
+    have tgt_rep: "tgt = replicate (length tgt) b"
+      using Cons bs_rep by simp
+    show ?thesis
+      using Cons True tgt_rep
+      by (simp add: generate_run_instructions_def append_assoc)
+  next
+    case False
+    have norun: "\<not> (4 \<le> length (b # bs) \<and> all_bytes_eq b bs)"
+      using False Cons by simp
+    then show ?thesis
+      using Cons norun by (auto simp: generate_run_instructions_def)
+  qed
+qed
+
+lemma generate_run_instructions_wf_aux:
+  "wf_insts_aux src (generate_run_instructions tgt) acc"
+  by (cases tgt) (auto simp: generate_run_instructions_def)
+
+lemma generate_run_instructions_valid:
+  "valid_insts src tgt (generate_run_instructions tgt)"
+  by (simp add: valid_insts_def wf_insts_def generate_run_instructions_exec
+                generate_run_instructions_wf_aux)
 
 lemma generate_instructions_correct:
   "generates_target src tgt (generate_instructions src tgt)"
-  by (simp add: generates_target_def generate_instructions_def)
+  by (simp add: generates_target_def generate_instructions_def
+                generate_run_instructions_exec)
 
 (* ---------- Per-instruction encoding ---------- *)
 
@@ -212,6 +266,10 @@ definition serialize_from_insts ::
           inst = fst (snd result);
           addr = fst (snd (snd result))
       in serialize src tgt data inst addr)"
+
+definition encode_spec_degenerate :: "byte list \<Rightarrow> byte list \<Rightarrow> byte list" where
+  "encode_spec_degenerate src tgt =
+     serialize_from_insts src tgt (generate_instructions_degenerate src tgt)"
 
 definition encode_spec :: "byte list \<Rightarrow> byte list \<Rightarrow> byte list" where
   "encode_spec src tgt = serialize_from_insts src tgt (generate_instructions src tgt)"
