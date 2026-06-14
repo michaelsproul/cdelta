@@ -1443,6 +1443,56 @@ lemma heap_bytes_drop_word_prefix:
   using heap_bytes_append_heap_bytes_word[OF no_overflow, of s buf]
   by simp
 
+lemma heap_bytes_word_eq_take_drop_heap_bytes:
+  fixes off sz len :: "32 word"
+  assumes bytes: "heap_bytes s buf (unat len) = bs"
+      and range: "unat off + unat sz \<le> unat len"
+  shows "heap_bytes_word s buf off sz =
+         take (unat sz) (drop (unat off) bs)"
+proof (rule nth_equalityI)
+  show "length (heap_bytes_word s buf off sz) =
+        length (take (unat sz) (drop (unat off) bs))"
+  proof -
+    have len_bs: "length bs = unat len"
+      using bytes by (metis heap_bytes_length)
+    show ?thesis
+      using len_bs range by simp
+  qed
+next
+  fix i
+  assume i_lt_len:
+    "i < length (heap_bytes_word s buf off sz)"
+  then have i_lt: "i < unat sz"
+    by simp
+  have no_overflow: "unat off + unat sz < 2 ^ 32"
+  proof -
+    have len_lt: "unat len < 2 ^ 32"
+      using unat_lt2p[of len] by simp
+    show ?thesis
+      using range len_lt by linarith
+  qed
+  have idx: "unat (off + of_nat i :: 32 word) = unat off + i"
+    by (rule unat_add_of_nat_index[OF i_lt no_overflow])
+  have idx_len: "unat off + i < unat len"
+    using i_lt range by linarith
+  have len_bs: "length bs = unat len"
+    using bytes by (metis heap_bytes_length)
+  have drop_nth: "drop (unat off) bs ! i = bs ! (unat off + i)"
+    using idx_len len_bs by simp
+  have bs_nth:
+    "bs ! (unat off + i) =
+     heap_w8 s (buf +\<^sub>p int (unat off + i))"
+    using bytes idx_len by (metis heap_bytes_nth)
+  have ptr_eq:
+    "buf +\<^sub>p uint (off + of_nat i :: 32 word) =
+     buf +\<^sub>p int (unat off + i)"
+    using idx by (simp only: uint_nat)
+  show "heap_bytes_word s buf off sz ! i =
+        take (unat sz) (drop (unat off) bs) ! i"
+    using i_lt drop_nth bs_nth ptr_eq
+    by (simp add: heap_bytes_word_nth heap_bytes_nth)
+qed
+
 (* ---------- Buffer validity ---------- *)
 
 definition buf_valid :: "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> bool" where
@@ -1905,6 +1955,23 @@ lemma write_byte'_success_preserves_heap_bytes:
     using ptr_ok .
   subgoal
     using pos_lt disj by (auto simp: word_not_le heap_bytes_def fun_upd_apply)
+  done
+
+lemma write_byte'_success_preserves_heap_bytes_word:
+  assumes pos_lt: "pos < cap"
+      and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
+      and disj: "\<forall>i < unat out_len.
+           out +\<^sub>p uint (out_pos + of_nat i) \<noteq> buf +\<^sub>p uint pos"
+  shows "write_byte' buf cap pos b \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+                   heap_bytes_word t out out_pos out_len =
+                   heap_bytes_word s out out_pos out_len \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[OF write_byte'_spec])
+  subgoal
+    using ptr_ok .
+  subgoal
+    using pos_lt disj by (auto simp: word_not_le heap_bytes_word_def fun_upd_apply)
   done
 
 lemma write_varint_loop_preserves_heap_bytes:
@@ -2416,6 +2483,104 @@ lemma write_bytes'_success_preserves_heap_bytes:
       [OF dst_valid src_valid disj]])
   by auto
 
+lemma write_bytes_loop_preserves_heap_bytes_word:
+  fixes len pos src_off out_pos out_len :: "32 word"
+  assumes dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))"
+      and disj: "\<forall>k < unat out_len. \<forall>i.
+           i < len \<longrightarrow>
+           out +\<^sub>p uint (out_pos + of_nat k) \<noteq>
+           buf +\<^sub>p uint (pos + i)"
+  shows "(whileLoop (\<lambda>(i :: 32 word) st. i < len)
+           (\<lambda>i. do {
+              guard (\<lambda>st. ptr_valid (heap_typing st) (buf +\<^sub>p uint (pos + i)));
+              guard (\<lambda>st. ptr_valid (heap_typing st) (src +\<^sub>p uint (src_off + i)));
+              modify (heap_w8_update
+                (\<lambda>h. h(buf +\<^sub>p uint (pos + i) :=
+                         h (src +\<^sub>p uint (src_off + i)))));
+              return (i + 1)
+           }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result len \<and>
+            heap_bytes_word t out out_pos out_len =
+            heap_bytes_word s out out_pos out_len \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((i :: 32 word), _). unat len - unat i)"
+      and I = "\<lambda>i st. unat i \<le> unat len
+             \<and> heap_bytes_word st out out_pos out_len =
+                heap_bytes_word s out out_pos out_len
+             \<and> heap_typing st = heap_typing s"])
+     subgoal by simp
+     subgoal by unat_arith
+    subgoal premises prems for i st
+    proof -
+      have len_le: "unat len \<le> unat i"
+        using prems(1) by (simp add: word_less_nat_alt)
+      have i_eq: "i = len"
+        using prems(2) len_le by (metis antisym_conv word_unat.Rep_inject)
+      show ?thesis
+        using prems(2) i_eq by simp
+    qed
+  subgoal premises prems for i st
+  proof -
+    have i_word: "i < len"
+      using prems(1) by (simp add: word_less_nat_alt)
+    have i_lt: "unat i < unat len"
+      using i_word by (simp add: word_less_nat_alt)
+    have i_of_nat: "(of_nat (unat i) :: 32 word) = i"
+      by (simp add: word_unat.Rep_inverse)
+    have dst:
+      "ptr_valid (heap_typing st) (buf +\<^sub>p uint (pos + i))"
+      using dst_valid[rule_format, of "unat i"] i_lt prems(2)
+      by (simp add: i_of_nat)
+    have src_ptr:
+      "ptr_valid (heap_typing st) (src +\<^sub>p uint (src_off + i))"
+      using src_valid[rule_format, of "unat i"] i_lt prems(2)
+      by (simp add: i_of_nat)
+    have out_update:
+      "heap_bytes_word
+        (heap_w8_update
+          (\<lambda>h. h(buf +\<^sub>p uint (pos + i) :=
+                   h (src +\<^sub>p uint (src_off + i)))) st)
+        out out_pos out_len =
+       heap_bytes_word st out out_pos out_len"
+      using disj i_word
+      by (auto simp: heap_bytes_word_def fun_upd_apply)
+    show ?thesis
+      using prems dst src_ptr out_update i_word
+      by (auto simp: runs_to.rep_eq run_bind run_guard run_modify
+                     word_less_nat_alt word_unat.Rep_inverse
+               intro: unat_suc_le_of_word_less
+                      unat_measure_decrease_of_word_less)
+  qed
+  done
+
+lemma write_bytes'_success_preserves_heap_bytes_word:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))"
+      and disj: "\<forall>k < unat out_len. \<forall>i.
+           i < len \<longrightarrow>
+           out +\<^sub>p uint (out_pos + of_nat k) \<noteq>
+           buf +\<^sub>p uint (pos + i)"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+                   heap_bytes_word t out out_pos out_len =
+                   heap_bytes_word s out out_pos out_len \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  unfolding write_bytes'_def
+  apply runs_to_vcg
+  using fits
+  apply simp
+  apply (rule runs_to_weaken[
+    OF write_bytes_loop_preserves_heap_bytes_word
+      [OF dst_valid src_valid disj]])
+  by auto
+
 lemma write_varint_loop_preserves_heap_bytes_prefix:
   fixes len pos :: "32 word"
   assumes dst_valid: "\<forall>j < unat len.
@@ -2820,6 +2985,81 @@ proof -
            heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
            heap_typing t = heap_typing s) \<rbrace>"
     using combined12 pres2 by (simp add: runs_to_conj)
+  show ?thesis
+    apply (rule runs_to_weaken[OF combined])
+    by auto
+qed
+
+lemma write_bytes'_success_heap_bytes_append_wordpos_preserves2_word:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))"
+      and dst_src_disj: "\<forall>i < unat len. \<forall>j < unat len.
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           src +\<^sub>p uint (src_off + of_nat j)"
+      and dst_inj: "\<forall>i < unat len. \<forall>j < unat len.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat pos. \<forall>i.
+           i < len \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and no_overflow: "unat pos + unat len < 2 ^ 32"
+      and disj1: "\<forall>k < out1_n. \<forall>i.
+           i < len \<longrightarrow> out1 +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and disj2: "\<forall>k < out2_n. \<forall>i.
+           i < len \<longrightarrow> out2 +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and word_disj: "\<forall>k < unat out3_len. \<forall>i.
+           i < len \<longrightarrow>
+           out3 +\<^sub>p uint (out3_pos + of_nat k) \<noteq>
+           buf +\<^sub>p uint (pos + i)"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + len)) =
+                   heap_bytes s buf (unat pos) @
+                   heap_bytes_word s src src_off len \<and>
+                   heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+                   heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+                   heap_bytes_word t out3 out3_pos out3_len =
+                   heap_bytes_word s out3 out3_pos out3_len \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have append2:
+    "write_bytes' buf cap pos src src_off len \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+               heap_bytes t buf (unat (pos + len)) =
+               heap_bytes s buf (unat pos) @
+               heap_bytes_word s src src_off len \<and>
+               heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+               heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_bytes'_success_heap_bytes_append_wordpos_preserves2
+      [OF fits dst_valid src_valid dst_src_disj dst_inj prefix_disj
+          no_overflow disj1 disj2])
+  have pres3:
+    "write_bytes' buf cap pos src src_off len \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+               heap_bytes_word t out3 out3_pos out3_len =
+               heap_bytes_word s out3 out3_pos out3_len \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_bytes'_success_preserves_heap_bytes_word
+      [OF fits dst_valid src_valid word_disj])
+  have combined:
+    "write_bytes' buf cap pos src src_off len \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+           heap_bytes t buf (unat (pos + len)) =
+           heap_bytes s buf (unat pos) @
+           heap_bytes_word s src src_off len \<and>
+           heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+           heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+           heap_typing t = heap_typing s) \<and>
+          (r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+           heap_bytes_word t out3 out3_pos out3_len =
+           heap_bytes_word s out3 out3_pos out3_len \<and>
+           heap_typing t = heap_typing s) \<rbrace>"
+    using append2 pres3 by (simp add: runs_to_conj)
   show ?thesis
     apply (rule runs_to_weaken[OF combined])
     by auto

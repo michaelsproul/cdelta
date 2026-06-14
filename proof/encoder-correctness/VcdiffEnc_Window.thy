@@ -83,6 +83,74 @@ next
   then show ?case by (cases xs) simp_all
 qed
 
+lemma take_drop_append_segment:
+  assumes "i \<le> j" "j \<le> length xs"
+  shows "take i xs @ take (j - i) (drop i xs) = take j xs"
+proof -
+  have "take j xs = take (i + (j - i)) xs"
+    using assms by simp
+  also have "... = take i xs @ take (j - i) (drop i xs)"
+    by (simp add: take_add)
+  finally show ?thesis
+    by simp
+qed
+
+lemma take_drop_all_eq_replicate:
+  assumes "i \<le> j" "j \<le> length xs"
+      and all: "\<And>k. \<lbrakk>i \<le> k; k < j\<rbrakk> \<Longrightarrow> xs ! k = b"
+  shows "take (j - i) (drop i xs) = replicate (j - i) b"
+proof (rule nth_equalityI)
+  show "length (take (j - i) (drop i xs)) =
+        length (replicate (j - i) b)"
+    using assms by simp
+next
+  fix k
+  assume k_lt:
+    "k < length (take (j - i) (drop i xs))"
+  then have k_seg: "k < j - i"
+    using assms by simp
+  have idx_ge: "i \<le> i + k"
+    by simp
+  have idx_lt: "i + k < j"
+    using assms k_seg by simp
+  have idx_len: "i + k < length xs"
+    using idx_lt assms by simp
+  show "take (j - i) (drop i xs) ! k = replicate (j - i) b ! k"
+    using k_seg idx_len all[OF idx_ge idx_lt]
+    by simp
+qed
+
+lemma unat_word_sub_of_le:
+  fixes i j :: "32 word"
+  assumes "unat i \<le> unat j"
+  shows "unat (j - i) = unat j - unat i"
+  using assms by unat_arith
+
+lemma unat_word_sub_add_of_le:
+  fixes i j :: "32 word"
+  assumes "unat i \<le> unat j"
+  shows "unat i + unat (j - i) = unat j"
+  using assms by unat_arith
+
+lemma append_pending_segment_take:
+  fixes off i :: "32 word"
+  assumes off_le: "unat off \<le> unat i"
+      and i_le: "unat i \<le> length pending_bytes"
+  shows "take (unat off) pending_bytes @
+         take (unat (i - off)) (drop (unat off) pending_bytes) =
+         take (unat i) pending_bytes"
+proof -
+  have sub_len: "unat (i - off) = unat i - unat off"
+    by (rule unat_word_sub_of_le[OF off_le])
+  have app:
+    "take (unat off) pending_bytes @
+     take (unat i - unat off) (drop (unat off) pending_bytes) =
+     take (unat i) pending_bytes"
+    by (rule take_drop_append_segment[OF off_le i_le])
+  show ?thesis
+    using app by (simp add: sub_len)
+qed
+
 lemma encoder_loop_inv_pending_eq_drop_take:
   assumes inv: "encoder_loop_inv tgt tp flushed pending"
   shows "pending = drop (length flushed) (take tp tgt)"
@@ -308,6 +376,19 @@ lemma section_decodes_empty[simp]:
 
 context vcdiff_enc_global_addresses begin
 
+lemma heap_bytes_word_pending_segment:
+  fixes off len total :: "32 word"
+  assumes bytes: "heap_bytes_word s pending 0 total = pending_bytes"
+      and range: "unat off + unat len \<le> unat total"
+  shows "heap_bytes_word s pending off len =
+         take (unat len) (drop (unat off) pending_bytes)"
+proof -
+  have heap_bytes: "heap_bytes s pending (unat total) = pending_bytes"
+    using bytes heap_bytes_word_zero[of s pending total] by simp
+  show ?thesis
+    by (rule heap_bytes_word_eq_take_drop_heap_bytes[OF heap_bytes range])
+qed
+
 lemma enc_sections_inv_empty:
   assumes "sections_t_C.data_pos_C sec = 0"
       and "sections_t_C.inst_pos_C sec = 0"
@@ -527,6 +608,145 @@ lemma encode_window_buffers_ok_heap_typing_eq:
      src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
      pending pending_cap"
   using assms by (simp add: encode_window_buffers_ok_def buf_valid_def)
+
+lemma word_range_no_overflow_of_cap:
+  fixes pos len cap :: "32 word"
+  assumes range: "unat pos + unat len \<le> unat cap"
+  shows "unat pos + unat len < (2 :: nat) ^ 32"
+proof -
+  have cap_lt_len: "unat cap < (2 :: nat) ^ LENGTH(32)"
+    by (rule unat_lt2p)
+  have cap_lt: "unat cap < (2 :: nat) ^ 32"
+    using cap_lt_len by simp
+  show ?thesis
+    using range cap_lt by linarith
+qed
+
+lemma word_sub_fits_unat_range:
+  fixes pos cap len :: "32 word"
+  assumes pos_le: "unat pos \<le> unat cap"
+      and fits: "\<not> cap - pos < len"
+  shows "unat pos + unat len \<le> unat cap"
+  using assms by unat_arith
+
+lemma bufs_disjoint_word_rangesD:
+  fixes p_pos p_len q_pos q_len :: "32 word"
+  assumes disj: "bufs_disjoint p p_total q q_total"
+      and p_no_overflow: "unat p_pos + unat p_len < (2 :: nat) ^ 32"
+      and q_no_overflow: "unat q_pos + unat q_len < (2 :: nat) ^ 32"
+      and p_range: "unat p_pos + unat p_len \<le> p_total"
+      and q_range: "unat q_pos + unat q_len \<le> q_total"
+      and i_lt: "i < unat p_len"
+      and j_lt: "j < unat q_len"
+  shows "p +\<^sub>p uint (p_pos + of_nat i) \<noteq>
+         q +\<^sub>p uint (q_pos + of_nat j)"
+proof -
+  have p_idx: "unat (p_pos + of_nat i :: 32 word) = unat p_pos + i"
+    by (rule unat_add_of_nat_index[OF i_lt p_no_overflow])
+  have q_idx: "unat (q_pos + of_nat j :: 32 word) = unat q_pos + j"
+    by (rule unat_add_of_nat_index[OF j_lt q_no_overflow])
+  have p_ptr:
+    "p +\<^sub>p uint (p_pos + of_nat i) = p +\<^sub>p int (unat p_pos + i)"
+    using p_idx by (simp only: uint_nat)
+  have q_ptr:
+    "q +\<^sub>p uint (q_pos + of_nat j) = q +\<^sub>p int (unat q_pos + j)"
+    using q_idx by (simp only: uint_nat)
+  have p_lt: "unat p_pos + i < p_total"
+    using i_lt p_range by simp
+  have q_lt: "unat q_pos + j < q_total"
+    using j_lt q_range by simp
+  have "p +\<^sub>p int (unat p_pos + i) \<noteq> q +\<^sub>p int (unat q_pos + j)"
+    using disj p_lt q_lt unfolding bufs_disjoint_def by blast
+  thus ?thesis
+    using p_ptr q_ptr by simp
+qed
+
+lemma bufs_disjoint_prefix_wordD:
+  fixes q_pos q_len :: "32 word"
+  assumes disj: "bufs_disjoint p p_total q q_total"
+      and q_no_overflow: "unat q_pos + unat q_len < (2 :: nat) ^ 32"
+      and p_range: "p_len \<le> p_total"
+      and q_range: "unat q_pos + unat q_len \<le> q_total"
+      and k_lt: "k < p_len"
+      and i_lt: "i < q_len"
+  shows "p +\<^sub>p int k \<noteq> q +\<^sub>p uint (q_pos + i)"
+proof -
+  have i_nat_lt: "unat i < unat q_len"
+    using i_lt by (simp add: word_less_nat_alt)
+  have q_idx: "unat (q_pos + of_nat (unat i) :: 32 word) =
+      unat q_pos + unat i"
+    by (rule unat_add_of_nat_index[OF i_nat_lt q_no_overflow])
+  have q_eq: "q_pos + of_nat (unat i) = q_pos + i"
+    by (simp add: word_unat.Rep_inverse)
+  have q_ptr:
+    "q +\<^sub>p uint (q_pos + i) = q +\<^sub>p int (unat q_pos + unat i)"
+    using q_idx q_eq by (simp only: uint_nat)
+  have q_lt: "unat q_pos + unat i < q_total"
+    using i_nat_lt q_range by simp
+  have k_total: "k < p_total"
+    using k_lt p_range by simp
+  have "p +\<^sub>p int k \<noteq> q +\<^sub>p int (unat q_pos + unat i)"
+    using disj k_total q_lt unfolding bufs_disjoint_def by blast
+  thus ?thesis
+    using q_ptr by simp
+qed
+
+lemma encode_window_buffers_ok_pending_valid_range:
+  fixes off len :: "32 word"
+  assumes ok: "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+      and range: "unat off + unat len \<le> unat pending_cap"
+  shows "\<forall>j < unat len.
+    ptr_valid (heap_typing st) (pending +\<^sub>p uint (off + of_nat j))"
+proof (intro allI impI)
+  fix j
+  assume j_lt: "j < unat len"
+  have valid: "buf_valid st pending (unat pending_cap)"
+    using ok by (simp add: encode_window_buffers_ok_def)
+  have no_overflow: "unat off + unat len < (2 :: nat) ^ 32"
+    by (rule word_range_no_overflow_of_cap[OF range])
+  show "ptr_valid (heap_typing st) (pending +\<^sub>p uint (off + of_nat j))"
+    by (rule buf_valid_word_rangeD[OF valid j_lt no_overflow range])
+qed
+
+lemma encode_window_buffers_ok_data_valid_range:
+  fixes off len :: "32 word"
+  assumes ok: "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+      and range: "unat off + unat len \<le> unat data_cap"
+  shows "\<forall>j < unat len.
+    ptr_valid (heap_typing st) (data +\<^sub>p uint (off + of_nat j))"
+proof (intro allI impI)
+  fix j
+  assume j_lt: "j < unat len"
+  have valid: "buf_valid st data (unat data_cap)"
+    using ok by (simp add: encode_window_buffers_ok_def)
+  have no_overflow: "unat off + unat len < (2 :: nat) ^ 32"
+    by (rule word_range_no_overflow_of_cap[OF range])
+  show "ptr_valid (heap_typing st) (data +\<^sub>p uint (off + of_nat j))"
+    by (rule buf_valid_word_rangeD[OF valid j_lt no_overflow range])
+qed
+
+lemma encode_window_buffers_ok_inst_valid_range:
+  fixes off len :: "32 word"
+  assumes ok: "encode_window_buffers_ok st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap"
+      and range: "unat off + unat len \<le> unat inst_cap"
+  shows "\<forall>j < unat len.
+    ptr_valid (heap_typing st) (inst +\<^sub>p uint (off + of_nat j))"
+proof (intro allI impI)
+  fix j
+  assume j_lt: "j < unat len"
+  have valid: "buf_valid st inst (unat inst_cap)"
+    using ok by (simp add: encode_window_buffers_ok_def)
+  have no_overflow: "unat off + unat len < (2 :: nat) ^ 32"
+    by (rule word_range_no_overflow_of_cap[OF range])
+  show "ptr_valid (heap_typing st) (inst +\<^sub>p uint (off + of_nat j))"
+    by (rule buf_valid_word_rangeD[OF valid j_lt no_overflow range])
+qed
 
 definition encode_window_c_loop_body ::
   "8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
@@ -1765,6 +1985,60 @@ proof -
     by (rule encode_window_c_loop_cache_invD(3)[OF loop])
   show ?thesis
     using sections abs wf by blast
+qed
+
+lemma encode_window_c_loop_run_inv_final_pendingD:
+  assumes run: "encode_window_c_loop_run_inv
+     src src_len tgt tgt_len head_p next_p data data_cap inst inst_cap addr addr_cap
+     pending pending_cap src_seg tgt_bytes (Result (pend_len, sec, tp)) st"
+      and exit: "\<not> tp < tgt_len"
+  obtains data_bytes inst_bytes addr_bytes flushed pending_bytes c_out where
+    "encode_window_c_loop_cache_inv st
+       src src_len tgt tgt_len head_p next_p
+       data data_cap inst inst_cap addr addr_cap
+       pending pending_cap sec tp pend_len
+       src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+       flushed pending_bytes c_out"
+    "tp = tgt_len"
+    "flushed @ pending_bytes = tgt_bytes"
+    "heap_bytes st pending (unat pend_len) = pending_bytes"
+    "length pending_bytes = unat pend_len"
+    "enc_sections_inv st data inst addr sec src_seg (length tgt_bytes)
+       data_bytes inst_bytes addr_bytes flushed c_out"
+    "enc_cache_abs st c_out"
+    "enc_cache_wf c_out"
+proof -
+  obtain data_bytes inst_bytes addr_bytes flushed pending_bytes c_out where loop:
+    "encode_window_c_loop_cache_inv st
+       src src_len tgt tgt_len head_p next_p
+       data data_cap inst inst_cap addr addr_cap
+       pending pending_cap sec tp pend_len
+       src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+       flushed pending_bytes c_out"
+    using run
+    by (auto simp: encode_window_c_loop_run_inv_def
+                   encode_window_c_loop_result_inv_def)
+  have base: "encode_window_c_loop_inv st
+     src src_len tgt tgt_len data data_cap inst inst_cap addr addr_cap
+     pending pending_cap sec tp pend_len
+     src_seg tgt_bytes data_bytes inst_bytes addr_bytes
+     flushed pending_bytes c_out"
+    by (rule encode_window_c_loop_cache_invD(1)[OF loop])
+  have tp_le: "unat tp \<le> unat tgt_len"
+    by (rule encode_window_c_loop_inv_tp_le_tgt_len[OF base])
+  have tgt_le: "unat tgt_len \<le> unat tp"
+    using exit by (simp add: word_less_nat_alt)
+  have tp_done: "tp = tgt_len"
+    using tp_le tgt_le by (metis antisym word_unat.Rep_inject)
+  have flushed_pending_eq: "flushed @ pending_bytes = tgt_bytes"
+    using encode_window_c_loop_invD(3,12)[OF base] tp_done
+          encoder_loop_inv_doneD
+    by fastforce
+  show ?thesis
+    using that[OF loop tp_done flushed_pending_eq
+        encode_window_c_loop_invD(6,7,13)[OF base]
+        encode_window_c_loop_cache_invD(2,3)[OF loop]]
+    by simp
 qed
 
 definition encode_window_final_sections_cache_post ::
