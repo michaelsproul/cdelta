@@ -105,6 +105,79 @@ lemma generate_instructions_correct:
   by (simp add: generates_target_def generate_instructions_def
                 generate_run_instructions_exec)
 
+(* ---------- C-shaped full encoder spec skeleton ---------- *)
+
+definition hash_bits :: nat where "hash_bits = 16"
+definition hash_size :: nat where "hash_size = 2 ^ hash_bits"
+definition hash_mask :: nat where "hash_mask = hash_size - 1"
+definition max_chain :: nat where "max_chain = 16"
+definition min_match :: nat where "min_match = 4"
+definition min_run :: nat where "min_run = 4"
+
+type_synonym source_index = "nat list list"
+
+record enc_match =
+  em_pos :: nat
+  em_len :: nat
+
+definition no_match :: enc_match where
+  "no_match = \<lparr> em_pos = 0, em_len = 0 \<rparr>"
+
+definition hash4_spec :: "byte list \<Rightarrow> nat \<Rightarrow> nat" where
+  "hash4_spec bs pos =
+     (((unat (bs ! pos))
+       + 256 * unat (bs ! (pos + 1))
+       + 65536 * unat (bs ! (pos + 2))
+       + 16777216 * unat (bs ! (pos + 3)))
+      * 2654435761) mod 2 ^ 32"
+
+definition hash_bucket_spec :: "byte list \<Rightarrow> nat \<Rightarrow> nat" where
+  "hash_bucket_spec bs pos = hash4_spec bs pos mod hash_size"
+
+definition source_positions_spec :: "byte list \<Rightarrow> nat list" where
+  "source_positions_spec src =
+     (if length src < min_match then [] else [0..<length src - min_match + 1])"
+
+definition build_index_spec :: "byte list \<Rightarrow> source_index" where
+  "build_index_spec src =
+     map (\<lambda>h. filter (\<lambda>p. hash_bucket_spec src p = h) (source_positions_spec src))
+       [0..<hash_size]"
+
+fun common_prefix_fuel ::
+    "nat \<Rightarrow> byte list \<Rightarrow> nat \<Rightarrow> byte list \<Rightarrow> nat \<Rightarrow> nat" where
+  "common_prefix_fuel 0 a apos b bpos = 0"
+| "common_prefix_fuel (Suc fuel) a apos b bpos =
+     (if apos < length a \<and> bpos < length b \<and> a ! apos = b ! bpos
+      then Suc (common_prefix_fuel fuel a (apos + 1) b (bpos + 1))
+      else 0)"
+
+definition common_prefix_spec ::
+    "byte list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> byte list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat" where
+  "common_prefix_spec a apos aend b bpos bend =
+     common_prefix_fuel (min (aend - apos) (bend - bpos))
+       (take aend a) apos (take bend b) bpos"
+
+definition index_bucket_spec :: "source_index \<Rightarrow> nat \<Rightarrow> nat list" where
+  "index_bucket_spec index h = (if h < length index then index ! h else [])"
+
+definition choose_match_spec ::
+    "byte list \<Rightarrow> byte list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> enc_match \<Rightarrow> enc_match" where
+  "choose_match_spec src tgt tp cand best =
+     (let l = common_prefix_spec src cand (length src) tgt tp (length tgt) in
+      if cand + min_match \<le> length src \<and> min_match \<le> l \<and> em_len best < l
+      then \<lparr> em_pos = cand, em_len = l \<rparr>
+      else best)"
+
+definition find_best_match_spec ::
+    "byte list \<Rightarrow> byte list \<Rightarrow> nat \<Rightarrow> source_index \<Rightarrow> enc_match" where
+  "find_best_match_spec src tgt tp index =
+     (if length src < min_match \<or> length tgt - tp < min_match then no_match
+      else
+        let h = hash_bucket_spec tgt tp;
+            candidates = take max_chain (index_bucket_spec index h)
+        in foldl (\<lambda>best cand. choose_match_spec src tgt tp cand best)
+             no_match candidates)"
+
 (* ---------- Per-instruction encoding ---------- *)
 
 (*
@@ -256,6 +329,198 @@ definition serialize ::
        @ varint_encode (length addr)
        @ data @ inst @ addr)"
 
+(* ---------- C-shaped stateful encoder spec ---------- *)
+
+record enc_full_state =
+  enc_tp      :: nat
+  enc_flushed :: nat
+  enc_pending :: "byte list"
+  enc_data    :: "byte list"
+  enc_inst    :: "byte list"
+  enc_addr    :: "byte list"
+  enc_cache   :: cache
+  enc_trace   :: "raw_inst list"
+
+definition enc_full_init :: enc_full_state where
+  "enc_full_init =
+     \<lparr> enc_tp = 0
+     , enc_flushed = 0
+     , enc_pending = []
+     , enc_data = []
+     , enc_inst = []
+     , enc_addr = []
+     , enc_cache = cache_init
+     , enc_trace = [] \<rparr>"
+
+definition emit_inst_spec ::
+    "nat \<Rightarrow> raw_inst \<Rightarrow> enc_full_state \<Rightarrow> enc_full_state" where
+  "emit_inst_spec src_len i st =
+     (let (data', inst', addr', cache', flushed') =
+        encode_one i src_len (enc_flushed st) (enc_cache st)
+          (enc_data st) (enc_inst st) (enc_addr st)
+      in st \<lparr> enc_data := data'
+              , enc_inst := inst'
+              , enc_addr := addr'
+              , enc_cache := cache'
+              , enc_flushed := flushed'
+              , enc_trace := enc_trace st @ [i] \<rparr>)"
+
+definition emit_insts_spec ::
+    "nat \<Rightarrow> raw_inst list \<Rightarrow> enc_full_state \<Rightarrow> enc_full_state" where
+  "emit_insts_spec src_len insts st =
+     foldl (\<lambda>s i. emit_inst_spec src_len i s) st insts"
+
+record pending_scan =
+  ps_add      :: "byte list"
+  ps_run_byte :: "byte option"
+  ps_run_len  :: nat
+  ps_out      :: "raw_inst list"
+
+definition pending_scan_init :: pending_scan where
+  "pending_scan_init =
+     \<lparr> ps_add = [], ps_run_byte = None, ps_run_len = 0, ps_out = [] \<rparr>"
+
+definition append_add_inst :: "byte list \<Rightarrow> raw_inst list \<Rightarrow> raw_inst list" where
+  "append_add_inst bs out = (if bs = [] then out else out @ [RAdd bs])"
+
+definition close_pending_run :: "pending_scan \<Rightarrow> pending_scan" where
+  "close_pending_run s =
+     (case ps_run_byte s of
+        None \<Rightarrow> s
+      | Some b \<Rightarrow>
+          if min_run \<le> ps_run_len s
+          then s \<lparr> ps_add := []
+                 , ps_run_byte := None
+                 , ps_run_len := 0
+                 , ps_out := append_add_inst (ps_add s) (ps_out s)
+                     @ [RRun b (ps_run_len s)] \<rparr>
+          else s \<lparr> ps_add := ps_add s @ replicate (ps_run_len s) b
+                 , ps_run_byte := None
+                 , ps_run_len := 0 \<rparr>)"
+
+definition pending_scan_step :: "pending_scan \<Rightarrow> byte \<Rightarrow> pending_scan" where
+  "pending_scan_step s b =
+     (case ps_run_byte s of
+        None \<Rightarrow> s \<lparr> ps_run_byte := Some b, ps_run_len := 1 \<rparr>
+      | Some rb \<Rightarrow>
+          if b = rb
+          then s \<lparr> ps_run_len := ps_run_len s + 1 \<rparr>
+          else (close_pending_run s)
+                 \<lparr> ps_run_byte := Some b, ps_run_len := 1 \<rparr>)"
+
+definition flush_pending_insts :: "byte list \<Rightarrow> raw_inst list" where
+  "flush_pending_insts pending =
+     (let s = close_pending_run (foldl pending_scan_step pending_scan_init pending)
+      in append_add_inst (ps_add s) (ps_out s))"
+
+definition flush_pending_spec ::
+    "nat \<Rightarrow> enc_full_state \<Rightarrow> enc_full_state" where
+  "flush_pending_spec src_len st =
+     (emit_insts_spec src_len (flush_pending_insts (enc_pending st)) st)
+       \<lparr> enc_pending := [] \<rparr>"
+
+definition buffer_pending_byte_spec ::
+    "byte \<Rightarrow> enc_full_state \<Rightarrow> enc_full_state" where
+  "buffer_pending_byte_spec b st =
+     st \<lparr> enc_tp := enc_tp st + 1
+        , enc_pending := enc_pending st @ [b] \<rparr>"
+
+definition emit_copy_spec ::
+    "nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> enc_full_state \<Rightarrow> enc_full_state" where
+  "emit_copy_spec src_len addr len st =
+     (emit_inst_spec src_len (RCopy addr len) st)
+       \<lparr> enc_tp := enc_tp st + len \<rparr>"
+
+definition fused_copy_len_spec :: "nat \<Rightarrow> nat \<Rightarrow> nat option" where
+  "fused_copy_len_spec mode copy_len =
+     (if mode \<le> 5 then
+        if min_match \<le> copy_len then Some (min copy_len 6) else None
+      else if mode \<le> 8 \<and> copy_len = 4 then Some 4
+      else None)"
+
+definition try_emit_add_copy_spec ::
+    "nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> enc_full_state \<Rightarrow> enc_full_state option" where
+  "try_emit_add_copy_spec src_len copy_addr copy_len st =
+     (let add_bs = enc_pending st;
+          add_len = length add_bs;
+          here = src_len + enc_tp st;
+          (mode, abytes, cache') = encode_address (enc_cache st) copy_addr here
+      in if 1 \<le> add_len \<and> add_len \<le> 4 \<and> min_match \<le> copy_len then
+           case fused_copy_len_spec mode copy_len of
+             None \<Rightarrow> None
+           | Some csz \<Rightarrow>
+               (case find_add_copy_opcode add_len csz mode of
+                  None \<Rightarrow> None
+                | Some op \<Rightarrow>
+                    Some (st \<lparr> enc_tp := enc_tp st + csz
+                             , enc_flushed := enc_flushed st + add_len + csz
+                             , enc_pending := []
+                             , enc_data := enc_data st @ add_bs
+                             , enc_inst := enc_inst st @ [word_of_nat op]
+                             , enc_addr := enc_addr st @ abytes
+                             , enc_cache := cache'
+                             , enc_trace := enc_trace st
+                                 @ [RAdd add_bs, RCopy copy_addr csz] \<rparr>))
+         else None)"
+
+definition flush_then_emit_copy_spec ::
+    "nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> enc_full_state \<Rightarrow> enc_full_state" where
+  "flush_then_emit_copy_spec src_len copy_addr copy_len st =
+     (let st' = (if enc_pending st = [] then st else flush_pending_spec src_len st)
+      in emit_copy_spec src_len copy_addr copy_len st')"
+
+fun encode_window_full_loop ::
+    "nat \<Rightarrow> byte list \<Rightarrow> byte list \<Rightarrow> source_index \<Rightarrow>
+     enc_full_state \<Rightarrow> enc_full_state" where
+  "encode_window_full_loop 0 src tgt index st =
+     (if enc_tp st < length tgt then st else flush_pending_spec (length src) st)"
+| "encode_window_full_loop (Suc fuel) src tgt index st =
+     (if enc_tp st \<ge> length tgt then flush_pending_spec (length src) st
+      else
+        let m = find_best_match_spec src tgt (enc_tp st) index in
+        if em_len m < min_match then
+          encode_window_full_loop fuel src tgt index
+            (buffer_pending_byte_spec (tgt ! enc_tp st) st)
+        else
+          let st' =
+            (case try_emit_add_copy_spec (length src) (em_pos m) (em_len m) st of
+               Some fused \<Rightarrow>
+                 let consumed = enc_tp fused - enc_tp st in
+                 if consumed < em_len m
+                 then emit_copy_spec (length src) (em_pos m + consumed)
+                        (em_len m - consumed) fused
+                 else fused
+             | None \<Rightarrow>
+                 flush_then_emit_copy_spec (length src) (em_pos m) (em_len m) st)
+          in encode_window_full_loop fuel src tgt index st')"
+
+record enc_full_result =
+  efr_data  :: "byte list"
+  efr_inst  :: "byte list"
+  efr_addr  :: "byte list"
+  efr_cache :: cache
+  efr_trace :: "raw_inst list"
+
+definition enc_full_result_of_state :: "enc_full_state \<Rightarrow> enc_full_result" where
+  "enc_full_result_of_state st =
+     \<lparr> efr_data = enc_data st
+     , efr_inst = enc_inst st
+     , efr_addr = enc_addr st
+     , efr_cache = enc_cache st
+     , efr_trace = enc_trace st \<rparr>"
+
+definition encode_window_full_spec ::
+    "byte list \<Rightarrow> byte list \<Rightarrow> enc_full_result" where
+  "encode_window_full_spec src tgt =
+     (let index = build_index_spec src;
+          st = encode_window_full_loop (length tgt + 1) src tgt index enc_full_init
+      in enc_full_result_of_state st)"
+
+definition encode_spec_full :: "byte list \<Rightarrow> byte list \<Rightarrow> byte list" where
+  "encode_spec_full src tgt =
+     (let r = encode_window_full_spec src tgt
+      in serialize src tgt (efr_data r) (efr_inst r) (efr_addr r))"
+
 (* ---------- Top-level ---------- *)
 
 definition serialize_from_insts ::
@@ -271,17 +536,27 @@ definition encode_spec_degenerate :: "byte list \<Rightarrow> byte list \<Righta
   "encode_spec_degenerate src tgt =
      serialize_from_insts src tgt (generate_instructions_degenerate src tgt)"
 
-definition encode_spec :: "byte list \<Rightarrow> byte list \<Rightarrow> byte list" where
-  "encode_spec src tgt = serialize_from_insts src tgt (generate_instructions src tgt)"
+definition encode_spec_run :: "byte list \<Rightarrow> byte list \<Rightarrow> byte list" where
+  "encode_spec_run src tgt =
+     serialize_from_insts src tgt (generate_instructions src tgt)"
 
-lemma encode_spec_alt:
-  "encode_spec src tgt =
+definition encode_spec :: "byte list \<Rightarrow> byte list \<Rightarrow> byte list" where
+  "encode_spec src tgt = encode_spec_full src tgt"
+
+lemma encode_spec_run_alt:
+  "encode_spec_run src tgt =
      (let insts = generate_instructions src tgt;
           result = encode_window insts (length src);
           data = fst result;
           inst = fst (snd result);
           addr = fst (snd (snd result))
       in serialize src tgt data inst addr)"
-  by (simp add: encode_spec_def serialize_from_insts_def)
+  by (simp add: encode_spec_run_def serialize_from_insts_def)
+
+lemma encode_spec_alt:
+  "encode_spec src tgt =
+     (let r = encode_window_full_spec src tgt
+      in serialize src tgt (efr_data r) (efr_inst r) (efr_addr r))"
+  by (simp add: encode_spec_def encode_spec_full_def)
 
 end

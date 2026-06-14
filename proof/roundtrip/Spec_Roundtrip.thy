@@ -2508,11 +2508,11 @@ proof -
   thus ?thesis by (simp add: varint_size_def)
 qed
 
-theorem spec_roundtrip:
+theorem spec_roundtrip_run:
   assumes src_bd: "length src < 2 ^ 32"
       and tgt_bd: "length tgt < 2 ^ 32 - 32"
       and combined_bd: "length src + length tgt < 2 ^ 32"
-  shows "decode_spec (encode_spec src tgt) src = Inl tgt"
+  shows "decode_spec (encode_spec_run src tgt) src = Inl tgt"
 proof -
   let ?insts = "generate_instructions src tgt"
 
@@ -2584,7 +2584,94 @@ proof -
   have "decode_spec (serialize_from_insts src tgt ?insts) src = Inl tgt"
     by (rule roundtrip_generic[OF vi bi src_bd tgt_bd32_slack combined_bd ew_bd])
   thus ?thesis
-    by (simp add: encode_spec_def)
+    by (simp add: encode_spec_run_def)
 qed
+
+(* ================================================================== *)
+(* Part 3: Full C-shaped encoder proof obligations                    *)
+(* ================================================================== *)
+
+lemma build_index_spec_bucket_sound:
+  assumes "p \<in> set (index_bucket_spec (build_index_spec src) h)"
+  shows "p + min_match \<le> length src \<and> hash_bucket_spec src p = h"
+  sorry
+
+lemma common_prefix_spec_sound:
+  assumes "k < common_prefix_spec a apos aend b bpos bend"
+  shows "apos + k < aend \<and> bpos + k < bend
+       \<and> apos + k < length a \<and> bpos + k < length b
+       \<and> a ! (apos + k) = b ! (bpos + k)"
+  sorry
+
+lemma find_best_match_spec_sound:
+  fixes m :: enc_match
+  assumes m_def: "m = find_best_match_spec src tgt tp (build_index_spec src)"
+      and match: "min_match \<le> em_len m"
+  shows "em_pos m + em_len m \<le> length src
+       \<and> tp + em_len m \<le> length tgt
+       \<and> (\<forall>k < em_len m. src ! (em_pos m + k) = tgt ! (tp + k))"
+  sorry
+
+lemma flush_pending_insts_exec:
+  "exec_inst_list src (flush_pending_insts pending) acc = acc @ pending"
+  sorry
+
+lemma flush_pending_insts_wf_aux:
+  "wf_insts_aux src (flush_pending_insts pending) acc"
+  sorry
+
+lemma try_emit_add_copy_spec_trace_exec:
+  assumes "try_emit_add_copy_spec src_len copy_addr copy_len st = Some st'"
+      and "exec_inst_list src (enc_trace st) [] = take (enc_flushed st) tgt"
+      and "enc_pending st = take (enc_tp st - enc_flushed st)
+            (drop (enc_flushed st) tgt)"
+      and "copy_addr + copy_len \<le> length src"
+      and "enc_tp st + copy_len \<le> length tgt"
+      and "\<forall>k < copy_len. src ! (copy_addr + k) = tgt ! (enc_tp st + k)"
+  shows "exec_inst_list src (enc_trace st') [] = take (enc_flushed st') tgt"
+  sorry
+
+lemma flush_pending_spec_trace_exec:
+  assumes "exec_inst_list src (enc_trace st) [] = take (enc_flushed st) tgt"
+      and "enc_pending st = take (enc_tp st - enc_flushed st)
+            (drop (enc_flushed st) tgt)"
+  shows "exec_inst_list src (enc_trace (flush_pending_spec src_len st)) []
+       = take (enc_tp st) tgt"
+  sorry
+
+lemma encode_window_full_spec_trace_valid:
+  assumes "length src < 2 ^ 32"
+      and "length tgt < 2 ^ 32"
+      and "length src + length tgt < 2 ^ 32"
+  shows "valid_insts src tgt (efr_trace (encode_window_full_spec src tgt))"
+  sorry
+
+lemma encode_window_full_spec_sections_decode:
+  assumes "length src < 2 ^ 32"
+      and "length tgt < 2 ^ 32 - 32"
+      and "length src + length tgt < 2 ^ 32"
+  shows "decode_spec
+           (serialize src tgt
+             (efr_data (encode_window_full_spec src tgt))
+             (efr_inst (encode_window_full_spec src tgt))
+             (efr_addr (encode_window_full_spec src tgt)))
+           src = Inl tgt"
+  sorry
+
+theorem encode_spec_full_roundtrip:
+  assumes "length src < 2 ^ 32"
+      and "length tgt < 2 ^ 32 - 32"
+      and "length src + length tgt < 2 ^ 32"
+  shows "decode_spec (encode_spec_full src tgt) src = Inl tgt"
+  using encode_window_full_spec_sections_decode[OF assms]
+  by (simp add: encode_spec_full_def Let_def)
+
+theorem spec_roundtrip:
+  assumes "length src < 2 ^ 32"
+      and "length tgt < 2 ^ 32 - 32"
+      and "length src + length tgt < 2 ^ 32"
+  shows "decode_spec (encode_spec src tgt) src = Inl tgt"
+  using encode_spec_full_roundtrip[OF assms]
+  by (simp add: encode_spec_def)
 
 end

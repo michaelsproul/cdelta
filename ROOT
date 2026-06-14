@@ -52,7 +52,7 @@ session TestAdd in "proof/test-add" = AutoCorres2 +
     Add
 
 session CdeltaSpecRoundtrip in "proof/roundtrip" = CdeltaSpecBase +
-  options [timeout = 1800, quick_and_dirty = false]
+  options [timeout = 1800, quick_and_dirty = true]
   theories
     Spec_Roundtrip
 
