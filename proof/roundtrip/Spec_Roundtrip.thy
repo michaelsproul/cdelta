@@ -2508,6 +2508,234 @@ proof -
   thus ?thesis by (simp add: varint_size_def)
 qed
 
+lemma try_better_snd_length_le:
+  "length (snd (try_better best mode enc)) \<le> length (snd best)"
+  by (simp add: try_better_def)
+
+lemma try_near_mode_snd_length_le:
+  "length (snd (try_near_mode c addr i best)) \<le> length (snd best)"
+  by (simp add: try_near_mode_def try_better_def Let_def)
+
+lemma try_near_modes_snd_length_le:
+  "length (snd (try_near_modes c addr k best)) \<le> length (snd best)"
+proof (induction k arbitrary: best)
+  case 0
+  then show ?case by simp
+next
+  case (Suc k)
+  have step:
+    "length (snd (try_near_mode c addr (s_near - Suc k) best))
+      \<le> length (snd best)"
+    by (rule try_near_mode_snd_length_le)
+  show ?case
+    using Suc.IH[of "try_near_mode c addr (s_near - Suc k) best"] step
+    by simp
+qed
+
+lemma try_same_mode_snd_length_le:
+  "length (snd (try_same_mode c addr i best)) \<le> length (snd best)"
+  by (simp add: try_same_mode_def try_better_def Let_def)
+
+lemma try_same_modes_snd_length_le:
+  "length (snd (try_same_modes c addr k best)) \<le> length (snd best)"
+proof (induction k arbitrary: best)
+  case 0
+  then show ?case by simp
+next
+  case (Suc k)
+  have step:
+    "length (snd (try_same_mode c addr (s_same - Suc k) best))
+      \<le> length (snd best)"
+    by (rule try_same_mode_snd_length_le)
+  show ?case
+    using Suc.IH[of "try_same_mode c addr (s_same - Suc k) best"] step
+    by simp
+qed
+
+lemma encode_address_length_le_varint_addr:
+  assumes "encode_address c addr here = (mode, bs, c')"
+  shows "length bs \<le> varint_size addr"
+proof -
+  let ?enc0 = "varint_encode addr"
+  let ?best0 = "(0, ?enc0)"
+  let ?best1 =
+    "if here > addr
+     then try_better ?best0 1 (varint_encode (here - addr))
+     else ?best0"
+  let ?best2 = "try_near_modes c addr s_near ?best1"
+  let ?best3 = "try_same_modes c addr s_same ?best2"
+
+  have best1_le: "length (snd ?best1) \<le> length (snd ?best0)"
+    by (simp add: try_better_def)
+  have best2_le: "length (snd ?best2) \<le> length (snd ?best1)"
+    by (rule try_near_modes_snd_length_le)
+  have best3_le: "length (snd ?best3) \<le> length (snd ?best2)"
+    by (rule try_same_modes_snd_length_le)
+  have bs_eq: "bs = snd ?best3"
+    using assms by (simp add: encode_address_def Let_def)
+  show ?thesis
+    using best1_le best2_le best3_le bs_eq by simp
+qed
+
+lemma encode_address_length_le_5:
+  assumes ea: "encode_address c addr here = (mode, bs, c')"
+      and addr_bd: "addr < 2 ^ 32"
+  shows "length bs \<le> 5"
+  using encode_address_length_le_varint_addr[OF ea]
+        varint_size_le_5_32[OF addr_bd]
+  by linarith
+
+lemma encode_one_add_section_lengths:
+  assumes eo:
+    "encode_one (RAdd bs) src_len tgt_pos c data inst addr =
+      (data', inst', addr', c', tgt_pos')"
+  shows "length data' = length data + length bs
+       \<and> length inst' \<le> length inst + 1 + varint_size (length bs)
+       \<and> length addr' = length addr
+       \<and> tgt_pos' = tgt_pos + length bs"
+  using eo
+  by (auto simp: Let_def split_def split: prod.splits)
+
+lemma encode_one_run_section_lengths:
+  assumes eo:
+    "encode_one (RRun b n) src_len tgt_pos c data inst addr =
+      (data', inst', addr', c', tgt_pos')"
+  shows "length data' = length data + 1
+       \<and> length inst' \<le> length inst + 1 + varint_size n
+       \<and> length addr' = length addr
+       \<and> tgt_pos' = tgt_pos + n"
+  using eo
+  by (auto simp: Let_def split_def split: prod.splits)
+
+lemma encode_one_copy_section_lengths:
+  assumes eo:
+    "encode_one (RCopy a n) src_len tgt_pos c data inst addr =
+      (data', inst', addr', c', tgt_pos')"
+      and addr_bd: "a < 2 ^ 32"
+  shows "length data' = length data
+       \<and> length inst' \<le> length inst + 1 + varint_size n
+       \<and> length addr' \<le> length addr + 5
+       \<and> tgt_pos' = tgt_pos + n"
+proof -
+  obtain mode abytes c1 where ea:
+    "encode_address c a (src_len + tgt_pos) = (mode, abytes, c1)"
+    by (cases "encode_address c a (src_len + tgt_pos)") auto
+  have abytes_le: "length abytes \<le> 5"
+    by (rule encode_address_length_le_5[OF ea addr_bd])
+  show ?thesis
+    using eo ea abytes_le by (auto simp: Let_def split_def split: prod.splits)
+qed
+
+lemma encode_one_section_lengths_32:
+  assumes eo: "encode_one i src_len tgt_pos c data inst addr =
+      (data', inst', addr', c', tgt_pos')"
+      and bi: "case i of RAdd bs \<Rightarrow> length bs < 2 ^ 32
+                | RRun _ n \<Rightarrow> n < 2 ^ 32
+                | RCopy a n \<Rightarrow> n < 2 ^ 32 \<and> a < 2 ^ 32"
+  shows "length data' \<le> length data
+          + (case i of RAdd bs \<Rightarrow> length bs | RRun _ _ \<Rightarrow> 1 | RCopy _ _ \<Rightarrow> 0)
+       \<and> length inst' \<le> length inst + 6
+       \<and> length addr' \<le> length addr
+          + (case i of RCopy _ _ \<Rightarrow> 5 | _ \<Rightarrow> 0)"
+proof (cases i)
+  case (RAdd bs)
+  have vsz: "varint_size (length bs) \<le> 5"
+    using bi RAdd by (auto intro: varint_size_le_5_32)
+  show ?thesis
+    using encode_one_add_section_lengths[OF eo[unfolded RAdd]] vsz RAdd
+    by simp
+next
+  case (RRun b n)
+  have vsz: "varint_size n \<le> 5"
+    using bi RRun by (auto intro: varint_size_le_5_32)
+  show ?thesis
+    using encode_one_run_section_lengths[OF eo[unfolded RRun]] vsz RRun
+    by simp
+next
+  case (RCopy a n)
+  have vsz: "varint_size n \<le> 5"
+    using bi RCopy by (auto intro: varint_size_le_5_32)
+  have addr_bd: "a < 2 ^ 32"
+    using bi RCopy by simp
+  show ?thesis
+    using encode_one_copy_section_lengths[OF eo[unfolded RCopy] addr_bd] vsz RCopy
+    by simp
+qed
+
+lemma bounded_insts_ConsD:
+  assumes "bounded_insts (i # insts)"
+  shows "case i of RAdd bs \<Rightarrow> length bs < 2 ^ 32
+              | RRun _ n \<Rightarrow> n < 2 ^ 32
+              | RCopy a n \<Rightarrow> n < 2 ^ 32 \<and> a < 2 ^ 32"
+    and "bounded_insts insts"
+  using assms by (simp_all add: bounded_insts_def)
+
+lemma encode_window_loop_section_lengths_32:
+  assumes ewl:
+    "encode_window_loop insts src_len tgt_pos c data inst addr =
+      (data', inst', addr', c')"
+      and bi: "bounded_insts insts"
+  shows "length data' \<le> length data
+          + sum_list (map (\<lambda>i. case i of RAdd bs \<Rightarrow> length bs
+                                 | RRun _ _ \<Rightarrow> 1
+                                 | RCopy _ _ \<Rightarrow> 0) insts)
+       \<and> length inst' \<le> length inst + 6 * length insts
+       \<and> length addr' \<le> length addr
+          + 5 * length (filter (\<lambda>i. case i of RCopy _ _ \<Rightarrow> True | _ \<Rightarrow> False) insts)"
+  using ewl bi
+proof (induction insts arbitrary: tgt_pos c data inst addr data' inst' addr' c')
+  case Nil
+  then show ?case by simp
+next
+  case (Cons i rest)
+  obtain d0 ib0 ab0 c0 tp0 where eo:
+    "encode_one i src_len tgt_pos c data inst addr = (d0, ib0, ab0, c0, tp0)"
+    by (cases "encode_one i src_len tgt_pos c data inst addr") auto
+  have rest_ewl:
+    "encode_window_loop rest src_len tp0 c0 d0 ib0 ab0 =
+      (data', inst', addr', c')"
+    using Cons.prems(1) eo by (simp add: Let_def split_def)
+  have bi_i:
+    "case i of RAdd bs \<Rightarrow> length bs < 2 ^ 32
+       | RRun _ n \<Rightarrow> n < 2 ^ 32
+       | RCopy a n \<Rightarrow> n < 2 ^ 32 \<and> a < 2 ^ 32"
+    using bounded_insts_ConsD(1)[OF Cons.prems(2)] .
+  have bi_rest: "bounded_insts rest"
+    using bounded_insts_ConsD(2)[OF Cons.prems(2)] .
+  have one:
+    "length d0 \<le> length data
+        + (case i of RAdd bs \<Rightarrow> length bs | RRun _ _ \<Rightarrow> 1 | RCopy _ _ \<Rightarrow> 0)
+     \<and> length ib0 \<le> length inst + 6
+     \<and> length ab0 \<le> length addr
+        + (case i of RCopy _ _ \<Rightarrow> 5 | _ \<Rightarrow> 0)"
+    using encode_one_section_lengths_32[OF eo bi_i] .
+  have rest_bounds:
+    "length data' \<le> length d0
+        + sum_list (map (\<lambda>i. case i of RAdd bs \<Rightarrow> length bs
+                               | RRun _ _ \<Rightarrow> 1
+                               | RCopy _ _ \<Rightarrow> 0) rest)
+     \<and> length inst' \<le> length ib0 + 6 * length rest
+     \<and> length addr' \<le> length ab0
+        + 5 * length (filter (\<lambda>i. case i of RCopy _ _ \<Rightarrow> True | _ \<Rightarrow> False) rest)"
+    using Cons.IH[OF rest_ewl bi_rest] .
+  show ?case
+    using one rest_bounds by (cases i) auto
+qed
+
+lemma encode_window_section_lengths_32:
+  assumes ew: "encode_window insts src_len = (data, inst, addr, c)"
+      and bi: "bounded_insts insts"
+  shows "length data \<le>
+          sum_list (map (\<lambda>i. case i of RAdd bs \<Rightarrow> length bs
+                                 | RRun _ _ \<Rightarrow> 1
+                                 | RCopy _ _ \<Rightarrow> 0) insts)
+       \<and> length inst \<le> 6 * length insts
+       \<and> length addr \<le>
+          5 * length (filter (\<lambda>i. case i of RCopy _ _ \<Rightarrow> True | _ \<Rightarrow> False) insts)"
+  using encode_window_loop_section_lengths_32[of insts src_len 0 cache_init "[]" "[]" "[]"
+        data inst addr c] ew bi
+  by (auto simp: encode_window_def)
+
 theorem spec_roundtrip_run:
   assumes src_bd: "length src < 2 ^ 32"
       and tgt_bd: "length tgt < 2 ^ 32 - 32"
