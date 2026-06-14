@@ -3033,6 +3033,54 @@ proof -
                   pending_scan_init_def)
 qed
 
+lemma exec_inst_list_append:
+  "exec_inst_list src (xs @ ys) acc =
+     exec_inst_list src ys (exec_inst_list src xs acc)"
+  by (induction xs arbitrary: acc) simp_all
+
+lemma fused_copy_len_spec_le:
+  assumes "fused_copy_len_spec mode copy_len = Some csz"
+  shows "csz \<le> copy_len"
+  using assms
+  by (auto simp: fused_copy_len_spec_def split: if_splits)
+
+lemma copy_loop_source_match_take:
+  assumes addr_bound: "addr + n \<le> length src"
+      and tgt_bound: "tp + n \<le> length tgt"
+      and match: "\<forall>k < n. src ! (addr + k) = tgt ! (tp + k)"
+  shows "copy_loop src (take tp tgt) addr n = take (tp + n) tgt"
+  using addr_bound tgt_bound match
+proof (induction n arbitrary: addr tp)
+  case 0
+  then show ?case by simp
+next
+  case (Suc n)
+  have addr_lt: "addr < length src"
+    using Suc.prems(1) by simp
+  have tp_lt: "tp < length tgt"
+    using Suc.prems(2) by simp
+  have match0: "src ! addr = tgt ! tp"
+    using Suc.prems(3) by (drule_tac x=0 in spec) simp
+  have cb: "combined_byte src (take tp tgt) addr = tgt ! tp"
+    using match0 addr_lt by (simp add: combined_byte_def)
+  have take_suc: "take tp tgt @ [tgt ! tp] = take (Suc tp) tgt"
+    using tp_lt by (simp add: take_Suc_conv_app_nth)
+  have addr_bound': "addr + 1 + n \<le> length src"
+    using Suc.prems(1) by simp
+  have tgt_bound': "Suc tp + n \<le> length tgt"
+    using Suc.prems(2) by simp
+  have match': "\<forall>k < n. src ! (addr + 1 + k) = tgt ! (Suc tp + k)"
+    using Suc.prems(3) by auto
+  have "copy_loop src (take tp tgt) addr (Suc n)
+      = copy_loop src (take (Suc tp) tgt) (addr + 1) n"
+    using cb take_suc by simp
+  also have "\<dots> = take (Suc tp + n) tgt"
+    using Suc.IH[OF addr_bound' tgt_bound' match'] .
+  also have "\<dots> = take (tp + Suc n) tgt"
+    by simp
+  finally show ?case .
+qed
+
 lemma try_emit_add_copy_spec_trace_exec:
   assumes "try_emit_add_copy_spec src_len copy_addr copy_len st = Some st'"
       and "exec_inst_list src (enc_trace st) [] = take (enc_flushed st) tgt"
@@ -3042,7 +3090,82 @@ lemma try_emit_add_copy_spec_trace_exec:
       and "enc_tp st + copy_len \<le> length tgt"
       and "\<forall>k < copy_len. src ! (copy_addr + k) = tgt ! (enc_tp st + k)"
   shows "exec_inst_list src (enc_trace st') [] = take (enc_flushed st') tgt"
-  sorry
+proof -
+  obtain mode abytes cache' where ea:
+    "encode_address (enc_cache st) copy_addr (src_len + enc_tp st) =
+      (mode, abytes, cache')"
+    by (cases "encode_address (enc_cache st) copy_addr (src_len + enc_tp st)")
+       auto
+  from assms(1) ea obtain csz op where
+      add_pos: "1 \<le> length (enc_pending st)"
+      and add_le: "length (enc_pending st) \<le> 4"
+      and fused: "fused_copy_len_spec mode copy_len = Some csz"
+      and opcode: "find_add_copy_opcode (length (enc_pending st)) csz mode = Some op"
+      and st'_eq:
+        "st' =
+          st \<lparr> enc_tp := enc_tp st + csz
+             , enc_flushed := enc_flushed st + length (enc_pending st) + csz
+             , enc_pending := []
+             , enc_data := enc_data st @ enc_pending st
+             , enc_inst := enc_inst st @ [word_of_nat op]
+             , enc_addr := enc_addr st @ abytes
+             , enc_cache := cache'
+             , enc_trace := enc_trace st
+                 @ [RAdd (enc_pending st), RCopy copy_addr csz] \<rparr>"
+    by (auto simp: try_emit_add_copy_spec_def Let_def
+        split: option.splits if_splits)
+  have csz_le: "csz \<le> copy_len"
+    by (rule fused_copy_len_spec_le[OF fused])
+  have tp_bound: "enc_tp st \<le> length tgt"
+    using assms(5) by simp
+  have flushed_le_tp: "enc_flushed st \<le> enc_tp st"
+  proof (rule ccontr)
+    assume "\<not> enc_flushed st \<le> enc_tp st"
+    hence "enc_tp st - enc_flushed st = 0" by simp
+    hence "enc_pending st = []"
+      using assms(3) by simp
+    thus False
+      using add_pos by simp
+  qed
+  have pending_len: "length (enc_pending st) = enc_tp st - enc_flushed st"
+    using assms(3) flushed_le_tp tp_bound by simp
+  have add_prefix: "take (enc_flushed st) tgt @ enc_pending st = take (enc_tp st) tgt"
+  proof -
+    have "take (enc_tp st) tgt =
+        take (enc_flushed st + (enc_tp st - enc_flushed st)) tgt"
+      using flushed_le_tp by simp
+    also have "\<dots> =
+        take (enc_flushed st) tgt
+        @ take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt)"
+      by (simp add: take_add)
+    also have "\<dots> = take (enc_flushed st) tgt @ enc_pending st"
+      using assms(3) by simp
+    finally show ?thesis by simp
+  qed
+  have copy_addr_bound: "copy_addr + csz \<le> length src"
+    using assms(4) csz_le by linarith
+  have copy_tgt_bound: "enc_tp st + csz \<le> length tgt"
+    using assms(5) csz_le by linarith
+  have copy_match:
+    "\<forall>k < csz. src ! (copy_addr + k) = tgt ! (enc_tp st + k)"
+    using assms(6) csz_le by auto
+  have copy_exec:
+    "copy_loop src (take (enc_tp st) tgt) copy_addr csz =
+      take (enc_tp st + csz) tgt"
+    by (rule copy_loop_source_match_take
+        [OF copy_addr_bound copy_tgt_bound copy_match])
+  have flushed'_eq: "enc_flushed st' = enc_tp st + csz"
+    using st'_eq pending_len flushed_le_tp by simp
+  have "exec_inst_list src (enc_trace st') [] =
+      copy_loop src (take (enc_tp st) tgt) copy_addr csz"
+    using assms(2) st'_eq add_prefix
+    by (simp add: exec_inst_list_append)
+  also have "\<dots> = take (enc_tp st + csz) tgt"
+    by (rule copy_exec)
+  also have "\<dots> = take (enc_flushed st') tgt"
+    using flushed'_eq by simp
+  finally show ?thesis .
+qed
 
 lemma flush_pending_spec_trace_exec:
   assumes "exec_inst_list src (enc_trace st) [] = take (enc_flushed st) tgt"
