@@ -285,6 +285,105 @@ lemma from_base128_bound:
   shows   "from_base128 ds < 128 ^ length ds"
   using from_base128_acc_bound[OF assms, of 0] by (simp add: from_base128_def)
 
+lemma from_base128_acc_eq:
+  "from_base128_acc acc ds = acc * 128 ^ length ds + from_base128 ds"
+proof (induction ds arbitrary: acc)
+  case Nil
+  then show ?case
+    by (simp add: from_base128_def)
+next
+  case (Cons d ds)
+  have step:
+    "from_base128_acc (acc * 128 + d) ds =
+     (acc * 128 + d) * 128 ^ length ds + from_base128 ds"
+    by (rule Cons.IH)
+  have d_step:
+    "from_base128_acc d ds = d * 128 ^ length ds + from_base128 ds"
+    by (rule Cons.IH)
+  show ?case
+    using step d_step
+    by (simp add: from_base128_def algebra_simps)
+qed
+
+lemma from_base128_cons:
+  "from_base128 (d # ds) = d * 128 ^ length ds + from_base128 ds"
+  using from_base128_acc_eq[of d ds]
+  by (simp add: from_base128_def)
+
+lemma from_base128_eq_length_bound_imp_eq:
+  assumes len: "length xs = length ys"
+      and xs_bound: "\<forall>d \<in> set xs. d < 128"
+      and ys_bound: "\<forall>d \<in> set ys. d < 128"
+      and val: "from_base128 xs = from_base128 ys"
+  shows "xs = ys"
+  using assms
+proof (induction xs arbitrary: ys)
+  case Nil
+  then show ?case
+    by simp
+next
+  case (Cons x xs)
+  then obtain y ys' where ys: "ys = y # ys'"
+    by (cases ys) auto
+  let ?B = "128 ^ length xs"
+  have len_rest: "length xs = length ys'"
+    using Cons.prems(1) ys by simp
+  have xs_tail_bound: "\<forall>d \<in> set xs. d < 128"
+    using Cons.prems(2) by simp
+  have ys_tail_bound: "\<forall>d \<in> set ys'. d < 128"
+    using Cons.prems(3) ys by simp
+  have xs_lt: "from_base128 xs < ?B"
+    by (rule from_base128_bound[OF xs_tail_bound])
+  have ys_lt: "from_base128 ys' < ?B"
+    using len_rest by (simp add: from_base128_bound[OF ys_tail_bound])
+  have val_exp:
+    "x * ?B + from_base128 xs = y * ?B + from_base128 ys'"
+    using Cons.prems(4) ys len_rest by (simp add: from_base128_cons)
+  have x_eq_y: "x = y"
+  proof -
+    have "(x * ?B + from_base128 xs) div ?B =
+          (y * ?B + from_base128 ys') div ?B"
+      using val_exp by simp
+    then show ?thesis
+      using xs_lt ys_lt by simp
+  qed
+  have tail_val: "from_base128 xs = from_base128 ys'"
+    using val_exp x_eq_y by simp
+  have "xs = ys'"
+    by (rule Cons.IH[OF len_rest xs_tail_bound ys_tail_bound tail_val])
+  then show ?case
+    using ys x_eq_y by simp
+qed
+
+lemma num_digits_eq_of_bounds:
+  assumes x_pos: "0 < x"
+      and k_pos: "0 < k"
+      and low: "128 ^ (k - 1) \<le> x"
+      and high: "x < 128 ^ k"
+  shows "num_digits x = k"
+proof -
+  have upper: "num_digits x \<le> k"
+    using high by (rule num_digits_le)
+  have x_bound: "x < 128 ^ num_digits x"
+    using from_base128_bound[OF to_base128_digit_bound, of x]
+          from_base128_to_base128[of x]
+    by (simp add: from_base128_def)
+  have lower: "k \<le> num_digits x"
+  proof (rule ccontr)
+    assume "\<not> k \<le> num_digits x"
+    then have nd_le: "num_digits x \<le> k - 1"
+      by simp
+    have "x < 128 ^ num_digits x"
+      by (rule x_bound)
+    also have "... \<le> 128 ^ (k - 1)"
+      using nd_le by simp
+    finally show False
+      using low by simp
+  qed
+  show ?thesis
+    using lower upper by simp
+qed
+
 (* ---------- Byte-level AND/OR lemmas for digits < 128 ---------- *)
 
 lemma digit_unat_of_nat [simp]:

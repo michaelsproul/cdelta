@@ -24,6 +24,13 @@ through low-level C helpers such as `flush_pending'`.
 - `CdeltaEncoderCorrectness` now contains the encoder proof split and builds
   cleanly.  The active frontier is `proof/encoder-correctness/VcdiffEnc_Emit.thy`
   plus the window-loop integration.
+- The first pure-state refinement bridge is in place:
+  `enc_sections_state_rel` relates emitted C section prefixes to an
+  `enc_full_state`, and ADD/RUN emitter wrappers now advance that relation.
+- The reusable varint bridge
+  `varint_size' v s = Some n ==> varint_bytes32 v n = varint_encode (unat v)`
+  is proved, so large ADD/RUN pure-state wrappers no longer need an explicit
+  byte-equality assumption.
 
 ## Encoder proof progress
 
@@ -32,6 +39,9 @@ through low-level C helpers such as `flush_pending'`.
   pointer fields needed by the emit proofs.
 - ADD and RUN emitted-section and `enc_sections_inv` preservation are proved,
   including C-varint instruction-size forms.
+- ADD and RUN also have `enc_sections_state_rel` preservation wrappers for
+  the pure encoder state fields.  Large ADD and RUN derive their pure varint
+  instruction bytes from `varint_size'`.
 - COPY emitted-section preservation is proved for all four branches:
   small/large COPY size crossed with one-byte/varint address emission.
 - COPY `enc_sections_inv` preservation is proved for all four branches.

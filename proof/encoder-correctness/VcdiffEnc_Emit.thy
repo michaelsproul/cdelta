@@ -54,8 +54,7 @@ lemma emit_inst_spec_RAdd_large_sections:
   fixes sz :: "32 word"
   assumes sz_large: "\<not> ((1 :: 32 word) \<le> sz \<and> sz \<le> (17 :: 32 word))"
       and bs_len: "length bs = unat sz"
-      and varint_bytes:
-        "varint_bytes32 sz n = varint_encode (unat sz)"
+      and size: "varint_size' sz s = Some n"
   shows "enc_data (emit_inst_spec src_len (RAdd bs) st) = enc_data st @ bs"
     and "enc_inst (emit_inst_spec src_len (RAdd bs) st) =
          enc_inst st @ [1] @ varint_bytes32 sz n"
@@ -73,7 +72,7 @@ proof -
     by (simp add: emit_inst_spec_def Let_def)
   show "enc_inst (emit_inst_spec src_len (RAdd bs) st) =
          enc_inst st @ [1] @ varint_bytes32 sz n"
-    using add_opcode bs_len varint_bytes
+    using add_opcode bs_len varint_bytes32_eq_varint_encode[OF size]
     by (simp add: emit_inst_spec_def Let_def)
   show "enc_addr (emit_inst_spec src_len (RAdd bs) st) = enc_addr st"
     using add_opcode
@@ -89,8 +88,7 @@ qed
 
 lemma emit_inst_spec_RRun_sections:
   fixes sz :: "32 word"
-  assumes varint_bytes:
-        "varint_bytes32 sz n = varint_encode (unat sz)"
+  assumes size: "varint_size' sz s = Some n"
   shows "enc_data (emit_inst_spec src_len (RRun fill (unat sz)) st) =
          enc_data st @ [fill]"
     and "enc_inst (emit_inst_spec src_len (RRun fill (unat sz)) st) =
@@ -101,7 +99,7 @@ lemma emit_inst_spec_RRun_sections:
          enc_cache st"
     and "enc_flushed (emit_inst_spec src_len (RRun fill (unat sz)) st) =
          enc_flushed st + unat sz"
-  using varint_bytes
+  using varint_bytes32_eq_varint_encode[OF size]
   by (simp_all add: emit_inst_spec_def Let_def find_single_run_opcode_def)
 
 lemma write_byte'_heap_bytes_append_next_typing_preserves2_word:
@@ -781,8 +779,6 @@ lemma emit_add'_large_success_enc_sections_state_rel:
         "enc_sections_state_rel s data inst addr sec spec_st"
       and sz_large: "\<not> ((1 :: 32 word) \<le> sz \<and> sz \<le> (17 :: 32 word))"
       and size: "varint_size' sz s = Some n"
-      and varint_bytes:
-        "varint_bytes32 sz n = varint_encode (unat sz)"
       and sec_ok: "sections_t_C.err_C sec = ENC_OK"
       and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
       and inst_byte_ptr:
@@ -874,7 +870,7 @@ proof -
        enc_inst spec_st @ [1] @ varint_bytes32 sz n"
     "enc_addr (emit_inst_spec src_len (RAdd ?bs) spec_st) =
        enc_addr spec_st"
-    using emit_inst_spec_RAdd_large_sections[OF sz_large bs_len varint_bytes]
+    using emit_inst_spec_RAdd_large_sections[OF sz_large bs_len size]
     by simp_all
   show ?thesis
     apply (rule runs_to_weaken[
@@ -1132,8 +1128,6 @@ lemma emit_run'_success_enc_sections_state_rel:
   assumes rel:
         "enc_sections_state_rel s data inst addr sec spec_st"
       and size: "varint_size' sz s = Some n"
-      and varint_bytes:
-        "varint_bytes32 sz n = varint_encode (unat sz)"
       and sec_ok: "sections_t_C.err_C sec = ENC_OK"
       and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
       and inst_byte_ptr:
@@ -1199,7 +1193,7 @@ proof -
        enc_inst spec_st @ [0] @ varint_bytes32 sz n"
     "enc_addr (emit_inst_spec src_len (RRun fill (unat sz)) spec_st) =
        enc_addr spec_st"
-    using emit_inst_spec_RRun_sections[OF varint_bytes]
+    using emit_inst_spec_RRun_sections[OF size]
     by simp_all
   show ?thesis
     apply (rule runs_to_weaken[

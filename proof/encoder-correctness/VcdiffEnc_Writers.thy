@@ -95,6 +95,20 @@ lemma word32_shiftr_35_zero:
   shows "x >> (35 :: nat) = 0"
   by (rule Word_Lemmas.shiftr_eq_0) simp
 
+lemma unat_pos_of_word_nonzero:
+  fixes w :: "'a::len word"
+  assumes "w \<noteq> 0"
+  shows "0 < unat w"
+proof (rule ccontr)
+  assume "\<not> 0 < unat w"
+  then have "unat w = 0"
+    by simp
+  then have "w = 0"
+    by (metis word_unat.Rep_inject unat_0)
+  then show False
+    using assms by simp
+qed
+
 lemma varint_shift_ok_of_unat_le5:
   fixes len i :: "32 word"
   assumes len_le: "unat len \<le> 5"
@@ -230,6 +244,50 @@ lemma varint_size'_shiftr_zero:
   assumes "varint_size' v s = Some n"
   shows "v >> (7 * unat n) = 0"
   using varint_size'_some_bounds_shift[of v s] assms by auto
+
+lemma varint_size'_prev_shiftr_nonzero:
+  assumes size: "varint_size' v s = Some n"
+  shows "unat n = 1 \<or> v >> (7 * (unat n - 1)) \<noteq> 0"
+proof -
+  let ?C = "\<lambda>(n :: 32 word, x :: 32 word) s. x \<noteq> 0"
+  let ?B = "\<lambda>(n :: 32 word, x :: 32 word). oreturn (n + 1, x >> (7 :: nat))"
+  let ?I = "\<lambda>(n :: 32 word, x :: 32 word) s.
+       1 \<le> unat n \<and> unat n \<le> 5 \<and>
+       x = v >> (7 * unat n) \<and>
+       (unat n = 1 \<or> v >> (7 * (unat n - 1)) \<noteq> 0)"
+  have loop_result:
+    "case owhile ?C ?B (1, v >> (7 :: nat)) s of
+       None \<Rightarrow> False
+     | Some (n, x) \<Rightarrow>
+         unat n = 1 \<or> v >> (7 * (unat n - 1)) \<noteq> 0"
+    apply (rule Reader_Monad.owhile_rule[
+      where I = ?I and M = "measure (\<lambda>(n :: 32 word, x :: 32 word). unat x)"])
+        apply simp
+       apply simp
+      subgoal for r r'
+        by (cases r; cases r')
+           (auto simp: Reader_Monad.oreturn_apply
+                 intro: word32_shiftr7_decreases)
+     subgoal for r r'
+       apply (cases r; cases r')
+       apply (clarsimp simp: Reader_Monad.oreturn_apply)
+       apply (subgoal_tac "unat a < 5")
+        apply (subgoal_tac "unat (a + 1) = unat a + 1")
+         apply (simp add: Word_Lemmas.shiftr_shiftr algebra_simps)
+        apply (simp add: Word.unat_arith_simps)
+       apply (rule ccontr)
+       apply (simp add: word32_shiftr_35_zero)
+       done
+    subgoal for r
+      by (cases r) (simp add: Reader_Monad.oreturn_apply)
+    subgoal for r
+      by (cases r) simp
+    done
+  show ?thesis
+    using loop_result size unfolding varint_size'_def
+    by (auto simp: Reader_Monad.obind_def Reader_Monad.oreturn_apply
+             split: option.splits prod.splits)
+qed
 
 lemma varint_size'_ge1:
   assumes "varint_size' v s = Some n"
@@ -854,6 +912,63 @@ proof -
     by (simp add: div_eq_0_iff)
 qed
 
+lemma shiftr_nonzero_power_le:
+  fixes v :: "32 word"
+  assumes "v >> k \<noteq> 0"
+  shows "2 ^ k \<le> unat v"
+proof -
+  have "unat (v >> k) = unat v div 2 ^ k"
+    by (simp add: Word_Lemmas.shiftr_div_2n')
+  then have "0 < unat v div 2 ^ k"
+    using unat_pos_of_word_nonzero[OF assms] by simp
+  then show ?thesis
+    by (simp add: div_greater_zero_iff)
+qed
+
+lemma varint_size'_unat_eq_varint_size:
+  assumes size: "varint_size' v s = Some n"
+  shows "unat n = varint_size (unat v)"
+proof (cases "v = 0")
+  case True
+  have "unat n = 1"
+    using varint_size'_prev_shiftr_nonzero[OF size] True by simp
+  then show ?thesis
+    using True by (simp add: varint_size_def)
+next
+  case False
+  have n_pos: "0 < unat n"
+    using varint_size'_ge1[OF size] by simp
+  have high: "unat v < 128 ^ unat n"
+  proof -
+    have "unat v < 2 ^ (7 * unat n)"
+      using shiftr_zero_unat_lt_power[OF varint_size'_shiftr_zero[OF size]] .
+    then show ?thesis
+      by (simp add: power_mult)
+  qed
+  have low: "128 ^ (unat n - 1) \<le> unat v"
+  proof (cases "unat n = 1")
+    case True
+    have v_pos: "0 < unat v"
+      by (rule unat_pos_of_word_nonzero[OF False])
+    then show ?thesis
+      using True v_pos by simp
+  next
+    case False
+    have prev: "v >> (7 * (unat n - 1)) \<noteq> 0"
+      using varint_size'_prev_shiftr_nonzero[OF size] False by simp
+    have "2 ^ (7 * (unat n - 1)) \<le> unat v"
+      using shiftr_nonzero_power_le[OF prev] .
+    then show ?thesis
+      by (simp add: power_mult)
+  qed
+  have v_pos: "0 < unat v"
+    by (rule unat_pos_of_word_nonzero[OF False])
+  have nd: "num_digits (unat v) = unat n"
+    using num_digits_eq_of_bounds[OF v_pos n_pos low high] .
+  show ?thesis
+    using v_pos nd by (simp add: varint_size_def)
+qed
+
 lemma varint_digits32_value:
   assumes size: "varint_size' v s = Some n"
   shows "from_base128_acc 0 (varint_digits32 v n) = unat v"
@@ -872,6 +987,59 @@ proof -
     using shiftr_zero_unat_lt_power[OF shift0] pow_eq by simp
   show ?thesis
     using folded v_lt by simp
+qed
+
+lemma varint_digits32_eq_to_base128:
+  assumes size: "varint_size' v s = Some n"
+      and v_nonzero: "v \<noteq> 0"
+  shows "varint_digits32 v n = to_base128 (unat v)"
+proof -
+  have len_eq: "length (varint_digits32 v n) = length (to_base128 (unat v))"
+  proof -
+    have v_pos: "0 < unat v"
+      by (rule unat_pos_of_word_nonzero[OF v_nonzero])
+    show ?thesis
+      using varint_size'_unat_eq_varint_size[OF size] v_pos
+      by (simp add: varint_size_def)
+  qed
+  have c_bound: "\<forall>d \<in> set (varint_digits32 v n). d < 128"
+    by (rule varint_digits32_bound)
+  have p_bound: "\<forall>d \<in> set (to_base128 (unat v)). d < 128"
+    by (rule to_base128_digit_bound)
+  have val_eq:
+    "from_base128 (varint_digits32 v n) =
+     from_base128 (to_base128 (unat v))"
+    using varint_digits32_value[OF size] from_base128_to_base128[of "unat v"]
+    by (simp add: from_base128_def)
+  show ?thesis
+    by (rule from_base128_eq_length_bound_imp_eq
+      [OF len_eq c_bound p_bound val_eq])
+qed
+
+lemma varint_bytes32_eq_varint_encode:
+  assumes size: "varint_size' v s = Some n"
+  shows "varint_bytes32 v n = varint_encode (unat v)"
+proof (cases "v = 0")
+  case True
+  have n_one: "unat n = 1"
+    using varint_size'_prev_shiftr_nonzero[OF size] True by simp
+  show ?thesis
+    using True n_one
+    by (simp add: varint_bytes32_def varint_byte32_def varint_encode_def
+                  word_less_nat_alt word_unat.Rep_inverse)
+next
+  case False
+  have n_le: "unat n \<le> 5"
+    by (rule varint_size'_le5[OF size])
+  have digits:
+    "varint_digits32 v n = to_base128 (unat v)"
+    by (rule varint_digits32_eq_to_base128[OF size False])
+  have v_pos: "0 < unat v"
+    by (rule unat_pos_of_word_nonzero[OF False])
+  show ?thesis
+    using varint_bytes32_eq_set_cont_bits[OF n_le, of v]
+          digits v_pos
+    by (simp add: varint_encode_def)
 qed
 
 lemma varint_decode_varint_bytes32:

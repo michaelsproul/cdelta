@@ -64,6 +64,13 @@ the spec roundtrip theorem, not by the C encoder proof itself.
   RUN, and all COPY branches.  COPY varint branches currently expose explicit
   assumptions equating C `varint_bytes32` output with pure `varint_encode`
   bytes.
+- `VcdiffEnc_Wire.thy` now has `enc_sections_state_rel`, relating emitted C
+  section prefixes directly to the `enc_data`, `enc_inst`, and `enc_addr`
+  fields of a pure `enc_full_state`.
+- `VcdiffEnc_Emit.thy` has pure-state relation wrappers for small ADD, large
+  ADD, and RUN.  Large ADD and RUN now derive their C varint bytes from
+  `varint_size'` via the writer-level bridge rather than exposing a separate
+  byte-equality premise.
 - Byte writes, byte-sequence writes, varint writes, and both forms of
   `emit_address'` now have cache-frame lemmas.
 - ADD, RUN, and all four COPY branches now have combined `enc_sections_inv` +
@@ -76,8 +83,9 @@ the spec roundtrip theorem, not by the C encoder proof itself.
   straightforward but too slow in this session.  Prefer the existing
   writer-level cache-field frame theorem or composition of existing writer
   preservation facts.
-- The remaining arithmetic bridge is a reusable theorem of the form
-  `varint_size' v s = Some n ==> varint_bytes32 v n = varint_encode (unat v)`.
+- The reusable arithmetic bridge
+  `varint_size' v s = Some n ==> varint_bytes32 v n = varint_encode (unat v)`
+  is proved in `VcdiffEnc_Writers.thy`.
 
 ## Worktree Setup
 
