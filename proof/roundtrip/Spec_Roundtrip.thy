@@ -3199,6 +3199,362 @@ proof -
   finally show ?thesis .
 qed
 
+lemma emit_inst_spec_enc_flushed_exec:
+  assumes "length acc = enc_flushed st"
+  shows "enc_flushed (emit_inst_spec src_len i st) =
+         length (exec_inst src i acc)"
+  using assms
+  by (cases i)
+     (auto simp: emit_inst_spec_def Let_def copy_loop_length
+           split: prod.splits)
+
+lemma emit_insts_spec_enc_flushed_exec:
+  assumes "length acc = enc_flushed st"
+  shows "enc_flushed (emit_insts_spec src_len insts st) =
+         length (exec_inst_list src insts acc)"
+  using assms
+proof (induction insts arbitrary: st acc)
+  case Nil
+  then show ?case
+    by (simp add: emit_insts_spec_def)
+next
+  case (Cons i insts)
+  have len_step:
+    "length (exec_inst src i acc) =
+     enc_flushed (emit_inst_spec src_len i st)"
+    using Cons.prems emit_inst_spec_enc_flushed_exec[of acc st src_len i src]
+    by simp
+  show ?case
+    using Cons.IH[OF len_step]
+    by (simp add: emit_insts_spec_def)
+qed
+
+lemma emit_insts_spec_trace:
+  "enc_trace (emit_insts_spec src_len insts st) = enc_trace st @ insts"
+  by (induction insts arbitrary: st)
+     (simp_all add: emit_insts_spec_def emit_inst_spec_def
+               split: prod.splits)
+
+lemma emit_insts_spec_enc_tp:
+  "enc_tp (emit_insts_spec src_len insts st) = enc_tp st"
+  by (induction insts arbitrary: st)
+     (simp_all add: emit_insts_spec_def emit_inst_spec_def
+               split: prod.splits)
+
+lemma emit_insts_spec_enc_pending:
+  "enc_pending (emit_insts_spec src_len insts st) = enc_pending st"
+  by (induction insts arbitrary: st)
+     (simp_all add: emit_insts_spec_def emit_inst_spec_def
+               split: prod.splits)
+
+definition encode_window_full_trace_inv ::
+    "byte list \<Rightarrow> byte list \<Rightarrow> enc_full_state \<Rightarrow> bool" where
+  "encode_window_full_trace_inv src tgt st \<longleftrightarrow>
+     enc_tp st \<le> length tgt \<and>
+     enc_flushed st \<le> enc_tp st \<and>
+     enc_pending st =
+       take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt) \<and>
+     exec_inst_list src (enc_trace st) [] = take (enc_flushed st) tgt \<and>
+     wf_insts_aux src (enc_trace st) []"
+
+lemma encode_window_full_trace_inv_init:
+  "encode_window_full_trace_inv src tgt enc_full_init"
+  by (simp add: encode_window_full_trace_inv_def enc_full_init_def)
+
+lemma encode_window_full_trace_invD:
+  assumes "encode_window_full_trace_inv src tgt st"
+  shows "enc_tp st \<le> length tgt"
+    and "enc_flushed st \<le> enc_tp st"
+    and "enc_pending st =
+       take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt)"
+    and "exec_inst_list src (enc_trace st) [] = take (enc_flushed st) tgt"
+    and "wf_insts_aux src (enc_trace st) []"
+  using assms by (simp_all add: encode_window_full_trace_inv_def)
+
+lemma encode_window_full_trace_inv_pending_len:
+  assumes "encode_window_full_trace_inv src tgt st"
+  shows "length (enc_pending st) = enc_tp st - enc_flushed st"
+proof -
+  have tp: "enc_tp st \<le> length tgt"
+    and fl: "enc_flushed st \<le> enc_tp st"
+    and pending: "enc_pending st =
+      take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt)"
+    using encode_window_full_trace_invD[OF assms] by simp_all
+  have "enc_tp st - enc_flushed st \<le> length (drop (enc_flushed st) tgt)"
+    using tp fl by simp
+  then show ?thesis
+    using pending by simp
+qed
+
+lemma encode_window_full_trace_inv_pending_empty_flushed:
+  assumes inv: "encode_window_full_trace_inv src tgt st"
+      and pending: "enc_pending st = []"
+  shows "enc_flushed st = enc_tp st"
+  using encode_window_full_trace_inv_pending_len[OF inv] pending
+        encode_window_full_trace_invD(2)[OF inv]
+  by simp
+
+lemma buffer_pending_byte_spec_trace_inv:
+  assumes inv: "encode_window_full_trace_inv src tgt st"
+      and tp_lt: "enc_tp st < length tgt"
+  shows "encode_window_full_trace_inv src tgt
+           (buffer_pending_byte_spec (tgt ! enc_tp st) st)"
+proof -
+  have tp: "enc_tp st \<le> length tgt"
+    and fl: "enc_flushed st \<le> enc_tp st"
+    and pending: "enc_pending st =
+      take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt)"
+    and exec: "exec_inst_list src (enc_trace st) [] =
+      take (enc_flushed st) tgt"
+    and wf: "wf_insts_aux src (enc_trace st) []"
+    using encode_window_full_trace_invD[OF inv] by simp_all
+  let ?k = "enc_tp st - enc_flushed st"
+  have k_lt: "?k < length (drop (enc_flushed st) tgt)"
+    using fl tp_lt by simp
+  have take_pending:
+    "take (enc_tp st + 1 - enc_flushed st) (drop (enc_flushed st) tgt) =
+     enc_pending st @ [tgt ! enc_tp st]"
+  proof -
+    have "enc_tp st + 1 - enc_flushed st = Suc ?k"
+      using fl by simp
+    moreover have
+      "take (Suc ?k) (drop (enc_flushed st) tgt) =
+       take ?k (drop (enc_flushed st) tgt) @
+       [drop (enc_flushed st) tgt ! ?k]"
+      using k_lt by (simp add: take_Suc_conv_app_nth)
+    moreover have "drop (enc_flushed st) tgt ! ?k = tgt ! enc_tp st"
+      using fl tp_lt by (simp add: nth_drop)
+    ultimately show ?thesis
+      using pending by simp
+  qed
+  show ?thesis
+    using tp_lt fl exec wf take_pending
+    by (simp add: encode_window_full_trace_inv_def
+                  buffer_pending_byte_spec_def)
+qed
+
+lemma flush_pending_spec_trace_inv:
+  assumes inv: "encode_window_full_trace_inv src tgt st"
+  shows "encode_window_full_trace_inv src tgt
+           (flush_pending_spec src_len st)"
+proof -
+  let ?st' = "flush_pending_spec src_len st"
+  have tp: "enc_tp st \<le> length tgt"
+    and fl: "enc_flushed st \<le> enc_tp st"
+    and pending: "enc_pending st =
+      take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt)"
+    and exec: "exec_inst_list src (enc_trace st) [] =
+      take (enc_flushed st) tgt"
+    and wf: "wf_insts_aux src (enc_trace st) []"
+    using encode_window_full_trace_invD[OF inv] by simp_all
+  have pending_len: "length (enc_pending st) = enc_tp st - enc_flushed st"
+    by (rule encode_window_full_trace_inv_pending_len[OF inv])
+  have fl': "enc_flushed ?st' = enc_tp st"
+  proof -
+    have "enc_flushed ?st' =
+        length (exec_inst_list src (flush_pending_insts (enc_pending st))
+          (replicate (enc_flushed st) 0))"
+      using emit_insts_spec_enc_flushed_exec
+        [of "replicate (enc_flushed st) 0" st src_len
+            "flush_pending_insts (enc_pending st)" src]
+      by (simp add: flush_pending_spec_def)
+    also have "\<dots> = enc_flushed st + length (enc_pending st)"
+      by (simp add: flush_pending_insts_exec)
+    also have "\<dots> = enc_tp st"
+      using pending_len fl by simp
+    finally show ?thesis .
+  qed
+  have exec': "exec_inst_list src (enc_trace ?st') [] = take (enc_tp st) tgt"
+    by (rule flush_pending_spec_trace_exec[OF exec pending fl])
+  have wf': "wf_insts_aux src (enc_trace ?st') []"
+  proof -
+    have trace:
+      "enc_trace ?st' =
+       enc_trace st @ flush_pending_insts (enc_pending st)"
+      by (simp add: flush_pending_spec_def emit_insts_spec_trace)
+    show ?thesis
+      using wf flush_pending_insts_wf_aux[of src "enc_pending st"
+            "exec_inst_list src (enc_trace st) []"]
+      by (simp add: trace wf_insts_aux_append)
+  qed
+  show ?thesis
+    using tp fl' exec' wf'
+    by (simp add: encode_window_full_trace_inv_def
+                  flush_pending_spec_def emit_insts_spec_enc_tp)
+qed
+
+lemma emit_copy_spec_trace_inv:
+  assumes inv: "encode_window_full_trace_inv src tgt st"
+      and pending: "enc_pending st = []"
+      and flushed: "enc_flushed st = enc_tp st"
+      and len_pos: "0 < copy_len"
+      and addr_bound: "copy_addr + copy_len \<le> length src"
+      and tgt_bound: "enc_tp st + copy_len \<le> length tgt"
+      and match: "\<forall>k < copy_len.
+            src ! (copy_addr + k) = tgt ! (enc_tp st + k)"
+  shows "encode_window_full_trace_inv src tgt
+           (emit_copy_spec src_len copy_addr copy_len st)"
+proof -
+  let ?st' = "emit_copy_spec src_len copy_addr copy_len st"
+  have tp: "enc_tp st \<le> length tgt"
+    and exec: "exec_inst_list src (enc_trace st) [] =
+      take (enc_flushed st) tgt"
+    and wf: "wf_insts_aux src (enc_trace st) []"
+    using encode_window_full_trace_invD[OF inv] by simp_all
+  have exec_tp: "exec_inst_list src (enc_trace st) [] = take (enc_tp st) tgt"
+    using exec flushed by simp
+  have copy_exec:
+    "copy_loop src (take (enc_tp st) tgt) copy_addr copy_len =
+     take (enc_tp st + copy_len) tgt"
+    by (rule copy_loop_source_match_take[OF addr_bound tgt_bound match])
+  have trace':
+    "enc_trace ?st' = enc_trace st @ [RCopy copy_addr copy_len]"
+    by (simp add: emit_copy_spec_def emit_inst_spec_def Let_def
+             split: prod.splits)
+  have fl': "enc_flushed ?st' = enc_tp st + copy_len"
+    using flushed
+    by (simp add: emit_copy_spec_def emit_inst_spec_def Let_def
+             split: prod.splits)
+  have tp': "enc_tp ?st' = enc_tp st + copy_len"
+    by (simp add: emit_copy_spec_def)
+  have pending': "enc_pending ?st' = []"
+    using pending
+    by (simp add: emit_copy_spec_def emit_inst_spec_def Let_def
+             split: prod.splits)
+  have exec':
+    "exec_inst_list src (enc_trace ?st') [] = take (enc_flushed ?st') tgt"
+    using exec_tp copy_exec fl'
+    by (simp add: trace' exec_inst_list_append)
+  have copy_addr_lt: "copy_addr < length src"
+    using addr_bound len_pos by linarith
+  have wf': "wf_insts_aux src (enc_trace ?st') []"
+    using wf exec_tp copy_addr_lt len_pos
+    by (simp add: trace' wf_insts_aux_append)
+  show ?thesis
+    using tgt_bound pending' exec' wf' fl' tp'
+    by (simp add: encode_window_full_trace_inv_def emit_copy_spec_def)
+qed
+
+lemma flush_then_emit_copy_spec_trace_inv:
+  assumes inv: "encode_window_full_trace_inv src tgt st"
+      and len_pos: "0 < copy_len"
+      and addr_bound: "copy_addr + copy_len \<le> length src"
+      and tgt_bound: "enc_tp st + copy_len \<le> length tgt"
+      and match: "\<forall>k < copy_len.
+            src ! (copy_addr + k) = tgt ! (enc_tp st + k)"
+  shows "encode_window_full_trace_inv src tgt
+           (flush_then_emit_copy_spec src_len copy_addr copy_len st)"
+proof (cases "enc_pending st = []")
+  case True
+  have flushed: "enc_flushed st = enc_tp st"
+    by (rule encode_window_full_trace_inv_pending_empty_flushed[OF inv True])
+  show ?thesis
+    using emit_copy_spec_trace_inv
+      [OF inv True flushed len_pos addr_bound tgt_bound match]
+    by (simp add: flush_then_emit_copy_spec_def True)
+next
+  case False
+  let ?fst = "flush_pending_spec src_len st"
+  have inv_flush: "encode_window_full_trace_inv src tgt ?fst"
+    by (rule flush_pending_spec_trace_inv[OF inv])
+  have pending_flush: "enc_pending ?fst = []"
+    by (simp add: flush_pending_spec_def)
+  have flushed_flush: "enc_flushed ?fst = enc_tp ?fst"
+    by (rule encode_window_full_trace_inv_pending_empty_flushed
+        [OF inv_flush pending_flush])
+  have tp_flush: "enc_tp ?fst = enc_tp st"
+    by (simp add: flush_pending_spec_def emit_insts_spec_enc_tp)
+  show ?thesis
+    using emit_copy_spec_trace_inv
+      [OF inv_flush pending_flush flushed_flush len_pos addr_bound]
+      tgt_bound match tp_flush False
+    by (simp add: flush_then_emit_copy_spec_def)
+qed
+
+lemma try_emit_add_copy_spec_trace_inv:
+  assumes try_some: "try_emit_add_copy_spec src_len copy_addr copy_len st = Some st'"
+      and inv: "encode_window_full_trace_inv src tgt st"
+      and addr_bound: "copy_addr + copy_len \<le> length src"
+      and tgt_bound: "enc_tp st + copy_len \<le> length tgt"
+      and match: "\<forall>k < copy_len.
+            src ! (copy_addr + k) = tgt ! (enc_tp st + k)"
+  shows "encode_window_full_trace_inv src tgt st'"
+proof -
+  obtain mode abytes cache' where ea:
+    "encode_address (enc_cache st) copy_addr (src_len + enc_tp st) =
+      (mode, abytes, cache')"
+    by (cases "encode_address (enc_cache st) copy_addr (src_len + enc_tp st)")
+       auto
+  from try_some ea obtain csz op where
+      add_pos: "1 \<le> length (enc_pending st)"
+      and min_copy: "min_match \<le> copy_len"
+      and fused: "fused_copy_len_spec mode copy_len = Some csz"
+      and opcode:
+        "find_add_copy_opcode (length (enc_pending st)) csz mode = Some op"
+      and st'_eq:
+        "st' =
+          st \<lparr> enc_tp := enc_tp st + csz
+             , enc_flushed := enc_flushed st + length (enc_pending st) + csz
+             , enc_pending := []
+             , enc_data := enc_data st @ enc_pending st
+             , enc_inst := enc_inst st @ [word_of_nat op]
+             , enc_addr := enc_addr st @ abytes
+             , enc_cache := cache'
+             , enc_trace := enc_trace st
+                 @ [RAdd (enc_pending st), RCopy copy_addr csz] \<rparr>"
+    by (auto simp: try_emit_add_copy_spec_def Let_def
+        split: option.splits if_splits)
+  have tp: "enc_tp st \<le> length tgt"
+    and fl: "enc_flushed st \<le> enc_tp st"
+    and pending: "enc_pending st =
+      take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt)"
+    and exec: "exec_inst_list src (enc_trace st) [] =
+      take (enc_flushed st) tgt"
+    and wf: "wf_insts_aux src (enc_trace st) []"
+    using encode_window_full_trace_invD[OF inv] by simp_all
+  have pending_len: "length (enc_pending st) = enc_tp st - enc_flushed st"
+    by (rule encode_window_full_trace_inv_pending_len[OF inv])
+  have csz_le: "csz \<le> copy_len"
+    by (rule fused_copy_len_spec_le[OF fused])
+  have csz_pos: "0 < csz"
+    using fused min_copy
+    by (auto simp: fused_copy_len_spec_def min_match_def split: if_splits)
+  have fl'_eq: "enc_flushed st' = enc_tp st + csz"
+    using st'_eq pending_len fl by simp
+  have tp'_eq: "enc_tp st' = enc_tp st + csz"
+    using st'_eq by simp
+  have tp'_bound: "enc_tp st' \<le> length tgt"
+    using tp'_eq tgt_bound csz_le by linarith
+  have exec':
+    "exec_inst_list src (enc_trace st') [] = take (enc_flushed st') tgt"
+    by (rule try_emit_add_copy_spec_trace_exec
+        [OF try_some exec pending addr_bound tgt_bound match])
+  have add_prefix: "take (enc_flushed st) tgt @ enc_pending st =
+      take (enc_tp st) tgt"
+  proof -
+    have "take (enc_tp st) tgt =
+        take (enc_flushed st + (enc_tp st - enc_flushed st)) tgt"
+      using fl by simp
+    also have "\<dots> =
+        take (enc_flushed st) tgt
+        @ take (enc_tp st - enc_flushed st) (drop (enc_flushed st) tgt)"
+      by (simp add: take_add)
+    also have "\<dots> = take (enc_flushed st) tgt @ enc_pending st"
+      using pending by simp
+    finally show ?thesis by simp
+  qed
+  have copy_addr_lt: "copy_addr < length src"
+    using addr_bound csz_le csz_pos by linarith
+  have add_nonempty: "enc_pending st \<noteq> []"
+    using add_pos by auto
+  have wf': "wf_insts_aux src (enc_trace st') []"
+    using wf exec add_prefix add_nonempty copy_addr_lt csz_pos st'_eq
+    by (simp add: wf_insts_aux_append exec_inst_list_append)
+  show ?thesis
+    using tp'_bound fl'_eq tp'_eq exec' wf' st'_eq
+    by (simp add: encode_window_full_trace_inv_def)
+qed
+
 lemma encode_window_full_spec_trace_valid:
   assumes "length src < 2 ^ 32"
       and "length tgt < 2 ^ 32"
