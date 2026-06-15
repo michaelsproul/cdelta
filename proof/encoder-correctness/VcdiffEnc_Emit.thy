@@ -7264,6 +7264,38 @@ lemma flush_pending'_replicate_run_inner_loop_Res:
    apply (rule pending_valid)
   by auto
 
+lemma flush_pending'_replicate_run_inner_loop_liftE:
+  fixes len :: "32 word"
+  assumes len_ge: "(4 :: 32 word) \<le> len"
+      and pending_all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "(liftE
+           ((whileLoop (\<lambda>(j :: 32 word, ret :: 32 word) st. ret \<noteq> 0)
+             (\<lambda>(j, ret). do {
+                x \<leftarrow> guard
+                  (\<lambda>st. j + 1 < len \<longrightarrow>
+                    IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+                ret \<leftarrow> gets
+                  (\<lambda>st. j + 1 < len \<and>
+                    heap_w8 st (pending +\<^sub>p uint (j + 1)) =
+                    heap_w8 s pending);
+                return (j + 1, if ret then 1 else 0)
+             }) (1, 1)) ::
+              (32 word \<times> 32 word, lifted_globals) res_monad)
+          :: ('e, 32 word \<times> 32 word, lifted_globals) exn_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result (len, 0) \<and> t = s \<rbrace>"
+  apply (rule runs_to_liftE)
+  apply (rule runs_to_weaken[
+    OF flush_pending'_replicate_run_inner_loop_Res])
+     apply (rule len_ge)
+    apply (rule pending_all_eq)
+   apply (rule pending_valid)
+  by auto
+
 lemma try_emit_add_copy'_pend_len_zero_noop:
   shows "try_emit_add_copy' sec data data_cap inst inst_cap addr_buf addr_cap
             pending 0 copy_addr here copy_len \<bullet> s
