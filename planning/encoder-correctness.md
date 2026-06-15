@@ -26,7 +26,8 @@ through low-level C helpers such as `flush_pending'`.
   plus the window-loop integration.
 - The first pure-state refinement bridge is in place:
   `enc_sections_state_rel` relates emitted C section prefixes to an
-  `enc_full_state`, and ADD/RUN emitter wrappers now advance that relation.
+  `enc_full_state`; ADD, RUN, COPY, zero-length final flush, and no-op
+  ADD+COPY fusion wrappers now advance or preserve that relation.
 - The reusable varint bridge
   `varint_size' v s = Some n ==> varint_bytes32 v n = varint_encode (unat v)`
   is proved, so large ADD/RUN pure-state wrappers no longer need an explicit
@@ -49,6 +50,10 @@ through low-level C helpers such as `flush_pending'`.
   the varint address and large-size branches currently take explicit
   `varint_bytes32 ... = varint_encode ...` assumptions, matching the existing
   serialization proof style.
+- COPY also has `enc_sections_state_rel` preservation wrappers for all four
+  size/address branches. These wrappers target `emit_copy_spec` and leave the
+  exact C `best_mode'` to pure `encode_address` equality as an explicit
+  address-choice premise for the later cache-choice refinement.
 - `best_mode'_encode_address_correct` connects the C address cache choice to
   the pure decoder cache predicate used by `section_decodes_append_copy`.
 - Cache abstraction preservation is now proved for successful byte writes,
@@ -63,11 +68,13 @@ through low-level C helpers such as `flush_pending'`.
   `enc_sections_inv` + `enc_cache_abs` + `enc_cache_wf` success wrappers for
   all four size/address branches.  Their near-pointer bounds are derived from
   `enc_cache_abs`.
-- The zero-length `flush_pending'` path has a no-op combined wrapper:
-  `flush_pending'_len_zero_enc_sections_cache_inv`.
-- The `try_emit_add_copy'` pending-length-zero path has a no-op combined
-  invariant wrapper:
-  `try_emit_add_copy'_pend_len_zero_enc_sections_cache_inv`.
+- The zero-length `flush_pending'` path has no-op combined and pure-state
+  wrappers:
+  `flush_pending'_len_zero_enc_sections_cache_inv` and
+  `flush_pending'_len_zero_enc_sections_state_rel`.
+- `try_emit_add_copy'` has no-op pure-state wrappers for pending length zero,
+  the early-exit guard, and the mode-greater-than-5/copy-not-4 guard, alongside
+  the existing combined invariant wrappers.
 - `VcdiffEnc_Window.thy` now has a strengthened checked loop invariant,
   `encode_window_c_loop_cache_inv`, which extends the existing window invariant
   with `enc_cache_abs` and `enc_cache_wf`.  Its entry lemma is proved modulo the
