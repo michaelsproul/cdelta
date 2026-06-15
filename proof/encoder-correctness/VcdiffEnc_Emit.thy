@@ -583,6 +583,17 @@ lemma flush_pending_spec_replicate_run:
   using pending_eq flush_pending_insts_replicate_run[OF n_ge]
   by (simp add: flush_pending_spec_def emit_insts_spec_def)
 
+lemma enc_pending_heap_bytes_word_all_eq_replicate:
+  assumes pending_eq:
+        "enc_pending st = heap_bytes_word s pending 0 len"
+      and all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+  shows "enc_pending st = replicate (unat len) (heap_w8 s pending)"
+  using pending_eq heap_bytes_word_replicateI[of len s pending 0 "heap_w8 s pending"]
+        all_eq
+  by simp
+
 lemma write_byte'_heap_bytes_append_next_typing_preserves2_word:
   assumes pos_lt: "pos < cap"
       and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
