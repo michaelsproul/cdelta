@@ -583,6 +583,18 @@ lemma flush_pending_spec_replicate_run:
   using pending_eq flush_pending_insts_replicate_run[OF n_ge]
   by (simp add: flush_pending_spec_def emit_insts_spec_def)
 
+lemma flush_pending_spec_replicate_run_sections:
+  assumes pending_eq: "enc_pending st = replicate n b"
+      and n_ge: "min_run \<le> n"
+  shows "enc_data (flush_pending_spec src_len st) =
+          enc_data (emit_inst_spec src_len (RRun b n) st)"
+    and "enc_inst (flush_pending_spec src_len st) =
+          enc_inst (emit_inst_spec src_len (RRun b n) st)"
+    and "enc_addr (flush_pending_spec src_len st) =
+          enc_addr (emit_inst_spec src_len (RRun b n) st)"
+  using flush_pending_spec_replicate_run[OF pending_eq n_ge]
+  by simp_all
+
 lemma enc_pending_heap_bytes_word_all_eq_replicate:
   assumes pending_eq:
         "enc_pending st = heap_bytes_word s pending 0 len"
@@ -593,6 +605,46 @@ lemma enc_pending_heap_bytes_word_all_eq_replicate:
   using pending_eq heap_bytes_word_replicateI[of len s pending 0 "heap_w8 s pending"]
         all_eq
   by simp
+
+lemma flush_pending_spec_heap_all_eq_run_sections:
+  assumes pending_eq:
+        "enc_pending st = heap_bytes_word s pending 0 len"
+      and len_ge: "(4 :: 32 word) \<le> len"
+      and all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+  shows "enc_data (flush_pending_spec src_len st) =
+          enc_data (emit_inst_spec src_len
+            (RRun (heap_w8 s pending) (unat len)) st)"
+    and "enc_inst (flush_pending_spec src_len st) =
+          enc_inst (emit_inst_spec src_len
+            (RRun (heap_w8 s pending) (unat len)) st)"
+    and "enc_addr (flush_pending_spec src_len st) =
+          enc_addr (emit_inst_spec src_len
+            (RRun (heap_w8 s pending) (unat len)) st)"
+proof -
+  have pending_replicate:
+    "enc_pending st = replicate (unat len) (heap_w8 s pending)"
+    by (rule enc_pending_heap_bytes_word_all_eq_replicate[
+        OF pending_eq all_eq])
+  have min_run_len: "min_run \<le> unat len"
+    using len_ge by (simp add: min_run_def word_le_nat_alt)
+  show "enc_data (flush_pending_spec src_len st) =
+          enc_data (emit_inst_spec src_len
+            (RRun (heap_w8 s pending) (unat len)) st)"
+    by (rule flush_pending_spec_replicate_run_sections(1)
+        [OF pending_replicate min_run_len])
+  show "enc_inst (flush_pending_spec src_len st) =
+          enc_inst (emit_inst_spec src_len
+            (RRun (heap_w8 s pending) (unat len)) st)"
+    by (rule flush_pending_spec_replicate_run_sections(2)
+        [OF pending_replicate min_run_len])
+  show "enc_addr (flush_pending_spec src_len st) =
+          enc_addr (emit_inst_spec src_len
+            (RRun (heap_w8 s pending) (unat len)) st)"
+    by (rule flush_pending_spec_replicate_run_sections(3)
+        [OF pending_replicate min_run_len])
+qed
 
 lemma write_byte'_heap_bytes_append_next_typing_preserves2_word:
   assumes pos_lt: "pos < cap"
