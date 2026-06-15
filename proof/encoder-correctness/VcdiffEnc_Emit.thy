@@ -519,6 +519,17 @@ lemma flush_pending_spec_four_add_break1:
                 close_pending_run_def append_add_inst_def
                 emit_insts_spec_def min_run_def numeral_eq_Suc)
 
+lemma flush_pending_spec_four_add_break2:
+  assumes pending_eq: "enc_pending st = [b, b, c, d]"
+      and break: "c \<noteq> b"
+  shows "flush_pending_spec src_len st =
+    (emit_inst_spec src_len (RAdd [b, b, c, d]) st)\<lparr>enc_pending := []\<rparr>"
+  using pending_eq break
+  by (simp add: flush_pending_spec_def flush_pending_insts_def
+                pending_scan_init_def pending_scan_step_def
+                close_pending_run_def append_add_inst_def
+                emit_insts_spec_def min_run_def numeral_eq_Suc)
+
 lemma write_byte'_heap_bytes_append_next_typing_preserves2_word:
   assumes pos_lt: "pos < cap"
       and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
