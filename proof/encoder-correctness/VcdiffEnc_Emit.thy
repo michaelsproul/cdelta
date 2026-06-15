@@ -7210,6 +7210,33 @@ lemma flush_pending'_replicate_run_inner_loop_from:
     done
   done
 
+lemma flush_pending'_replicate_run_inner_loop_from_Res:
+  fixes len start :: "32 word"
+  assumes start_lt: "start < len"
+      and pending_all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "(whileLoop (\<lambda>(j :: 32 word, ret :: 32 word) st. ret \<noteq> 0)
+           (\<lambda>(j, ret). do {
+              x \<leftarrow> guard
+                (\<lambda>st. j + 1 < len \<longrightarrow>
+                  IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+              ret \<leftarrow> gets
+                (\<lambda>st. j + 1 < len \<and>
+                  heap_w8 st (pending +\<^sub>p uint (j + 1)) =
+                  heap_w8 s pending);
+              return (j + 1, if ret then 1 else 0)
+           }) (start, 1) :: (32 word \<times> 32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>Res r t. r = (len, 0) \<and> t = s \<rbrace>"
+  apply (rule runs_to_weaken[
+    where Q = "\<lambda>r t. r = Result (len, 0) \<and> t = s"])
+   apply (rule flush_pending'_replicate_run_inner_loop_from[
+      OF start_lt pending_all_eq pending_valid])
+  by auto
+
 lemma flush_pending'_replicate_run_inner_loop:
   fixes len :: "32 word"
   assumes len_ge: "(4 :: 32 word) \<le> len"
