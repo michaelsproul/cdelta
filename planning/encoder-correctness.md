@@ -75,6 +75,12 @@ through low-level C helpers such as `flush_pending'`.
 - `try_emit_add_copy'` has no-op pure-state wrappers for pending length zero,
   the early-exit guard, and the mode-greater-than-5/copy-not-4 guard, alongside
   the existing combined invariant wrappers.
+- Pure fused ADD+COPY success shape is now characterized for both opcode
+  families:
+  `try_emit_add_copy_spec_mode_le5_success` and
+  `try_emit_add_copy_spec_mode_gt5_success`.
+- The fused success proof has the needed reusable byte-sequence writer frame:
+  `write_bytes'_success_heap_bytes_append_wordpos_preserves2_near_ptr`.
 - `VcdiffEnc_Window.thy` now has a strengthened checked loop invariant,
   `encode_window_c_loop_cache_inv`, which extends the existing window invariant
   with `enc_cache_abs` and `enc_cache_wf`.  Its entry lemma is proved modulo the

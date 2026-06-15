@@ -283,6 +283,111 @@ proof -
              split: option.splits prod.splits)
 qed
 
+lemma try_emit_add_copy_spec_mode_le5_success:
+  fixes pend_len copy_len mode csz op :: "32 word"
+  defines "csz \<equiv> (if (6 :: 32 word) < copy_len then (6 :: 32 word) else copy_len)"
+      and "op \<equiv>
+        (163 + mode * 12 + (pend_len - 1) * 3 + (csz - 4) :: 32 word)"
+  assumes pending_len: "length (enc_pending st) = unat pend_len"
+      and pend_ge: "(1 :: 32 word) \<le> pend_len"
+      and pend_le: "pend_len \<le> (4 :: 32 word)"
+      and copy_ge: "(4 :: 32 word) \<le> copy_len"
+      and mode_le: "mode \<le> (5 :: 32 word)"
+      and addr_choice:
+        "encode_address (enc_cache st) (unat copy_addr)
+           (src_len + enc_tp st) =
+         (unat mode, addr_bytes, cache_update (enc_cache st) (unat copy_addr))"
+  shows "try_emit_add_copy_spec src_len (unat copy_addr) (unat copy_len) st =
+    Some (st \<lparr> enc_tp := enc_tp st + unat csz
+             , enc_flushed := enc_flushed st + unat pend_len + unat csz
+             , enc_pending := []
+             , enc_data := enc_data st @ enc_pending st
+             , enc_inst := enc_inst st @ [ucast op]
+             , enc_addr := enc_addr st @ addr_bytes
+             , enc_cache := cache_update (enc_cache st) (unat copy_addr)
+             , enc_trace := enc_trace st
+                 @ [RAdd (enc_pending st), RCopy (unat copy_addr) (unat csz)]
+             \<rparr>)"
+proof -
+  have pend_nat: "1 \<le> unat pend_len" "unat pend_len \<le> 4"
+    using pend_ge pend_le by (simp_all add: word_le_nat_alt)
+  have copy_nat: "4 \<le> unat copy_len"
+    using copy_ge by (simp add: word_le_nat_alt)
+  have mode_nat: "unat mode \<le> 5"
+    using mode_le by (simp add: word_le_nat_alt)
+  have csz_nat: "unat csz = min (unat copy_len) 6"
+    using copy_ge unfolding csz_def
+    by (auto simp: word_less_nat_alt word_le_nat_alt)
+  then have csz_range: "4 \<le> unat csz" "unat csz \<le> 6"
+    using copy_nat by simp_all
+  have fused:
+    "fused_copy_len_spec (unat mode) (unat copy_len) = Some (unat csz)"
+    using mode_nat copy_nat csz_nat
+    by (simp add: fused_copy_len_spec_def min_match_def)
+  have find:
+    "find_add_copy_opcode (unat pend_len) (unat csz) (unat mode) =
+     Some (unat op)"
+    using pend_ge pend_le mode_le csz_range
+    unfolding op_def
+    by (simp add: find_add_copy_opcode_def word_le_nat_alt
+                  unat_word_ariths)
+  have op_byte: "(word_of_nat (unat op) :: byte) = ucast op"
+    by (rule byte_of_unat_ucast32)
+  show ?thesis
+    using pending_len pend_nat copy_nat addr_choice fused find op_byte
+    by (simp add: try_emit_add_copy_spec_def min_match_def Let_def)
+qed
+
+lemma try_emit_add_copy_spec_mode_gt5_success:
+  fixes pend_len copy_len mode op :: "32 word"
+  defines "op \<equiv> (235 + (mode - 6) * 4 + (pend_len - 1) :: 32 word)"
+  assumes pending_len: "length (enc_pending st) = unat pend_len"
+      and pend_ge: "(1 :: 32 word) \<le> pend_len"
+      and pend_le: "pend_len \<le> (4 :: 32 word)"
+      and copy_eq: "copy_len = (4 :: 32 word)"
+      and mode_gt: "(5 :: 32 word) < mode"
+      and mode_le: "mode \<le> (8 :: 32 word)"
+      and addr_choice:
+        "encode_address (enc_cache st) (unat copy_addr)
+           (src_len + enc_tp st) =
+         (unat mode, addr_bytes, cache_update (enc_cache st) (unat copy_addr))"
+  shows "try_emit_add_copy_spec src_len (unat copy_addr) (unat copy_len) st =
+    Some (st \<lparr> enc_tp := enc_tp st + unat copy_len
+             , enc_flushed := enc_flushed st + unat pend_len + unat copy_len
+             , enc_pending := []
+             , enc_data := enc_data st @ enc_pending st
+             , enc_inst := enc_inst st @ [ucast op]
+             , enc_addr := enc_addr st @ addr_bytes
+             , enc_cache := cache_update (enc_cache st) (unat copy_addr)
+             , enc_trace := enc_trace st
+                 @ [RAdd (enc_pending st),
+                    RCopy (unat copy_addr) (unat copy_len)]
+             \<rparr>)"
+proof -
+  have pend_nat: "1 \<le> unat pend_len" "unat pend_len \<le> 4"
+    using pend_ge pend_le by (simp_all add: word_le_nat_alt)
+  have mode_nat: "6 \<le> unat mode" "unat mode \<le> 8"
+    using mode_gt mode_le by (simp_all add: word_less_nat_alt word_le_nat_alt)
+  have copy_nat: "unat copy_len = 4"
+    using copy_eq by simp
+  have fused:
+    "fused_copy_len_spec (unat mode) (unat copy_len) = Some (unat copy_len)"
+    using mode_nat copy_nat
+    by (simp add: fused_copy_len_spec_def)
+  have find:
+    "find_add_copy_opcode (unat pend_len) (unat copy_len) (unat mode) =
+     Some (unat op)"
+    using pend_ge pend_le copy_eq mode_gt mode_le
+    unfolding op_def
+    by (simp add: find_add_copy_opcode_def word_le_nat_alt
+                  word_less_nat_alt unat_word_ariths)
+  have op_byte: "(word_of_nat (unat op) :: byte) = ucast op"
+    by (rule byte_of_unat_ucast32)
+  show ?thesis
+    using pending_len pend_nat copy_nat addr_choice fused find op_byte
+    by (simp add: try_emit_add_copy_spec_def min_match_def Let_def)
+qed
+
 lemma flush_pending_spec_empty_sections:
   assumes pending_empty: "enc_pending st = []"
   shows "enc_data (flush_pending_spec src_len st) = enc_data st"
@@ -393,6 +498,135 @@ proof -
            heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
            heap_typing t = heap_typing s) \<and>
           (r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+           near_ptr_'' t = near_ptr_'' s \<and>
+           heap_typing t = heap_typing s) \<rbrace>"
+    using append2 near by (simp add: runs_to_conj)
+  show ?thesis
+    apply (rule runs_to_weaken[OF combined])
+    by auto
+qed
+
+lemma write_bytes_loop_preserves_near_ptr:
+  fixes len pos src_off :: "32 word"
+  assumes dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))"
+  shows "(whileLoop (\<lambda>(i :: 32 word) st. i < len)
+           (\<lambda>i. do {
+              guard (\<lambda>st. ptr_valid (heap_typing st) (buf +\<^sub>p uint (pos + i)));
+              guard (\<lambda>st. ptr_valid (heap_typing st) (src +\<^sub>p uint (src_off + i)));
+              modify (heap_w8_update
+                (\<lambda>h. h(buf +\<^sub>p uint (pos + i) :=
+                         h (src +\<^sub>p uint (src_off + i)))));
+              return (i + 1)
+           }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result len \<and>
+            near_ptr_'' t = near_ptr_'' s \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((i :: 32 word), _). unat len - unat i)"
+      and I = "\<lambda>i st. unat i \<le> unat len \<and>
+             near_ptr_'' st = near_ptr_'' s \<and>
+             heap_typing st = heap_typing s"])
+     subgoal by simp
+     subgoal by unat_arith
+    subgoal premises prems for i st
+    proof -
+      have len_le: "unat len \<le> unat i"
+        using prems(1) by (simp add: word_less_nat_alt)
+      have i_eq: "i = len"
+        using prems(2) len_le by (metis antisym_conv word_unat.Rep_inject)
+      show ?thesis
+        using prems(2) i_eq by simp
+    qed
+  subgoal for i st
+    using dst_valid[rule_format, of "unat i"]
+          src_valid[rule_format, of "unat i"]
+    by (auto simp: runs_to.rep_eq run_bind run_guard run_modify
+                   word_less_nat_alt word_unat.Rep_inverse
+             intro: unat_suc_le_of_word_less
+                    unat_measure_decrease_of_word_less)
+  done
+
+lemma write_bytes'_success_preserves_near_ptr:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+                   near_ptr_'' t = near_ptr_'' s \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  unfolding write_bytes'_def
+  apply runs_to_vcg
+  using fits
+  apply simp
+  apply (rule runs_to_weaken[
+    OF write_bytes_loop_preserves_near_ptr[OF dst_valid src_valid]])
+  by auto
+
+lemma write_bytes'_success_heap_bytes_append_wordpos_preserves2_near_ptr:
+  assumes fits: "\<not> cap - pos < len"
+      and dst_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))"
+      and src_valid: "\<forall>j < unat len.
+           ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))"
+      and dst_src_disj: "\<forall>i < unat len. \<forall>j < unat len.
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           src +\<^sub>p uint (src_off + of_nat j)"
+      and dst_inj: "\<forall>i < unat len. \<forall>j < unat len.
+           i \<noteq> j \<longrightarrow>
+           buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+           buf +\<^sub>p uint (pos + of_nat j)"
+      and prefix_disj: "\<forall>k < unat pos. \<forall>i.
+           i < len \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and no_overflow: "unat pos + unat len < 2 ^ 32"
+      and disj1: "\<forall>k < out1_n. \<forall>i.
+           i < len \<longrightarrow> out1 +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+      and disj2: "\<forall>k < out2_n. \<forall>i.
+           i < len \<longrightarrow> out2 +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + len)) =
+                   heap_bytes s buf (unat pos) @
+                   heap_bytes_word s src src_off len \<and>
+                   heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+                   heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+                   near_ptr_'' t = near_ptr_'' s \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have append2:
+    "write_bytes' buf cap pos src src_off len \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+               heap_bytes t buf (unat (pos + len)) =
+               heap_bytes s buf (unat pos) @
+               heap_bytes_word s src src_off len \<and>
+               heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+               heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_bytes'_success_heap_bytes_append_wordpos_preserves2
+      [OF fits dst_valid src_valid dst_src_disj dst_inj prefix_disj
+          no_overflow disj1 disj2])
+  have near:
+    "write_bytes' buf cap pos src src_off len \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+               near_ptr_'' t = near_ptr_'' s \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+    by (rule write_bytes'_success_preserves_near_ptr
+      [OF fits dst_valid src_valid])
+  have combined:
+    "write_bytes' buf cap pos src src_off len \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+           heap_bytes t buf (unat (pos + len)) =
+           heap_bytes s buf (unat pos) @
+           heap_bytes_word s src src_off len \<and>
+           heap_bytes t out1 out1_n = heap_bytes s out1 out1_n \<and>
+           heap_bytes t out2 out2_n = heap_bytes s out2 out2_n \<and>
+           heap_typing t = heap_typing s) \<and>
+          (r = Result (wr_t_C (pos + len) ENC_OK) \<and>
            near_ptr_'' t = near_ptr_'' s \<and>
            heap_typing t = heap_typing s) \<rbrace>"
     using append2 near by (simp add: runs_to_conj)
