@@ -1,6 +1,6 @@
 theory VcdiffEnc_Serialize
   imports
-    VcdiffEnc_Window
+    VcdiffEnc_Emit
 begin
 
 context vcdiff_enc_global_addresses begin

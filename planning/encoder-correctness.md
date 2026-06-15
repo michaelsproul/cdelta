@@ -21,9 +21,11 @@ through low-level C helpers such as `flush_pending'`.
   refinement theorem `vcdiff_decode'_spec_inl`:
   if `decode_spec patch src = Inl tgt`, the lifted C decoder returns `0`,
   writes `length tgt` to `out_len`, and writes `tgt` to `out`.
-- `CdeltaEncoderCorrectness` now contains the encoder proof split and builds
-  cleanly.  The active frontier is `proof/encoder-correctness/VcdiffEnc_Emit.thy`
-  plus the window-loop integration.
+- `CdeltaEncoderCorrectness` now builds with `quick_and_dirty = false`.
+  The obsolete direct window-loop scaffold has been removed from the active
+  session; the active frontier is pure-state refinement of the C helpers in
+  `proof/encoder-correctness/VcdiffEnc_Emit.thy` plus future C-shaped window
+  refinement against the pure encoder spec.
 - The first pure-state refinement bridge is in place:
   `enc_sections_state_rel` relates emitted C section prefixes to an
   `enc_full_state`; ADD, RUN, COPY, zero-length final flush, and no-op
@@ -81,104 +83,23 @@ through low-level C helpers such as `flush_pending'`.
   `try_emit_add_copy_spec_mode_gt5_success`.
 - The fused success proof has the needed reusable byte-sequence writer frame:
   `write_bytes'_success_heap_bytes_append_wordpos_preserves2_near_ptr`.
-- `VcdiffEnc_Window.thy` now has a strengthened checked loop invariant,
-  `encode_window_c_loop_cache_inv`, which extends the existing window invariant
-  with `enc_cache_abs` and `enc_cache_wf`.  Its entry lemma is proved modulo the
-  cache facts established by `cache_reset`.
-- `CdeltaEncoderCorrectness` is temporarily in `quick_and_dirty` mode so the
-  decomposition can install `sorry` lemmas and check how they compose.
-- The obsolete direct-composition theory `VcdiffEnc_Correct.thy` has been
-  removed from the session.  The replacement top-level target is byte-level
-  refinement against the pure encoder state and `encode_spec`, not a direct
-  `section_decodes` theorem.
-- The first window `sorry` has been split.  Cache reset and loop-invariant
-  entry are now proved by
-  `cache_reset'_encode_window_c_loop_cache_inv_entry`, and
-  `encode_window'_success_enc_sections_cache_inv` is proved from that entry
-  plus an explicit matcher-totality slot.  The after-reset lemma consumes
-  `cache_reset'` through `runs_to_vcg`.
-- The pending-byte branch now has a concrete invariant step:
-  `encode_window_c_loop_cache_inv_pending_byte_step`.  It advances `tp` and
-  `pend_len`, appends the target byte to the pending bytes, and preserves the
-  section/cache invariant under explicit buffer-disjointness premises.
-- The C-shaped pending-byte heap update is also covered by
-  `encode_window_c_loop_cache_inv_pending_byte_step_c_update`, which bridges
-  the generated `uint` pointer arithmetic and source-target heap read back to
-  the normalized invariant step.
-- The pending-byte branch is now proved at the generated monad level by
-  `encode_window_pending_byte_branch_result_inv`.  This establishes the
-  `liftE { guard; guard; heap update; return }` branch against the loop-result
-  invariant that the real `whileLoop` will use.
-- The generated small-match branch wrapper
-  `encode_window_pending_match_branch_result_inv` is also proved: the
-  pending-full path throws a non-OK section, and the non-full path calls the
-  pending-byte branch lemma.
-- The small-match branch now has a loop-step-strengthened wrapper:
-  `encode_window_pending_match_branch_loop_step`.  It proves the same
-  result invariant plus the `tp` measure decrease required by
-  `runs_to_whileLoop_exn'`.
-- The generated loop body has been named as `encode_window_c_loop_body`, and
-  `encode_window_c_loop_body_result_inv` checks the decomposition against that
-  exact body.  Its `gets_the find_best_match'` witness is supplied through the
-  new `encode_window_match_ok` predicate; the `len < 4` branch is proved, while
-  the COPY/fusion side is the remaining local body `sorry`.
-- The matcher proof has base cases for windows that do not need the index:
-  `find_best_match'_early_zero`/`find_best_match'_early_zero_valid` cover the
-  generated early return, and `encode_window_match_ok_src_len_lt4` plus
-  `encode_window_match_ok_tgt_len_lt4` lift those cases to the loop-level
-  matcher predicate.
-- The generated `whileLoop` now has a standalone skeleton,
-  `encode_window_c_loop_while_run_inv`, over `encode_window_c_loop_run_inv`.
-  This plugs the body lemma into `runs_to_whileLoop_exn'` with the real `tp`
-  measure and proves the loop rule obligations.  Its postcondition also exposes
-  the generated loop exit fact `tp < tgt_len` is false for successful loop
-  results.  The run invariant deliberately carries result correctness,
-  byte-buffer validity, and matcher totality so the remaining preservation gaps
-  are explicit.
-- `encode_window'_after_cache_reset_success_enc_sections_cache_inv` now folds
-  the generated loop body to `encode_window_c_loop_body` and invokes
-  `encode_window_c_loop_while_run_inv` after `cache_reset'`.  It also routes
-  the generated final-flush continuation through
-  `encode_window_c_loop_final_flush_run_inv_generated`.  Its proof is complete
-  relative to the explicit `match_ok_entry` premise; the outer serialized
-  scaffold now owns the `match_ok_after_reset` hole that should be discharged
-  from `build_index'`.
-- The window proof now carries an explicit `encode_window_buffers_ok`
-  precondition.  This is needed for target/pending pointer validity and for the
-  non-aliasing facts required to preserve the source, target, pending, and
-  emitted-section heap slices.
-- The zero-pending loop exit is bridged by
-  `encode_window_c_loop_result_inv_doneD`: if the generated `whileLoop` exits
-  with `(0, sec, tp)` and `tp < tgt_len` is false, the result invariant yields
-  the final `enc_sections_inv` plus cache facts directly.
-- The generated final-flush continuation has a named split:
-  `encode_window_c_loop_final_flush_zero` proves the `pend_len = 0` exit path,
-  `encode_window_c_loop_final_flush_result` centralizes the remaining nonzero
-  `flush_pending'` preservation hole, and
-  `encode_window_c_loop_final_flush_run_inv_generated` adapts this to the
-  postcondition shape emitted by the top-level VCG.
-- The completed-loop extraction is captured by
-  `encode_window_c_loop_cache_inv_doneD`: at `tp = tgt_len` and `pend_len = 0`,
-  the strengthened loop invariant yields the exact `enc_sections_inv` and cache
-  facts needed by the `encode_window'` success target.
+- The obsolete `VcdiffEnc_Window.thy` scaffold has been deleted.  Its
+  `section_decodes` loop invariant and final-flush theorem chain belonged to
+  the abandoned direct proof strategy and was not needed by serialization or
+  the current helper-refinement work.  It can be recovered from git history if
+  any local buffer facts are worth mining later.
 
 Remaining encoder-refinement proof debt:
 
 - Prove nonzero `flush_pending` and fused ADD+COPY preservation over the pure
   encoder-state relation shape.
-- Prove `encode_window_match_ok` from `build_index` plus source/target heap
-  facts, or thread it from the build-index stage into the window proof.  This
-  is the real totality/match-validity precondition for the generated
-  `gets_the (find_best_match' ...)`.
-- Prove `encode_window_c_loop_body_run_inv`'s auxiliary preservation slot:
-  successful body steps must preserve `encode_window_buffers_ok` and
-  `encode_window_match_ok`.  The pending branch should follow from heap-update
-  frame facts; COPY/fusion will follow from the emit helper heap-typing/frame
-  postconditions.
+- Prove `build_index'` and `find_best_match'` refinement against the pure
+  matcher/index spec.
+- Rebuild the window-loop theorem as a simulation against the pure
+  `enc_full_state`/`encode_window_spec` shape, rather than reviving the removed
+  `section_decodes` loop invariant.
 - Prove the top-level `vcdiff_encode'` theorem by composing window refinement
   to pure sections with `serialize'_writes_serialize`.
-- Once the remaining window `sorry` lemmas are discharged, turn
-  `CdeltaEncoderCorrectness` back to `quick_and_dirty = false`.
 
 ## Active proof shape
 
