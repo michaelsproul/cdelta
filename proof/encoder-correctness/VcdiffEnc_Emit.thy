@@ -7233,8 +7233,40 @@ lemma flush_pending'_replicate_run_inner_loop_from_Res:
          \<lbrace> \<lambda>Res r t. r = (len, 0) \<and> t = s \<rbrace>"
   apply (rule runs_to_weaken[
     where Q = "\<lambda>r t. r = Result (len, 0) \<and> t = s"])
-   apply (rule flush_pending'_replicate_run_inner_loop_from[
+  apply (rule flush_pending'_replicate_run_inner_loop_from[
       OF start_lt pending_all_eq pending_valid])
+  by auto
+
+lemma flush_pending'_replicate_run_inner_loop_from_liftE:
+  fixes len start :: "32 word"
+  assumes start_lt: "start < len"
+      and pending_all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "(liftE
+           ((whileLoop (\<lambda>(j :: 32 word, ret :: 32 word) st. ret \<noteq> 0)
+             (\<lambda>(j, ret). do {
+                x \<leftarrow> guard
+                  (\<lambda>st. j + 1 < len \<longrightarrow>
+                    IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+                ret \<leftarrow> gets
+                  (\<lambda>st. j + 1 < len \<and>
+                    heap_w8 st (pending +\<^sub>p uint (j + 1)) =
+                    heap_w8 s pending);
+                return (j + 1, if ret then 1 else 0)
+             }) (start, 1)) ::
+              (32 word \<times> 32 word, lifted_globals) res_monad)
+          :: ('e, 32 word \<times> 32 word, lifted_globals) exn_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result (len, 0) \<and> t = s \<rbrace>"
+  apply (rule runs_to_liftE)
+  apply (rule runs_to_weaken[
+    OF flush_pending'_replicate_run_inner_loop_from_Res])
+     apply (rule start_lt)
+    apply (rule pending_all_eq)
+   apply (rule pending_valid)
   by auto
 
 lemma flush_pending'_replicate_run_inner_loop:
