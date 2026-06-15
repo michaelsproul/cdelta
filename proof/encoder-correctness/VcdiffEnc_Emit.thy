@@ -6876,6 +6876,167 @@ proof -
     using pure_sections by (auto simp: enc_sections_state_rel_def)
 qed
 
+lemma flush_pending'_len_four_enc_sections_state_rel:
+  assumes rel:
+        "enc_sections_state_rel s data inst addr sec spec_st"
+      and pending_eq:
+        "enc_pending spec_st = heap_bytes_word s pending 0 (4 :: 32 word)"
+      and pending_valid: "\<forall>j < unat (4 :: 32 word).
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and size: "varint_size' (4 :: 32 word) s = Some n"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_byte_dist:
+        "ptr_range_distinct inst (Suc (unat (sections_t_C.inst_pos_C sec)))"
+      and inst_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_pending_disj:
+        "\<forall>i < unat (4 :: 32 word).
+           pending +\<^sub>p uint ((0 :: 32 word) + of_nat i) \<noteq>
+           inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_varint_fits:
+        "\<not> inst_cap - (sections_t_C.inst_pos_C sec + 1) < n"
+      and inst_varint_valid: "\<forall>j < unat n.
+        ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j))"
+      and inst_varint_inj: "\<forall>i < unat n. \<forall>j < unat n.
+        i \<noteq> j \<longrightarrow>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat i) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j)"
+      and inst_varint_prefix_disj: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+        i < n \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and inst_varint_no_overflow:
+        "unat (sections_t_C.inst_pos_C sec + 1) + unat n < 2 ^ 32"
+      and inst_varint_data_disj: "\<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+        i < n \<longrightarrow>
+        data +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and inst_varint_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+        i < n \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and data_fits:
+        "\<not> data_cap - sections_t_C.data_pos_C sec < (4 :: 32 word)"
+      and data_valid: "\<forall>j < unat (4 :: 32 word).
+        ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j))"
+      and data_pending_disj: "\<forall>i < unat (4 :: 32 word).
+        \<forall>j < unat (4 :: 32 word).
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)"
+      and data_inj: "\<forall>i < unat (4 :: 32 word).
+        \<forall>j < unat (4 :: 32 word).
+        i \<noteq> j \<longrightarrow>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j)"
+      and data_prefix_disj: "\<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+        i < (4 :: 32 word) \<longrightarrow>
+        data +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_no_overflow:
+        "unat (sections_t_C.data_pos_C sec) + unat (4 :: 32 word) < 2 ^ 32"
+      and data_inst_disj: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+        i < (4 :: 32 word) \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+        i < (4 :: 32 word) \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_byte_fits: "sections_t_C.data_pos_C sec < data_cap"
+      and data_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec))"
+      and data_byte_dist:
+        "ptr_range_distinct data (Suc (unat (sections_t_C.data_pos_C sec)))"
+      and data_byte_inst_disj:
+        "\<forall>i < unat (sections_t_C.inst_pos_C sec + 1 + n).
+           inst +\<^sub>p int i \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec)"
+      and data_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec)"
+  shows "flush_pending' sec data data_cap inst inst_cap pending (4 :: 32 word) \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                enc_sections_state_rel t data inst addr sec'
+                  (flush_pending_spec src_len spec_st)) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  let ?b0 = "heap_w8 s pending"
+  let ?b1 = "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 1))"
+  let ?b2 = "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 2))"
+  let ?b3 = "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 3))"
+  have unat4[simp]: "unat (4 :: 32 word) = 4"
+    by simp
+  consider
+    (run) "?b1 = ?b0" "?b2 = ?b0" "?b3 = ?b0"
+  | (break1) "?b1 \<noteq> ?b0"
+  | (break2) "?b1 = ?b0" "?b2 \<noteq> ?b0"
+  | (break3) "?b1 = ?b0" "?b2 = ?b0" "?b3 \<noteq> ?b0"
+    by blast
+  then show ?thesis
+  proof cases
+    case run
+    have pending_all_eq: "\<forall>j < unat (4 :: 32 word).
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+    proof (intro allI impI)
+      fix j
+      assume "j < unat (4 :: 32 word)"
+      then have "j = 0 \<or> j = 1 \<or> j = 2 \<or> j = 3"
+        by auto
+      then show "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+          heap_w8 s pending"
+        using run by auto
+    qed
+    show ?thesis
+      by (rule flush_pending'_len_four_run_enc_sections_state_rel[
+          OF rel pending_eq pending_all_eq pending_valid size sec_ok
+             inst_byte_fits inst_byte_ptr inst_byte_dist
+             inst_byte_data_disj inst_byte_addr_disj
+             inst_varint_fits inst_varint_valid inst_varint_inj
+             inst_varint_prefix_disj inst_varint_no_overflow
+             inst_varint_data_disj inst_varint_addr_disj
+             data_byte_fits data_byte_ptr data_byte_dist
+             data_byte_inst_disj data_byte_addr_disj])
+  next
+    case break1
+    show ?thesis
+      by (rule flush_pending'_len_four_add_break1_enc_sections_state_rel[
+          OF rel pending_eq break1 sec_ok
+             inst_byte_fits inst_byte_ptr inst_byte_dist
+             inst_byte_data_disj inst_byte_addr_disj inst_byte_pending_disj
+             data_fits data_valid pending_valid data_pending_disj
+             data_inj data_prefix_disj data_no_overflow
+             data_inst_disj data_addr_disj])
+  next
+    case break2
+    show ?thesis
+      by (rule flush_pending'_len_four_add_break2_enc_sections_state_rel[
+          OF rel pending_eq break2(1) break2(2) sec_ok
+             inst_byte_fits inst_byte_ptr inst_byte_dist
+             inst_byte_data_disj inst_byte_addr_disj inst_byte_pending_disj
+             data_fits data_valid pending_valid data_pending_disj
+             data_inj data_prefix_disj data_no_overflow
+             data_inst_disj data_addr_disj])
+  next
+    case break3
+    show ?thesis
+      by (rule flush_pending'_len_four_add_break3_enc_sections_state_rel[
+          OF rel pending_eq break3(1) break3(2) break3(3) sec_ok
+             inst_byte_fits inst_byte_ptr inst_byte_dist
+             inst_byte_data_disj inst_byte_addr_disj inst_byte_pending_disj
+             data_fits data_valid pending_valid data_pending_disj
+             data_inj data_prefix_disj data_no_overflow
+             data_inst_disj data_addr_disj])
+  qed
+qed
+
 lemma try_emit_add_copy'_pend_len_zero_noop:
   shows "try_emit_add_copy' sec data data_cap inst inst_cap addr_buf addr_cap
             pending 0 copy_addr here copy_len \<bullet> s
