@@ -83,6 +83,10 @@ through low-level C helpers such as `flush_pending'`.
   `try_emit_add_copy_spec_mode_gt5_success`.
 - The fused success proof has the needed reusable byte-sequence writer frame:
   `write_bytes'_success_heap_bytes_append_wordpos_preserves2_near_ptr`.
+- `try_emit_add_copy'` now has pure-state success wrappers for both fused
+  opcode families:
+  `try_emit_add_copy'_mode_le5_success_enc_sections_state_rel` and
+  `try_emit_add_copy'_mode_gt5_success_enc_sections_state_rel`.
 - The obsolete `VcdiffEnc_Window.thy` scaffold has been deleted.  Its
   `section_decodes` loop invariant and final-flush theorem chain belonged to
   the abandoned direct proof strategy and was not needed by serialization or
@@ -91,8 +95,7 @@ through low-level C helpers such as `flush_pending'`.
 
 Remaining encoder-refinement proof debt:
 
-- Prove nonzero `flush_pending` and fused ADD+COPY preservation over the pure
-  encoder-state relation shape.
+- Prove nonzero `flush_pending` over the pure encoder-state relation shape.
 - Prove `build_index'` and `find_best_match'` refinement against the pure
   matcher/index spec.
 - Rebuild the window-loop theorem as a simulation against the pure
