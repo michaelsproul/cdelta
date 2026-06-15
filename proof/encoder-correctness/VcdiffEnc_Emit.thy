@@ -6408,6 +6408,230 @@ proof -
     using pure_sections by (auto simp: enc_sections_state_rel_def)
 qed
 
+lemma flush_pending'_len_four_add_break2_enc_sections_state_rel:
+  assumes rel:
+        "enc_sections_state_rel s data inst addr sec spec_st"
+      and pending_eq:
+        "enc_pending spec_st = heap_bytes_word s pending 0 (4 :: 32 word)"
+      and pending_eq01:
+        "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 1)) =
+         heap_w8 s pending"
+      and pending_break2:
+        "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 2)) \<noteq>
+         heap_w8 s pending"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_byte_dist:
+        "ptr_range_distinct inst (Suc (unat (sections_t_C.inst_pos_C sec)))"
+      and inst_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_pending_disj:
+        "\<forall>i < unat (4 :: 32 word).
+           pending +\<^sub>p uint ((0 :: 32 word) + of_nat i) \<noteq>
+           inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and data_fits:
+        "\<not> data_cap - sections_t_C.data_pos_C sec < (4 :: 32 word)"
+      and data_valid: "\<forall>j < unat (4 :: 32 word).
+        ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j))"
+      and pending_valid: "\<forall>j < unat (4 :: 32 word).
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and data_pending_disj: "\<forall>i < unat (4 :: 32 word).
+        \<forall>j < unat (4 :: 32 word).
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)"
+      and data_inj: "\<forall>i < unat (4 :: 32 word).
+        \<forall>j < unat (4 :: 32 word).
+        i \<noteq> j \<longrightarrow>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j)"
+      and data_prefix_disj: "\<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+        i < (4 :: 32 word) \<longrightarrow>
+        data +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_no_overflow:
+        "unat (sections_t_C.data_pos_C sec) + unat (4 :: 32 word) < 2 ^ 32"
+      and data_inst_disj: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+        i < (4 :: 32 word) \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+        i < (4 :: 32 word) \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+  shows "flush_pending' sec data data_cap inst inst_cap pending (4 :: 32 word) \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                enc_sections_state_rel t data inst addr sec'
+                  (flush_pending_spec src_len spec_st)) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  let ?b0 = "heap_w8 s pending"
+  let ?b2 = "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 2))"
+  let ?b3 = "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 3))"
+  have unat4[simp]: "unat (4 :: 32 word) = 4"
+    by simp
+  have bytes_four:
+    "heap_bytes_word s pending 0 (4 :: 32 word) =
+      [?b0, ?b0, ?b2, ?b3]"
+    using pending_eq01
+    by (simp add: heap_bytes_word_def upt_rec)
+  have v0:
+    "ptr_valid (heap_typing s)
+      (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 0))"
+    using pending_valid[rule_format, of 0] by simp
+  have v1:
+    "ptr_valid (heap_typing s)
+      (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 1))"
+    using pending_valid[rule_format, of 1] by simp
+  have v2:
+    "ptr_valid (heap_typing s)
+      (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 2))"
+    using pending_valid[rule_format, of 2] by simp
+  have v3:
+    "ptr_valid (heap_typing s)
+      (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 3))"
+    using pending_valid[rule_format, of 3] by simp
+  have p1:
+    "heap_w8 s (pending +\<^sub>p 1) = heap_w8 s pending"
+    using pending_eq01 by simp
+  have p2_ne:
+    "heap_w8 s (pending +\<^sub>p 2) \<noteq> heap_w8 s pending"
+    using pending_break2 by simp
+  have pending_four:
+    "enc_pending spec_st = [?b0, ?b0, ?b2, ?b3]"
+    using pending_eq bytes_four by simp
+  have pure_sections:
+    "enc_data (flush_pending_spec src_len spec_st) =
+       enc_data (emit_inst_spec src_len
+         (RAdd (heap_bytes_word s pending 0 (4 :: 32 word))) spec_st)"
+    "enc_inst (flush_pending_spec src_len spec_st) =
+       enc_inst (emit_inst_spec src_len
+         (RAdd (heap_bytes_word s pending 0 (4 :: 32 word))) spec_st)"
+    "enc_addr (flush_pending_spec src_len spec_st) =
+       enc_addr (emit_inst_spec src_len
+         (RAdd (heap_bytes_word s pending 0 (4 :: 32 word))) spec_st)"
+    using flush_pending_spec_four_add_break2[OF pending_four pending_break2]
+          bytes_four
+    by simp_all
+  show ?thesis
+    unfolding flush_pending'_def
+    apply runs_to_vcg
+    apply (rule runs_to_whileLoop_exn'[
+      where R = "measure
+        (\<lambda>((add_start :: 32 word, i :: 32 word, sec_cur :: sections_t_C), _).
+          if i = 0 then 4 else if i = 1 then 3 else if i = 2 then 2 else if i = 3 then 1 else 0)"
+        and I = "\<lambda>r t.
+          (r = Result (0, 0, sec) \<or>
+           r = Result (0, 1, sec) \<or>
+           r = Result (0, 2, sec) \<or>
+           r = Result (0, 3, sec) \<or>
+           r = Result (0, 4, sec)) \<and> t = s"])
+       apply (clarsimp split: prod.splits)
+     apply runs_to_vcg
+     using pending_valid apply (simp add: word_less_nat_alt)
+     apply (subst whileLoop_unroll)
+     apply runs_to_vcg
+     apply (auto simp: word_less_nat_alt word_le_nat_alt pending_eq01 pending_break2)
+     subgoal
+       apply runs_to_vcg
+          using v0 apply simp
+         using v1 apply simp
+        using pending_eq01 apply simp
+       apply (subst whileLoop_unroll)
+       apply runs_to_vcg
+       using v2 pending_break2 apply (auto simp: word_less_nat_alt word_le_nat_alt)
+       using p1 p2_ne apply simp
+       apply (subst whileLoop_unroll)
+       apply runs_to_vcg
+       using p1 p2_ne apply simp
+       done
+     subgoal
+       apply runs_to_vcg
+          apply (erule_tac x=1 in allE)
+          apply simp
+         apply (erule_tac x=2 in allE)
+         apply simp
+       apply (subst whileLoop_unroll)
+       apply runs_to_vcg
+       apply (auto simp: word_less_nat_alt word_le_nat_alt)
+       subgoal
+         apply (erule_tac x=3 in allE)
+         apply simp
+         done
+       subgoal
+         apply (subst whileLoop_unroll)
+         apply runs_to_vcg
+         apply (subst whileLoop_unroll)
+         apply runs_to_vcg
+         apply (auto simp: word_less_nat_alt word_le_nat_alt)
+         apply (subst whileLoop_unroll)
+         apply runs_to_vcg
+         done
+       subgoal
+         apply (subst whileLoop_unroll)
+         apply runs_to_vcg
+         done
+       subgoal
+         apply (subst whileLoop_unroll)
+         apply runs_to_vcg
+         done
+       done
+     subgoal
+       apply runs_to_vcg
+          apply (erule_tac x=2 in allE)
+          apply simp
+         apply (erule_tac x=3 in allE)
+         apply simp
+       apply (subst whileLoop_unroll)
+       apply runs_to_vcg
+       apply (auto simp: word_less_nat_alt word_le_nat_alt)
+       subgoal
+         apply (subst whileLoop_unroll)
+         apply runs_to_vcg
+         done
+       subgoal
+         apply (subst whileLoop_unroll)
+         apply runs_to_vcg
+         done
+       done
+     subgoal
+       apply runs_to_vcg
+       apply (erule_tac x=3 in allE)
+       apply simp
+       done
+    apply (rule runs_to_liftE_bind_throw_result)
+    apply (rule runs_to_weaken)
+     apply (rule emit_add'_small_success_enc_sections_state_rel[
+        where src_len = src_len])
+                       apply (rule rel)
+                      apply simp
+                     apply simp
+                    apply (rule sec_ok)
+                   apply (rule inst_byte_fits)
+                  apply (rule inst_byte_ptr)
+                 apply (rule inst_byte_dist)
+                apply (rule inst_byte_data_disj)
+               apply (rule inst_byte_addr_disj)
+              using inst_byte_pending_disj apply simp
+             apply (rule data_fits)
+            using data_valid apply simp
+           using pending_valid apply simp
+          using data_pending_disj apply simp
+         using data_inj apply simp
+        using data_prefix_disj apply simp
+       apply (rule data_no_overflow)
+      using data_inst_disj apply simp
+     using data_addr_disj apply simp
+    using pure_sections by (auto simp: enc_sections_state_rel_def)
+qed
+
 lemma try_emit_add_copy'_pend_len_zero_noop:
   shows "try_emit_add_copy' sec data data_cap inst inst_cap addr_buf addr_cap
             pending 0 copy_addr here copy_len \<bullet> s
