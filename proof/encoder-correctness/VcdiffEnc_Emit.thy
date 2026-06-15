@@ -541,6 +541,48 @@ lemma flush_pending_spec_four_add_break3:
                 close_pending_run_def append_add_inst_def
                 emit_insts_spec_def min_run_def numeral_eq_Suc)
 
+lemma foldl_pending_scan_step_replicate_current:
+  assumes run_byte: "ps_run_byte s = Some b"
+  shows "foldl pending_scan_step s (replicate n b) =
+   s\<lparr>ps_run_len := ps_run_len s + n\<rparr>"
+  using run_byte
+  by (induction n arbitrary: s)
+     (simp_all add: pending_scan_step_def ac_simps)
+
+lemma foldl_pending_scan_step_replicate_init_Suc:
+  "foldl pending_scan_step pending_scan_init (replicate (Suc n) b) =
+   pending_scan_init\<lparr>ps_run_byte := Some b, ps_run_len := Suc n\<rparr>"
+  by (simp add: pending_scan_init_def pending_scan_step_def
+                foldl_pending_scan_step_replicate_current)
+
+lemma flush_pending_insts_replicate_run:
+  assumes n_ge: "min_run \<le> n"
+  shows "flush_pending_insts (replicate n b) = [RRun b n]"
+proof (cases n)
+  case 0
+  then show ?thesis
+    using n_ge by (simp add: min_run_def)
+next
+  case (Suc n')
+  have fold:
+    "foldl pending_scan_step pending_scan_init (replicate (Suc n') b) =
+     pending_scan_init\<lparr>ps_run_byte := Some b, ps_run_len := Suc n'\<rparr>"
+    by (rule foldl_pending_scan_step_replicate_init_Suc)
+  then show ?thesis
+    using Suc n_ge fold
+    by (simp add: flush_pending_insts_def
+                  close_pending_run_def append_add_inst_def
+                  pending_scan_init_def emit_insts_spec_def)
+qed
+
+lemma flush_pending_spec_replicate_run:
+  assumes pending_eq: "enc_pending st = replicate n b"
+      and n_ge: "min_run \<le> n"
+  shows "flush_pending_spec src_len st =
+    (emit_inst_spec src_len (RRun b n) st)\<lparr>enc_pending := []\<rparr>"
+  using pending_eq flush_pending_insts_replicate_run[OF n_ge]
+  by (simp add: flush_pending_spec_def emit_insts_spec_def)
+
 lemma write_byte'_heap_bytes_append_next_typing_preserves2_word:
   assumes pos_lt: "pos < cap"
       and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
