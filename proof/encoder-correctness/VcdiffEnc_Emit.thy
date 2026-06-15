@@ -398,6 +398,106 @@ lemma flush_pending_spec_empty_sections:
                     emit_insts_spec_def append_add_inst_def
                     close_pending_run_def pending_scan_init_def)
 
+lemma flush_pending_insts_short:
+  assumes len_lt: "length pending < min_run"
+  shows "flush_pending_insts pending =
+    (if pending = [] then [] else [RAdd pending])"
+proof -
+  have len_lt4: "length pending < 4"
+    using len_lt by (simp add: min_run_def)
+  show ?thesis
+    using len_lt4
+    apply (cases pending)
+     apply (simp add: flush_pending_insts_def append_add_inst_def
+                      close_pending_run_def pending_scan_init_def)
+    subgoal for b pending'
+      apply (cases pending')
+       apply (simp add: flush_pending_insts_def append_add_inst_def
+                        close_pending_run_def pending_scan_init_def
+                        pending_scan_step_def min_run_def)
+      subgoal for c pending''
+        apply (cases pending'')
+         apply (simp add: flush_pending_insts_def append_add_inst_def
+                          close_pending_run_def pending_scan_init_def
+                          pending_scan_step_def min_run_def)
+        subgoal for d pending'''
+          apply (cases pending''')
+           apply (simp add: flush_pending_insts_def append_add_inst_def
+                            close_pending_run_def pending_scan_init_def
+                            pending_scan_step_def min_run_def)
+          apply simp
+          done
+        done
+      done
+    done
+qed
+
+lemma flush_pending_spec_short:
+  assumes len_lt: "length (enc_pending st) < min_run"
+  shows "flush_pending_spec src_len st =
+    (if enc_pending st = [] then st
+     else (emit_inst_spec src_len (RAdd (enc_pending st)) st)
+       \<lparr> enc_pending := [] \<rparr>)"
+proof (cases "enc_pending st = []")
+  case True
+  then show ?thesis
+    by (simp add: flush_pending_spec_def flush_pending_insts_def
+                  emit_insts_spec_def append_add_inst_def
+                  close_pending_run_def pending_scan_init_def)
+next
+  case False
+  have insts:
+    "flush_pending_insts (enc_pending st) = [RAdd (enc_pending st)]"
+    using flush_pending_insts_short[OF len_lt] False by simp
+  show ?thesis
+    using False insts
+    by (simp add: flush_pending_spec_def emit_insts_spec_def)
+qed
+
+lemma flush_pending_spec_short_nonempty_sections:
+  assumes pending_nonempty: "enc_pending st \<noteq> []"
+      and len_lt: "length (enc_pending st) < min_run"
+  shows "enc_data (flush_pending_spec src_len st) =
+          enc_data st @ enc_pending st"
+    and "enc_inst (flush_pending_spec src_len st) =
+          enc_inst st @ [word_of_nat (1 + length (enc_pending st))]"
+    and "enc_addr (flush_pending_spec src_len st) = enc_addr st"
+    and "enc_cache (flush_pending_spec src_len st) = enc_cache st"
+    and "enc_flushed (flush_pending_spec src_len st) =
+          enc_flushed st + length (enc_pending st)"
+    and "enc_pending (flush_pending_spec src_len st) = []"
+proof -
+  have len_ge: "1 \<le> length (enc_pending st)"
+    using pending_nonempty by (cases "enc_pending st") auto
+  have len_le: "length (enc_pending st) \<le> 17"
+    using len_lt by (simp add: min_run_def)
+  have opcode:
+    "find_single_add_opcode (length (enc_pending st)) =
+      (1 + length (enc_pending st), False)"
+    using len_ge len_le by (simp add: find_single_add_opcode_def)
+  show "enc_data (flush_pending_spec src_len st) =
+          enc_data st @ enc_pending st"
+    using flush_pending_spec_short[OF len_lt] pending_nonempty opcode
+    by (simp add: emit_inst_spec_def encode_one.simps Let_def)
+  show "enc_inst (flush_pending_spec src_len st) =
+          enc_inst st @ [word_of_nat (1 + length (enc_pending st))]"
+    using flush_pending_spec_short[OF len_lt] pending_nonempty opcode
+    by (simp add: emit_inst_spec_def encode_one.simps Let_def)
+  show "enc_addr (flush_pending_spec src_len st) = enc_addr st"
+    using flush_pending_spec_short[OF len_lt] pending_nonempty opcode
+    by (simp add: emit_inst_spec_def encode_one.simps Let_def)
+  show "enc_cache (flush_pending_spec src_len st) = enc_cache st"
+    using flush_pending_spec_short[OF len_lt] pending_nonempty opcode
+    by (simp add: emit_inst_spec_def encode_one.simps Let_def)
+  show "enc_flushed (flush_pending_spec src_len st) =
+          enc_flushed st + length (enc_pending st)"
+    using flush_pending_spec_short[OF len_lt] pending_nonempty opcode
+    by (simp add: emit_inst_spec_def encode_one.simps Let_def)
+  show "enc_pending (flush_pending_spec src_len st) = []"
+    using flush_pending_spec_short[OF len_lt] pending_nonempty opcode
+    by (simp add: emit_inst_spec_def encode_one.simps Let_def)
+qed
+
 lemma write_byte'_heap_bytes_append_next_typing_preserves2_word:
   assumes pos_lt: "pos < cap"
       and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
@@ -5452,6 +5552,124 @@ proof -
     apply (rule runs_to_weaken[OF flush_pending'_len_zero_noop])
     using rel pure_sections
     by (auto simp: enc_sections_state_rel_def)
+qed
+
+lemma runs_to_liftE_bind_throw_result:
+  assumes f: "f \<bullet> s \<lbrace>\<lambda>Res v t. P v t\<rbrace>"
+  shows "(liftE f >>= throw) \<bullet> s
+           \<lbrace>\<lambda>r t. (\<forall>v. r = Result v \<longrightarrow> Q v t) \<and>
+                   (\<forall>v. r = Exn v \<longrightarrow> P v t)\<rbrace>"
+  apply runs_to_vcg
+  apply (rule runs_to_weaken[OF f])
+  by auto
+
+lemma flush_pending'_len_one_enc_sections_state_rel:
+  assumes rel:
+        "enc_sections_state_rel s data inst addr sec spec_st"
+      and pending_eq:
+        "enc_pending spec_st = heap_bytes_word s pending 0 (1 :: 32 word)"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_byte_dist:
+        "ptr_range_distinct inst (Suc (unat (sections_t_C.inst_pos_C sec)))"
+      and inst_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_pending_disj:
+        "pending +\<^sub>p uint (0 :: 32 word) \<noteq>
+           inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and data_fits:
+        "\<not> data_cap - sections_t_C.data_pos_C sec < (1 :: 32 word)"
+      and data_valid:
+        "ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec))"
+      and pending_valid:
+        "ptr_valid (heap_typing s) (pending +\<^sub>p uint (0 :: 32 word))"
+      and data_pending_disj:
+        "data +\<^sub>p uint (sections_t_C.data_pos_C sec) \<noteq>
+          pending +\<^sub>p uint (0 :: 32 word)"
+      and data_prefix_disj: "\<forall>k < unat (sections_t_C.data_pos_C sec).
+        data +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec)"
+      and data_no_overflow:
+        "unat (sections_t_C.data_pos_C sec) + 1 < 2 ^ 32"
+      and data_inst_disj: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1).
+        inst +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec)"
+      and data_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec).
+        addr +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec)"
+  shows "flush_pending' sec data data_cap inst inst_cap pending (1 :: 32 word) \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                enc_sections_state_rel t data inst addr sec'
+                  (flush_pending_spec src_len spec_st)) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have pending_word_len:
+    "length (heap_bytes_word s pending 0 (1 :: 32 word)) = 1"
+    by simp
+  have pending_nonempty: "enc_pending spec_st \<noteq> []"
+    using pending_eq pending_word_len by (metis length_0_conv one_neq_zero)
+  have pending_short: "length (enc_pending spec_st) < min_run"
+    using pending_eq by (simp add: min_run_def)
+  have pure_sections:
+    "enc_data (flush_pending_spec src_len spec_st) =
+       enc_data (emit_inst_spec src_len
+         (RAdd (heap_bytes_word s pending 0 (1 :: 32 word))) spec_st)"
+    "enc_inst (flush_pending_spec src_len spec_st) =
+       enc_inst (emit_inst_spec src_len
+         (RAdd (heap_bytes_word s pending 0 (1 :: 32 word))) spec_st)"
+    "enc_addr (flush_pending_spec src_len spec_st) =
+       enc_addr (emit_inst_spec src_len
+         (RAdd (heap_bytes_word s pending 0 (1 :: 32 word))) spec_st)"
+    using flush_pending_spec_short_nonempty_sections
+      [OF pending_nonempty pending_short] pending_eq
+    by (simp_all add: emit_inst_spec_def encode_one.simps
+                      find_single_add_opcode_def)
+  show ?thesis
+    unfolding flush_pending'_def
+    apply runs_to_vcg
+    apply (rule runs_to_whileLoop_exn'[
+      where R = "measure
+        (\<lambda>((add_start :: 32 word, i :: 32 word, sec_cur :: sections_t_C), _).
+          if i = 0 then 1 else 0)"
+        and I = "\<lambda>r t.
+          (r = Result (0, 0, sec) \<or> r = Result (0, 1, sec)) \<and> t = s"])
+       apply (clarsimp split: prod.splits)
+     apply runs_to_vcg
+     using pending_valid apply simp
+     apply (subst whileLoop_unroll)
+     apply runs_to_vcg
+     apply (auto simp: word_less_nat_alt word_le_nat_alt)
+    apply (rule runs_to_liftE_bind_throw_result)
+    apply (rule runs_to_weaken)
+     apply (rule emit_add'_small_success_enc_sections_state_rel[
+        where src_len = src_len])
+                       apply (rule rel)
+                      apply simp
+                     apply simp
+                    apply (rule sec_ok)
+                   apply (rule inst_byte_fits)
+                  apply (rule inst_byte_ptr)
+                 apply (rule inst_byte_dist)
+                apply (rule inst_byte_data_disj)
+               apply (rule inst_byte_addr_disj)
+              using inst_byte_pending_disj apply simp
+             apply (rule data_fits)
+            using data_valid apply simp
+           using pending_valid apply simp
+          using data_pending_disj apply simp
+         apply simp
+        using data_prefix_disj apply simp
+       using data_no_overflow apply simp
+      using data_inst_disj apply simp
+     using data_addr_disj apply simp
+    using pure_sections by (auto simp: enc_sections_state_rel_def)
 qed
 
 lemma try_emit_add_copy'_pend_len_zero_noop:
