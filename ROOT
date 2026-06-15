@@ -44,7 +44,6 @@ session CdeltaEncoderCorrectness in "proof/encoder-correctness" = CdeltaEncoder 
     VcdiffEnc_Emit
     VcdiffEnc_Window
     VcdiffEnc_Serialize
-    VcdiffEnc_Correct
 
 session TestAdd in "proof/test-add" = AutoCorres2 +
   options [timeout = 600]

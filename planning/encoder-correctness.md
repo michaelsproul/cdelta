@@ -72,24 +72,12 @@ through low-level C helpers such as `flush_pending'`.
   `encode_window_c_loop_cache_inv`, which extends the existing window invariant
   with `enc_cache_abs` and `enc_cache_wf`.  Its entry lemma is proved modulo the
   cache facts established by `cache_reset`.
-- `VcdiffEnc_Correct.thy` now proves the pure top-level composition path:
-  `section_decodes_apply_window`, `enc_sections_inv_apply_window`, and
-  `encoder_sections_serialize_decode`.  Thus a proved window postcondition of
-  `enc_sections_inv ... tgt ...` plus the existing serialize bridge is enough
-  to conclude `decode_spec (serialize src tgt data inst addr) src = Inl tgt`.
 - `CdeltaEncoderCorrectness` is temporarily in `quick_and_dirty` mode so the
   decomposition can install `sorry` lemmas and check how they compose.
-- `VcdiffEnc_Correct.thy` has two installed `sorry` C-glue lemmas:
-  `encode_window'_success_enc_sections_cache_inv` and
-  `vcdiff_encode'_success_serialized_sections`.  The public
-  `vcdiff_encode'_success_decode_spec` theorem is no longer a stub: it is
-  proved from the serialized-sections glue lemma and the pure
-  `section_decodes_serialize_decode` bridge.
-- The `vcdiff_encode'_success_serialized_sections` scaffold explicitly invokes
-  `encode_window'_success_enc_sections_cache_inv`, so the proposed window
-  postcondition is checked at the C top-level boundary.  The remaining `sorry`
-  there is the build-index/serialize glue, including the large
-  `serialize'_writes_serialize` premise package.
+- The obsolete direct-composition theory `VcdiffEnc_Correct.thy` has been
+  removed from the session.  The replacement top-level target is byte-level
+  refinement against the pure encoder state and `encode_spec`, not a direct
+  `section_decodes` theorem.
 - The first window `sorry` has been split.  Cache reset and loop-invariant
   entry are now proved by
   `cache_reset'_encode_window_c_loop_cache_inv_entry`, and
@@ -161,11 +149,10 @@ through low-level C helpers such as `flush_pending'`.
   the strengthened loop invariant yields the exact `enc_sections_inv` and cache
   facts needed by the `encode_window'` success target.
 
-Remaining proof debt on the now-suspended direct proof path:
+Remaining encoder-refinement proof debt:
 
-- Discharge or centralize the C-varint byte-equality assumptions.
-- Prove nonzero `flush_pending` and fused ADD+COPY preservation over the same
-  section/cache invariant shape.
+- Prove nonzero `flush_pending` and fused ADD+COPY preservation over the pure
+  encoder-state relation shape.
 - Prove `encode_window_match_ok` from `build_index` plus source/target heap
   facts, or thread it from the build-index stage into the window proof.  This
   is the real totality/match-validity precondition for the generated
@@ -175,14 +162,9 @@ Remaining proof debt on the now-suspended direct proof path:
   `encode_window_match_ok`.  The pending branch should follow from heap-update
   frame facts; COPY/fusion will follow from the emit helper heap-typing/frame
   postconditions.
-- Prove the outer `match_ok_after_reset` slot in
-  `vcdiff_encode'_success_serialized_sections` from `build_index'`; reset,
-  loop-rule integration, the generated pending-byte/small-match branch, and the
-  zero-pending final exit are no longer part of the after-reset window proof.
-- Refine `vcdiff_encode'_success_serialized_sections` so it is proved by
-  composing `encode_window'_success_enc_sections_cache_inv` with
-  `serialize'_writes_serialize`.
-- Once the two installed `sorry` lemmas are discharged, turn
+- Prove the top-level `vcdiff_encode'` theorem by composing window refinement
+  to pure sections with `serialize'_writes_serialize`.
+- Once the remaining window `sorry` lemmas are discharged, turn
   `CdeltaEncoderCorrectness` back to `quick_and_dirty = false`.
 
 ## Active proof shape
