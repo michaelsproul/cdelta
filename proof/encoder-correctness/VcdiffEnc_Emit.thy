@@ -7090,6 +7090,128 @@ proof -
   qed
 qed
 
+lemma flush_pending'_replicate_run_inner_loop_from:
+  fixes len :: "32 word"
+  assumes start_lt: "start < len"
+      and pending_all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "(whileLoop (\<lambda>(j :: 32 word, ret :: 32 word) st. ret \<noteq> 0)
+           (\<lambda>(j, ret). do {
+              x \<leftarrow> guard
+                (\<lambda>st. j + 1 < len \<longrightarrow>
+                  IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+              ret \<leftarrow> gets
+                (\<lambda>st. j + 1 < len \<and>
+                  heap_w8 st (pending +\<^sub>p uint (j + 1)) =
+                  heap_w8 s pending);
+              return (j + 1, if ret then 1 else 0)
+           }) (start, 1) :: (32 word \<times> 32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result (len, 0) \<and> t = s \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure
+      (\<lambda>((j :: 32 word, ret :: 32 word), _). unat len - unat j)"
+      and I = "\<lambda>(j, ret) t.
+        unat j \<le> unat len \<and>
+        (ret \<noteq> 0 \<longleftrightarrow> j < len) \<and>
+        t = s"])
+     subgoal
+       using start_lt by (simp add: word_less_nat_alt)
+    subgoal
+      using start_lt by unat_arith
+   subgoal premises prems for r t
+   proof -
+     obtain j ret where r_def: "r = (j, ret)"
+       by (cases r)
+     have j_le: "unat j \<le> unat len"
+       using prems r_def by auto
+     have not_lt: "\<not> j < len"
+       using prems r_def by auto
+     have "unat len \<le> unat j"
+       using not_lt by (simp add: word_less_nat_alt)
+     then have j_eq: "j = len"
+       using j_le by (metis antisym_conv word_unat.Rep_inject)
+     have ret_eq: "ret = 0"
+       using prems r_def by auto
+     show ?thesis
+       using prems r_def j_eq ret_eq by simp
+   qed
+  subgoal for r t
+    apply (cases r)
+    apply clarsimp
+    subgoal for j ret
+      apply runs_to_vcg
+      subgoal
+        using pending_valid[rule_format, of "unat (j + 1)"]
+        by (simp add: word_less_nat_alt word_unat.Rep_inverse)
+      subgoal
+        by (rule unat_suc_le_of_word_less)
+      subgoal
+        using pending_all_eq[rule_format, of "unat (j + 1)"]
+        by (auto simp: word_less_nat_alt word_unat.Rep_inverse)
+      subgoal
+        by (simp add: unat_measure_decrease_of_word_less)
+      done
+    done
+  done
+
+lemma flush_pending'_replicate_run_inner_loop:
+  fixes len :: "32 word"
+  assumes len_ge: "(4 :: 32 word) \<le> len"
+      and pending_all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "(whileLoop (\<lambda>(j :: 32 word, ret :: 32 word) st. ret \<noteq> 0)
+           (\<lambda>(j, ret). do {
+              x \<leftarrow> guard
+                (\<lambda>st. j + 1 < len \<longrightarrow>
+                  IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+              ret \<leftarrow> gets
+                (\<lambda>st. j + 1 < len \<and>
+                  heap_w8 st (pending +\<^sub>p uint (j + 1)) =
+                  heap_w8 s pending);
+              return (j + 1, if ret then 1 else 0)
+           }) (1, 1) :: (32 word \<times> 32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result (len, 0) \<and> t = s \<rbrace>"
+  apply (rule flush_pending'_replicate_run_inner_loop_from[
+    OF _ pending_all_eq pending_valid])
+  using len_ge by (simp add: word_less_nat_alt word_le_nat_alt)
+
+lemma flush_pending'_replicate_run_inner_loop_Res:
+  fixes len :: "32 word"
+  assumes len_ge: "(4 :: 32 word) \<le> len"
+      and pending_all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "(whileLoop (\<lambda>(j :: 32 word, ret :: 32 word) st. ret \<noteq> 0)
+           (\<lambda>(j, ret). do {
+              x \<leftarrow> guard
+                (\<lambda>st. j + 1 < len \<longrightarrow>
+                  IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+              ret \<leftarrow> gets
+                (\<lambda>st. j + 1 < len \<and>
+                  heap_w8 st (pending +\<^sub>p uint (j + 1)) =
+                  heap_w8 s pending);
+              return (j + 1, if ret then 1 else 0)
+           }) (1, 1) :: (32 word \<times> 32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>Res r t. r = (len, 0) \<and> t = s \<rbrace>"
+  apply (rule runs_to_weaken[
+    where Q = "\<lambda>r t. r = Result (len, 0) \<and> t = s"])
+   apply (rule flush_pending'_replicate_run_inner_loop)
+     apply (rule len_ge)
+    apply (rule pending_all_eq)
+   apply (rule pending_valid)
+  by auto
+
 lemma try_emit_add_copy'_pend_len_zero_noop:
   shows "try_emit_add_copy' sec data data_cap inst inst_cap addr_buf addr_cap
             pending 0 copy_addr here copy_len \<bullet> s
