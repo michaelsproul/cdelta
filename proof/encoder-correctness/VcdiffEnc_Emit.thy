@@ -7269,6 +7269,58 @@ lemma flush_pending'_replicate_run_inner_loop_from_liftE:
    apply (rule pending_valid)
   by auto
 
+lemma flush_pending'_replicate_run_prescan_two_Res:
+  fixes len :: "32 word"
+  assumes len_gt2: "(2 :: 32 word) < len"
+      and pending_all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "((do {
+              x \<leftarrow> guard
+                (\<lambda>st. (2 :: 32 word) < len \<longrightarrow>
+                  IS_VALID(8 word) st (pending +\<^sub>p uint (2 :: 32 word)));
+              ret \<leftarrow> gets
+                (\<lambda>st. (2 :: 32 word) < len \<and>
+                  heap_w8 st (pending +\<^sub>p uint (2 :: 32 word)) =
+                  heap_w8 s pending);
+              return ((2 :: 32 word), if ret then 1 else 0)
+            } >>= whileLoop (\<lambda>(j :: 32 word, ret :: 32 word) st. ret \<noteq> 0)
+              (\<lambda>(j, ret). do {
+                 x \<leftarrow> guard
+                   (\<lambda>st. j + 1 < len \<longrightarrow>
+                     IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+                 ret \<leftarrow> gets
+                   (\<lambda>st. j + 1 < len \<and>
+                     heap_w8 st (pending +\<^sub>p uint (j + 1)) =
+                     heap_w8 s pending);
+                 return (j + 1, if ret then 1 else 0)
+              })) :: (32 word \<times> 32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>Res r t. r = (len, 0) \<and> t = s \<rbrace>"
+proof -
+  have v2:
+    "ptr_valid (heap_typing s) (pending +\<^sub>p uint (2 :: 32 word))"
+    using pending_valid[rule_format, of 2] len_gt2
+    by (simp add: word_less_nat_alt)
+  have p2:
+    "heap_w8 s (pending +\<^sub>p uint (2 :: 32 word)) =
+      heap_w8 s pending"
+    using pending_all_eq[rule_format, of 2] len_gt2
+    by (auto simp: word_less_nat_alt)
+  show ?thesis
+    apply runs_to_vcg
+    using v2 apply simp
+    using p2 len_gt2 apply simp
+    apply (rule runs_to_weaken[
+      OF flush_pending'_replicate_run_inner_loop_from_Res])
+       apply (rule len_gt2)
+      apply (rule pending_all_eq)
+     apply (rule pending_valid)
+    using len_gt2 p2 by auto
+qed
+
 lemma flush_pending'_replicate_run_prescan_two_liftE:
   fixes len :: "32 word"
   assumes len_gt2: "(2 :: 32 word) < len"
@@ -7301,28 +7353,52 @@ lemma flush_pending'_replicate_run_prescan_two_liftE:
               })) :: (32 word \<times> 32 word, lifted_globals) res_monad)
           :: ('e, 32 word \<times> 32 word, lifted_globals) exn_monad) \<bullet> s
          \<lbrace> \<lambda>r t. r = Result (len, 0) \<and> t = s \<rbrace>"
-proof -
-  have v2:
-    "ptr_valid (heap_typing s) (pending +\<^sub>p uint (2 :: 32 word))"
-    using pending_valid[rule_format, of 2] len_gt2
-    by (simp add: word_less_nat_alt)
-  have p2:
-    "heap_w8 s (pending +\<^sub>p uint (2 :: 32 word)) =
-      heap_w8 s pending"
-    using pending_all_eq[rule_format, of 2] len_gt2
-    by (auto simp: word_less_nat_alt)
-  show ?thesis
-    apply (rule runs_to_liftE)
-    apply runs_to_vcg
-    using v2 apply simp
-    using p2 len_gt2 apply simp
-    apply (rule runs_to_weaken[
-      OF flush_pending'_replicate_run_inner_loop_from_Res])
-       apply (rule len_gt2)
-      apply (rule pending_all_eq)
-     apply (rule pending_valid)
-    using len_gt2 p2 by auto
-qed
+  apply (rule runs_to_liftE)
+  apply (rule runs_to_weaken[
+    OF flush_pending'_replicate_run_prescan_two_Res])
+    apply (rule len_gt2)
+   apply (rule pending_all_eq)
+  apply (rule pending_valid)
+  by auto
+
+lemma flush_pending'_replicate_run_prescan_two_condition_liftE:
+  fixes len :: "32 word"
+  assumes len_gt2: "(2 :: 32 word) < len"
+      and pending_all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "(liftE
+           (condition (\<lambda>st. True)
+             ((do {
+                x \<leftarrow> guard
+                  (\<lambda>st. (2 :: 32 word) < len \<longrightarrow>
+                    IS_VALID(8 word) st (pending +\<^sub>p uint (2 :: 32 word)));
+                ret \<leftarrow> gets
+                  (\<lambda>st. (2 :: 32 word) < len \<and>
+                    heap_w8 st (pending +\<^sub>p uint (2 :: 32 word)) =
+                    heap_w8 s pending);
+                return ((2 :: 32 word), if ret then 1 else 0)
+              } >>= whileLoop (\<lambda>(j :: 32 word, ret :: 32 word) st. ret \<noteq> 0)
+                (\<lambda>(j, ret). do {
+                   x \<leftarrow> guard
+                     (\<lambda>st. j + 1 < len \<longrightarrow>
+                       IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+                   ret \<leftarrow> gets
+                     (\<lambda>st. j + 1 < len \<and>
+                       heap_w8 st (pending +\<^sub>p uint (j + 1)) =
+                       heap_w8 s pending);
+                   return (j + 1, if ret then 1 else 0)
+                })) :: (32 word \<times> 32 word, lifted_globals) res_monad)
+             (return ((1 :: 32 word), 1 :: 32 word)))
+          :: ('e, 32 word \<times> 32 word, lifted_globals) exn_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result (len, 0) \<and> t = s \<rbrace>"
+  apply (rule runs_to_liftE)
+  apply (simp add: condition_def)
+  by (rule flush_pending'_replicate_run_prescan_two_Res[
+      OF len_gt2 pending_all_eq pending_valid, simplified])
 
 lemma flush_pending'_replicate_run_inner_loop:
   fixes len :: "32 word"
