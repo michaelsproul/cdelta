@@ -7259,6 +7259,36 @@ lemma flush_pending'_replicate_run_inner_loop_from_Res:
       OF start_lt pending_all_eq pending_valid])
   by auto
 
+lemma flush_pending'_replicate_run_inner_loop_from_Res_unat:
+  fixes len start :: "32 word"
+  assumes start_lt: "unat start < unat len"
+      and pending_all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "(whileLoop (\<lambda>(j :: 32 word, ret :: 32 word) st. ret \<noteq> 0)
+           (\<lambda>(j, ret). do {
+              x \<leftarrow> guard
+                (\<lambda>st. unat (j + 1) < unat len \<longrightarrow>
+                  IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+              ret \<leftarrow> gets
+                (\<lambda>st. unat (j + 1) < unat len \<and>
+                  heap_w8 st (pending +\<^sub>p uint (j + 1)) =
+                  heap_w8 s pending);
+              return (j + 1, if ret then 1 else 0)
+           }) (start, 1) :: (32 word \<times> 32 word, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>Res r t. r = (len, 0) \<and> t = s \<rbrace>"
+proof -
+  have start_word: "start < len"
+    using start_lt by (simp add: word_less_nat_alt)
+  show ?thesis
+    using flush_pending'_replicate_run_inner_loop_from_Res
+      [OF start_word pending_all_eq pending_valid]
+    by (simp add: word_less_nat_alt)
+qed
+
 lemma flush_pending'_replicate_run_inner_loop_from_liftE:
   fixes len start :: "32 word"
   assumes start_lt: "start < len"
