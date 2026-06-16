@@ -832,7 +832,7 @@ lemma write_bytes'_success_preserves_near_ptr:
   unfolding write_bytes'_def
   apply runs_to_vcg
   using fits
-  apply simp
+  apply blast
   apply (rule runs_to_weaken[
     OF write_bytes_loop_preserves_near_ptr[OF dst_valid src_valid]])
   by auto
