@@ -646,6 +646,28 @@ proof -
         [OF pending_replicate min_run_len])
 qed
 
+lemma flush_pending_spec_heap_all_eq_run:
+  assumes pending_eq:
+        "enc_pending st = heap_bytes_word s pending 0 len"
+      and len_ge: "(4 :: 32 word) \<le> len"
+      and all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+  shows "flush_pending_spec src_len st =
+    (emit_inst_spec src_len (RRun (heap_w8 s pending) (unat len)) st)
+      \<lparr>enc_pending := []\<rparr>"
+proof -
+  have pending_replicate:
+    "enc_pending st = replicate (unat len) (heap_w8 s pending)"
+    by (rule enc_pending_heap_bytes_word_all_eq_replicate[
+        OF pending_eq all_eq])
+  have min_run_len: "min_run \<le> unat len"
+    using len_ge by (simp add: min_run_def word_le_nat_alt)
+  show ?thesis
+    by (rule flush_pending_spec_replicate_run[
+        OF pending_replicate min_run_len])
+qed
+
 lemma write_byte'_heap_bytes_append_next_typing_preserves2_word:
   assumes pos_lt: "pos < cap"
       and ptr_ok: "ptr_valid (heap_typing s) (buf +\<^sub>p uint pos)"
