@@ -7266,8 +7266,116 @@ lemma flush_pending'_replicate_run_inner_loop_from_liftE:
     OF flush_pending'_replicate_run_inner_loop_from_Res])
      apply (rule start_lt)
     apply (rule pending_all_eq)
-   apply (rule pending_valid)
+    apply (rule pending_valid)
   by auto
+
+lemma unat_suc_le_of_unat_less32:
+  fixes i len :: "32 word"
+  assumes "unat i < unat len"
+  shows "unat (i + 1) \<le> unat len"
+  using assms unat_suc_le_of_word_less[of i len]
+  by (simp add: word_less_nat_alt)
+
+lemma unat_measure_decrease_of_unat_less32:
+  fixes i len :: "32 word"
+  assumes "unat i < unat len"
+  shows "unat len - unat (i + 1) < unat len - unat i"
+  using assms unat_measure_decrease_of_word_less[of i len]
+  by (simp add: word_less_nat_alt)
+
+lemma word_suc_eq_of_unat_lt_not_unat_suc_lt32:
+  fixes i len :: "32 word"
+  assumes i_lt: "unat i < unat len"
+      and suc_not_lt: "\<not> unat (i + 1) < unat len"
+  shows "i + 1 = len"
+proof -
+  have suc_le: "unat (i + 1) \<le> unat len"
+    by (rule unat_suc_le_of_unat_less32[OF i_lt])
+  have len_le: "unat len \<le> unat (i + 1)"
+    using suc_not_lt by simp
+  then have "unat (i + 1) = unat len"
+    using suc_le by simp
+  then show ?thesis
+    by (metis word_unat.Rep_inject)
+qed
+
+lemma flush_pending'_replicate_run_inner_loop_from_exn:
+  fixes len start :: "32 word"
+  assumes start_lt: "start < len"
+      and pending_all_eq: "\<forall>j < unat len.
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) =
+        heap_w8 s pending"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "(whileLoop (\<lambda>(j :: 32 word, ret :: 32 word) st. ret \<noteq> 0)
+           (\<lambda>(j, ret). do {
+              x \<leftarrow> guard
+                (\<lambda>st. j + 1 < len \<longrightarrow>
+                  IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+              ret \<leftarrow> gets
+                (\<lambda>st. j + 1 < len \<and>
+                  heap_w8 st (pending +\<^sub>p uint (j + 1)) =
+                  heap_w8 s pending);
+              return (j + 1, if ret then 1 else 0)
+           }) (start, 1) :: ('e, 32 word \<times> 32 word, lifted_globals) exn_monad) \<bullet> s
+         \<lbrace> \<lambda>r t. r = Result (len, 0) \<and> t = s \<rbrace>"
+  apply (rule runs_to_whileLoop_exn'[
+    where R = "measure
+      (\<lambda>((j :: 32 word, ret :: 32 word), _). unat len - unat j)"
+      and I = "\<lambda>r t.
+        ((\<forall>j ret. r = Result (j, ret) \<longrightarrow>
+            unat j \<le> unat len \<and>
+            (ret \<noteq> 0 \<longleftrightarrow> j < len) \<and>
+            t = s) \<and>
+         (\<forall>e. r = Exn e \<longrightarrow> False))"])
+  subgoal for a t
+    apply (cases a)
+    apply clarsimp
+    subgoal for j ret
+      apply runs_to_vcg
+      subgoal
+        using pending_valid[rule_format, of "unat (j + 1)"]
+        by (simp add: word_less_nat_alt word_unat.Rep_inverse)
+      subgoal
+        by (rule unat_suc_le_of_word_less)
+      subgoal
+        using unat_measure_decrease_of_unat_less32[of j len]
+        by (simp add: word_less_nat_alt)
+      subgoal
+        using pending_all_eq[rule_format, of "unat (j + 1)"]
+        by (auto simp: word_less_nat_alt word_unat.Rep_inverse
+                 intro: word_suc_eq_of_unat_lt_not_unat_suc_lt32
+                        unat_suc_le_of_unat_less32)
+      subgoal
+        using pending_all_eq[rule_format, of "unat (j + 1)"]
+        by (auto simp: word_less_nat_alt word_unat.Rep_inverse)
+      subgoal
+        using unat_measure_decrease_of_unat_less32[of j len]
+        by (simp add: word_less_nat_alt)
+      done
+    done
+  subgoal premises prems for a t
+  proof -
+    obtain j ret where a_def: "a = (j, ret)"
+      by (cases a)
+    have j_le: "unat j \<le> unat len"
+      using prems a_def by auto
+    have not_lt: "\<not> j < len"
+      using prems a_def by auto
+    have "unat len \<le> unat j"
+      using not_lt by (simp add: word_less_nat_alt)
+    then have j_eq: "j = len"
+      using j_le by (metis antisym_conv word_unat.Rep_inject)
+    have ret_eq: "ret = 0"
+      using prems a_def by auto
+    show ?thesis
+      using prems a_def j_eq ret_eq by simp
+  qed
+  subgoal by simp
+  subgoal by simp
+  subgoal using start_lt by (auto simp: word_less_nat_alt)
+  done
 
 lemma flush_pending'_replicate_run_prescan_two_Res:
   fixes len :: "32 word"
@@ -7375,10 +7483,10 @@ lemma flush_pending'_replicate_run_prescan_two_condition_liftE:
              ((do {
                 x \<leftarrow> guard
                   (\<lambda>st. (2 :: 32 word) < len \<longrightarrow>
-                    IS_VALID(8 word) st (pending +\<^sub>p uint (2 :: 32 word)));
+                    IS_VALID(8 word) st (pending +\<^sub>p 2));
                 ret \<leftarrow> gets
                   (\<lambda>st. (2 :: 32 word) < len \<and>
-                    heap_w8 st (pending +\<^sub>p uint (2 :: 32 word)) =
+                    heap_w8 st (pending +\<^sub>p 2) =
                     heap_w8 s pending);
                 return ((2 :: 32 word), if ret then 1 else 0)
               } >>= whileLoop (\<lambda>(j :: 32 word, ret :: 32 word) st. ret \<noteq> 0)
