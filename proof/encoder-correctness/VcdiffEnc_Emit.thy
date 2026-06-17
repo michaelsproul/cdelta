@@ -811,6 +811,110 @@ proof -
     by (rule heap_bytes_word_zero_take_drop[OF range])
 qed
 
+lemma flush_pending_groups_run_from_heap_scan:
+  fixes i j len :: "32 word"
+  assumes i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and min_len: "min_run \<le> unat (j - i)"
+      and all_eq: "\<And>k. \<lbrakk> unat i \<le> k; k < unat j \<rbrakk> \<Longrightarrow>
+        heap_w8 s
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+      and stop: "j < len \<Longrightarrow>
+        heap_w8 s (pending +\<^sub>p uint j) \<noteq> b"
+  shows "flush_pending_groups add
+          (drop (unat i) (heap_bytes_word s pending 0 len)) =
+         append_add_inst add [] @ [RRun b (unat (j - i))] @
+         flush_pending_groups []
+          (drop (unat j) (heap_bytes_word s pending 0 len))"
+proof -
+  have diff: "unat j - unat i = unat (j - i)"
+    using i_lt_j by (simp add: unat_sub word_less_nat_alt word_le_nat_alt)
+  have groups:
+    "flush_pending_groups add
+      (drop (unat i) (heap_bytes_word s pending 0 len)) =
+     append_add_inst add [] @ [RRun b (unat j - unat i)] @
+     flush_pending_groups []
+      (drop (unat j) (heap_bytes_word s pending 0 len))"
+  proof (rule flush_pending_groups_run_from_maximal)
+    show "unat i < unat j"
+      using i_lt_j by (simp add: word_less_nat_alt)
+    show "unat j \<le> length (heap_bytes_word s pending 0 len)"
+      using j_le_len by (simp add: word_le_nat_alt)
+    show "min_run \<le> unat j - unat i"
+      using diff min_len by simp
+  next
+    fix k
+    assume i_le_k: "unat i \<le> k" and k_lt_j: "k < unat j"
+    then have k_lt_len: "k < unat len"
+      using j_le_len by (simp add: word_le_nat_alt)
+    show "heap_bytes_word s pending 0 len ! k = b"
+      using all_eq[OF i_le_k k_lt_j] k_lt_len
+      by (simp add: heap_bytes_word_nth)
+  next
+    assume j_lt_len_nat: "unat j < length (heap_bytes_word s pending 0 len)"
+    then have j_lt_len: "j < len"
+      by (simp add: word_less_nat_alt)
+    show "heap_bytes_word s pending 0 len ! unat j \<noteq> b"
+      using stop[OF j_lt_len] j_lt_len_nat
+      by (simp add: heap_bytes_word_nth word_unat.Rep_inverse)
+  qed
+  show ?thesis
+    using groups diff by simp
+qed
+
+lemma flush_pending_groups_short_from_heap_scan:
+  fixes i j len :: "32 word"
+  assumes i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and short: "unat (j - i) < min_run"
+      and all_eq: "\<And>k. \<lbrakk> unat i \<le> k; k < unat j \<rbrakk> \<Longrightarrow>
+        heap_w8 s
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+      and stop: "j < len \<Longrightarrow>
+        heap_w8 s (pending +\<^sub>p uint j) \<noteq> b"
+  shows "flush_pending_groups add
+          (drop (unat i) (heap_bytes_word s pending 0 len)) =
+         flush_pending_groups
+          (add @ take (unat (j - i))
+            (drop (unat i) (heap_bytes_word s pending 0 len)))
+          (drop (unat j) (heap_bytes_word s pending 0 len))"
+proof -
+  have diff: "unat j - unat i = unat (j - i)"
+    using i_lt_j by (simp add: unat_sub word_less_nat_alt word_le_nat_alt)
+  have groups:
+    "flush_pending_groups add
+      (drop (unat i) (heap_bytes_word s pending 0 len)) =
+     flush_pending_groups
+      (add @ take (unat j - unat i)
+        (drop (unat i) (heap_bytes_word s pending 0 len)))
+      (drop (unat j) (heap_bytes_word s pending 0 len))"
+  proof (rule flush_pending_groups_short_from_maximal)
+    show "unat i < unat j"
+      using i_lt_j by (simp add: word_less_nat_alt)
+    show "unat j \<le> length (heap_bytes_word s pending 0 len)"
+      using j_le_len by (simp add: word_le_nat_alt)
+    show "unat j - unat i < min_run"
+      using diff short by simp
+  next
+    fix k
+    assume i_le_k: "unat i \<le> k" and k_lt_j: "k < unat j"
+    then have k_lt_len: "k < unat len"
+      using j_le_len by (simp add: word_le_nat_alt)
+    show "heap_bytes_word s pending 0 len ! k = b"
+      using all_eq[OF i_le_k k_lt_j] k_lt_len
+      by (simp add: heap_bytes_word_nth)
+  next
+    assume j_lt_len_nat: "unat j < length (heap_bytes_word s pending 0 len)"
+    then have j_lt_len: "j < len"
+      by (simp add: word_less_nat_alt)
+    show "heap_bytes_word s pending 0 len ! unat j \<noteq> b"
+      using stop[OF j_lt_len] j_lt_len_nat
+      by (simp add: heap_bytes_word_nth word_unat.Rep_inverse)
+  qed
+  show ?thesis
+    using groups diff by simp
+qed
+
 lemma flush_pending_insts_short:
   assumes len_lt: "length pending < min_run"
   shows "flush_pending_insts pending =
