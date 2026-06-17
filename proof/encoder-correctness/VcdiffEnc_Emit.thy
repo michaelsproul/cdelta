@@ -821,6 +821,95 @@ proof -
     by (rule heap_bytes_word_zero_take_drop[OF range])
 qed
 
+lemma take_drop_append_between:
+  assumes a_le_i: "a \<le> i"
+      and i_le_j: "i \<le> j"
+      and j_le_len: "j \<le> length xs"
+  shows "take (i - a) (drop a xs) @ take (j - i) (drop i xs) =
+         take (j - a) (drop a xs)"
+proof (rule nth_equalityI)
+  show "length (take (i - a) (drop a xs) @ take (j - i) (drop i xs)) =
+        length (take (j - a) (drop a xs))"
+    using assms by simp
+next
+  fix k
+  assume k_lt:
+    "k < length (take (i - a) (drop a xs) @ take (j - i) (drop i xs))"
+  have k_lt_total: "k < j - a"
+    using k_lt assms by simp
+  show "(take (i - a) (drop a xs) @ take (j - i) (drop i xs)) ! k =
+        take (j - a) (drop a xs) ! k"
+  proof (cases "k < i - a")
+    case True
+    have a_k_lt_len: "a + k < length xs"
+      using k_lt_total j_le_len a_le_i i_le_j by simp
+    have k_lt_drop_a: "k < length xs - a"
+      using a_k_lt_len by simp
+    then show ?thesis
+      using True k_lt_total a_k_lt_len k_lt_drop_a
+      by (simp add: nth_append)
+  next
+    case False
+    let ?m = "k - (i - a)"
+    have m_lt: "?m < j - i"
+      using False k_lt_total a_le_i i_le_j by simp
+    have idx: "i + ?m = a + k"
+      using False a_le_i by simp
+    have i_m_lt_len: "i + ?m < length xs"
+      using m_lt j_le_len i_le_j by simp
+    have a_k_lt_len: "a + k < length xs"
+      using idx i_m_lt_len by simp
+    have k_lt_drop_a: "k < length xs - a"
+      using a_k_lt_len by simp
+    have m_lt_drop_i: "?m < length xs - i"
+      using i_m_lt_len by simp
+    show ?thesis
+      using False m_lt k_lt_total idx i_m_lt_len a_k_lt_len
+            k_lt_drop_a m_lt_drop_i
+      by (simp add: nth_append add.commute)
+  qed
+qed
+
+lemma heap_bytes_word_append_between:
+  fixes a i j :: "32 word"
+  assumes a_le_i: "a \<le> i"
+      and i_le_j: "i \<le> j"
+  shows "heap_bytes_word s buf a (i - a) @
+         heap_bytes_word s buf i (j - i) =
+         heap_bytes_word s buf a (j - a)"
+proof -
+  have a_le_j: "a \<le> j"
+    using a_le_i i_le_j by simp
+  have h_ai:
+    "heap_bytes_word s buf a (i - a) =
+     take (unat (i - a)) (drop (unat a)
+       (heap_bytes_word s buf 0 j))"
+    by (rule heap_bytes_word_zero_take_drop_between[OF a_le_i i_le_j])
+  have h_ij:
+    "heap_bytes_word s buf i (j - i) =
+     take (unat (j - i)) (drop (unat i)
+       (heap_bytes_word s buf 0 j))"
+    by (rule heap_bytes_word_zero_take_drop_between[OF i_le_j order.refl])
+  have h_aj:
+    "heap_bytes_word s buf a (j - a) =
+     take (unat (j - a)) (drop (unat a)
+       (heap_bytes_word s buf 0 j))"
+    by (rule heap_bytes_word_zero_take_drop_between[OF a_le_j order.refl])
+  have list:
+    "take (unat i - unat a) (drop (unat a)
+       (heap_bytes_word s buf 0 j)) @
+     take (unat j - unat i) (drop (unat i)
+       (heap_bytes_word s buf 0 j)) =
+     take (unat j - unat a) (drop (unat a)
+       (heap_bytes_word s buf 0 j))"
+    by (rule take_drop_append_between)
+       (use a_le_i i_le_j in
+        \<open>simp_all add: word_le_nat_alt\<close>)
+  show ?thesis
+    using h_ai h_ij h_aj list a_le_i i_le_j a_le_j
+    by (simp add: unat_sub word_le_nat_alt)
+qed
+
 lemma flush_pending_groups_run_from_heap_scan:
   fixes i j len :: "32 word"
   assumes i_lt_j: "i < j"
