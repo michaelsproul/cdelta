@@ -8144,6 +8144,125 @@ proof -
     by (metis word_unat.Rep_inject)
 qed
 
+lemma all_prev_extend_word_suc:
+  fixes j len :: "32 word"
+  assumes j_lt: "j < len"
+      and all_prev: "\<And>k. \<lbrakk> start \<le> k; k < unat j \<rbrakk> \<Longrightarrow> P k"
+      and cur: "P (unat j)"
+      and k_ge: "start \<le> k"
+      and k_lt: "k < unat (j + 1)"
+  shows "P k"
+proof (cases "k < unat j")
+  case True
+  then show ?thesis
+    using all_prev k_ge by blast
+next
+  case False
+  have suc_unat: "unat (j + 1) = Suc (unat j)"
+    using unat_word_suc_of_less[OF j_lt] .
+  then have "k = unat j"
+    using False k_lt by simp
+  then show ?thesis
+    using cur by simp
+qed
+
+lemma pending_all_eq_extend_word_suc:
+  fixes j len :: "32 word"
+  assumes j_lt: "j < len"
+      and all_prev: "\<forall>k. start \<le> k \<and> k < unat j \<longrightarrow>
+        heap_w8 s
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+      and cur: "heap_w8 s (pending +\<^sub>p uint j) = b"
+      and k_ge: "start \<le> k"
+      and k_lt: "k < unat (j + 1)"
+  shows "heap_w8 s
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+proof -
+  have cur_at_unat:
+    "heap_w8 s
+      (pending +\<^sub>p uint ((0 :: 32 word) + of_nat (unat j))) = b"
+    using cur by simp
+  show ?thesis
+    apply (rule all_prev_extend_word_suc[
+      where P = "\<lambda>k. heap_w8 s
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+        and j = j and len = len and start = start,
+      OF j_lt _ cur_at_unat k_ge k_lt])
+    using all_prev by blast
+qed
+
+lemma flush_pending_scan_inner_step_maximal:
+  fixes j len :: "32 word"
+    and ret :: int
+    and start :: nat
+    and pending :: "8 word ptr"
+    and b :: byte
+    and s :: lifted_globals
+  defines "j' \<equiv> j + 1"
+      and "ret' \<equiv>
+        (if j + 1 < len \<and>
+            heap_w8 s (pending +\<^sub>p uint (j + 1)) = b
+         then (1 :: int) else 0)"
+  assumes start_le: "start \<le> unat j"
+      and j_le: "unat j \<le> unat len"
+      and ret_run: "ret \<noteq> (0 :: int)"
+      and ret_imp:
+        "ret \<noteq> (0 :: int) \<longrightarrow>
+          j < len \<and> heap_w8 s (pending +\<^sub>p uint j) = b"
+      and all_prev:
+        "\<forall>k. start \<le> k \<and> k < unat j \<longrightarrow>
+          heap_w8 s
+            (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+  shows "start \<le> unat j' \<and>
+         unat j' \<le> unat len \<and>
+         (ret' \<noteq> 0 \<longrightarrow>
+          j' < len \<and> heap_w8 s (pending +\<^sub>p uint j') = b) \<and>
+         (ret' = 0 \<longrightarrow>
+          (j' < len \<longrightarrow>
+            heap_w8 s (pending +\<^sub>p uint j') \<noteq> b)) \<and>
+         (\<forall>k. start \<le> k \<and> k < unat j' \<longrightarrow>
+          heap_w8 s
+            (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b)"
+proof -
+  have j_lt: "j < len"
+    using ret_run ret_imp by simp
+  have cur: "heap_w8 s (pending +\<^sub>p uint j) = b"
+    using ret_run ret_imp by simp
+  have start_le_suc: "start \<le> unat j'"
+    unfolding j'_def
+    apply (subst unat_word_suc_of_less)
+     apply (rule j_lt)
+    using start_le by simp
+  have suc_le_len: "unat j' \<le> unat len"
+    unfolding j'_def
+    by (rule unat_suc_le_of_word_less[OF j_lt])
+  have ret_nonzero:
+    "ret' \<noteq> 0 \<longrightarrow>
+      j' < len \<and> heap_w8 s (pending +\<^sub>p uint j') = b"
+    unfolding ret'_def j'_def by auto
+  have ret_zero:
+    "ret' = 0 \<longrightarrow>
+      (j' < len \<longrightarrow> heap_w8 s (pending +\<^sub>p uint j') \<noteq> b)"
+    unfolding ret'_def j'_def by auto
+  have all_suc:
+    "\<forall>k. start \<le> k \<and> k < unat j' \<longrightarrow>
+      heap_w8 s
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+  proof safe
+    fix k
+    assume k_ge: "start \<le> k"
+       and k_lt: "k < unat j'"
+    show "heap_w8 s
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+      unfolding j'_def
+      apply (rule pending_all_eq_extend_word_suc[
+        OF j_lt all_prev cur k_ge])
+      using k_lt unfolding j'_def .
+  qed
+  show ?thesis
+    using start_le_suc suc_le_len ret_nonzero ret_zero all_suc by blast
+qed
+
 lemma flush_pending'_replicate_run_inner_loop_from_exn:
   fixes len start :: "32 word"
   assumes start_lt: "start < len"
