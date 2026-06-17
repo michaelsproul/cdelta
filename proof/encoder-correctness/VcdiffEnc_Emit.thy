@@ -1014,6 +1014,52 @@ proof -
     using groups diff by simp
 qed
 
+lemma flush_pending_groups_short_heap_slice_update:
+  fixes add_start i j len :: "32 word"
+  assumes add_start_le_i: "add_start \<le> i"
+      and i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and short: "unat (j - i) < min_run"
+      and all_eq: "\<And>k. \<lbrakk> unat i \<le> k; k < unat j \<rbrakk> \<Longrightarrow>
+        heap_w8 s
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+      and stop: "j < len \<Longrightarrow>
+        heap_w8 s (pending +\<^sub>p uint j) \<noteq> b"
+  shows "flush_pending_groups
+          (heap_bytes_word s pending add_start (i - add_start))
+          (drop (unat i) (heap_bytes_word s pending 0 len)) =
+         flush_pending_groups
+          (heap_bytes_word s pending add_start (j - add_start))
+          (drop (unat j) (heap_bytes_word s pending 0 len))"
+proof -
+  have i_le_j: "i \<le> j"
+    using i_lt_j by simp
+  have short_branch:
+    "flush_pending_groups
+      (heap_bytes_word s pending add_start (i - add_start))
+      (drop (unat i) (heap_bytes_word s pending 0 len)) =
+     flush_pending_groups
+      (heap_bytes_word s pending add_start (i - add_start) @
+       take (unat (j - i))
+        (drop (unat i) (heap_bytes_word s pending 0 len)))
+      (drop (unat j) (heap_bytes_word s pending 0 len))"
+    by (rule flush_pending_groups_short_from_heap_scan[
+      OF i_lt_j j_le_len short all_eq stop])
+  have scanned:
+    "take (unat (j - i))
+      (drop (unat i) (heap_bytes_word s pending 0 len)) =
+     heap_bytes_word s pending i (j - i)"
+    using i_le_j j_le_len
+    by (simp add: heap_bytes_word_zero_take_drop_between)
+  have appended:
+    "heap_bytes_word s pending add_start (i - add_start) @
+     heap_bytes_word s pending i (j - i) =
+     heap_bytes_word s pending add_start (j - add_start)"
+    by (rule heap_bytes_word_append_between[OF add_start_le_i i_le_j])
+  show ?thesis
+    using short_branch scanned appended by simp
+qed
+
 lemma flush_pending_insts_short:
   assumes len_lt: "length pending < min_run"
   shows "flush_pending_insts pending =
