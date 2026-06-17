@@ -1060,6 +1060,54 @@ proof -
     using short_branch scanned appended by simp
 qed
 
+lemma flush_pending_groups_run_from_heap_scan_word:
+  fixes i j len :: "32 word"
+  assumes i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and run_ge: "(4 :: 32 word) \<le> j - i"
+      and all_eq: "\<And>k. \<lbrakk> unat i \<le> k; k < unat j \<rbrakk> \<Longrightarrow>
+        heap_w8 s
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+      and stop: "j < len \<Longrightarrow>
+        heap_w8 s (pending +\<^sub>p uint j) \<noteq> b"
+  shows "flush_pending_groups add
+          (drop (unat i) (heap_bytes_word s pending 0 len)) =
+         append_add_inst add [] @ [RRun b (unat (j - i))] @
+         flush_pending_groups []
+          (drop (unat j) (heap_bytes_word s pending 0 len))"
+proof -
+  have min_len: "min_run \<le> unat (j - i)"
+    using run_ge by (simp add: min_run_def word_le_nat_alt)
+  show ?thesis
+    by (rule flush_pending_groups_run_from_heap_scan[
+      OF i_lt_j j_le_len min_len all_eq stop])
+qed
+
+lemma flush_pending_groups_short_heap_slice_update_word:
+  fixes add_start i j len :: "32 word"
+  assumes add_start_le_i: "add_start \<le> i"
+      and i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and short: "\<not> (4 :: 32 word) \<le> j - i"
+      and all_eq: "\<And>k. \<lbrakk> unat i \<le> k; k < unat j \<rbrakk> \<Longrightarrow>
+        heap_w8 s
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+      and stop: "j < len \<Longrightarrow>
+        heap_w8 s (pending +\<^sub>p uint j) \<noteq> b"
+  shows "flush_pending_groups
+          (heap_bytes_word s pending add_start (i - add_start))
+          (drop (unat i) (heap_bytes_word s pending 0 len)) =
+         flush_pending_groups
+          (heap_bytes_word s pending add_start (j - add_start))
+          (drop (unat j) (heap_bytes_word s pending 0 len))"
+proof -
+  have short_nat: "unat (j - i) < min_run"
+    using short by (simp add: min_run_def word_le_nat_alt)
+  show ?thesis
+    by (rule flush_pending_groups_short_heap_slice_update[
+      OF add_start_le_i i_lt_j j_le_len short_nat all_eq stop])
+qed
+
 lemma flush_pending_insts_short:
   assumes len_lt: "length pending < min_run"
   shows "flush_pending_insts pending =
