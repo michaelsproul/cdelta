@@ -421,6 +421,16 @@ lemma append_add_inst_append:
   "append_add_inst bs (out @ ys) = out @ append_add_inst bs ys"
   by (simp add: append_add_inst_def)
 
+lemma emit_insts_spec_append[simp]:
+  "emit_insts_spec src_len (xs @ ys) st =
+   emit_insts_spec src_len ys (emit_insts_spec src_len xs st)"
+  by (simp add: emit_insts_spec_def)
+
+lemma emit_insts_spec_append_add_inst_empty[simp]:
+  "emit_insts_spec src_len (append_add_inst add []) st =
+   (if add = [] then st else emit_inst_spec src_len (RAdd add) st)"
+  by (simp add: append_add_inst_def emit_insts_spec_def)
+
 lemma close_pending_run_no_run[simp]:
   "ps_run_byte (close_pending_run s) = None"
   by (simp add: close_pending_run_def split: option.splits)
