@@ -8390,6 +8390,39 @@ lemma flush_pending_scan_inner_inv_init:
   using start_lt start_eq
   by (auto simp: flush_pending_scan_inner_inv_def word_less_nat_alt)
 
+lemma flush_pending_scan_inner_inv_init_suc:
+  fixes i len :: "32 word"
+  assumes i_lt_len: "i < len"
+      and cur_eq: "heap_w8 s (pending +\<^sub>p uint i) = b"
+  shows "flush_pending_scan_inner_inv s pending b (unat i) len
+          (i + 1)
+          (if i + 1 < len \<and>
+              heap_w8 s (pending +\<^sub>p uint (i + 1)) = b
+           then (1 :: int) else 0)
+          s"
+proof -
+  have suc_unat: "unat (i + 1) = Suc (unat i)"
+    using unat_word_suc_of_less[OF i_lt_len] .
+  have suc_le_len: "unat (i + 1) \<le> unat len"
+    by (rule unat_suc_le_of_word_less[OF i_lt_len])
+  have all_prev:
+    "\<forall>k. unat i \<le> k \<and> k < unat (i + 1) \<longrightarrow>
+      heap_w8 s
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+  proof safe
+    fix k
+    assume "unat i \<le> k" and "k < unat (i + 1)"
+    then have k_eq: "k = unat i"
+      using suc_unat by simp
+    show "heap_w8 s
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+      using cur_eq k_eq by (simp add: word_unat.Rep_inverse)
+  qed
+  show ?thesis
+    using suc_unat suc_le_len all_prev
+    by (auto simp: flush_pending_scan_inner_inv_def)
+qed
+
 lemma flush_pending_scan_inner_inv_exit:
   assumes inv:
         "flush_pending_scan_inner_inv s pending b start len j ret t"
@@ -8560,6 +8593,156 @@ lemma flush_pending'_scan_inner_loop_maximal_from_Res_int:
         by (auto simp: flush_pending_scan_inner_inv_def)
       done
     done
+  done
+
+lemma flush_pending'_scan_from_Res_int:
+  fixes len i :: "32 word"
+  assumes i_lt_len: "i < len"
+      and cur_eq: "heap_w8 s (pending +\<^sub>p uint i) = b"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "((do {
+            j \<leftarrow> return (i + 1);
+            ret \<leftarrow> do {
+              x \<leftarrow> guard
+                (\<lambda>st. j < len \<longrightarrow>
+                  IS_VALID(8 word) st (pending +\<^sub>p uint j));
+              gets
+                (\<lambda>st. if j < len \<and>
+                  heap_w8 st (pending +\<^sub>p uint j) = b
+                 then (1 :: int) else 0)
+            };
+            whileLoop (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
+              (\<lambda>(j, ret). do {
+                 x \<leftarrow> guard
+                   (\<lambda>st. j + 1 < len \<longrightarrow>
+                     IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+                 ret \<leftarrow> gets
+                   (\<lambda>st. j + 1 < len \<and>
+                     heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
+                 return (j + 1, if ret then 1 else 0)
+              }) (j, ret)
+          }) :: (32 word \<times> int, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>Res r t.
+              \<exists>j. r = (j, 0) \<and> t = s \<and>
+                i < j \<and> j \<le> len \<and>
+                (\<forall>k. unat i \<le> k \<and> k < unat j \<longrightarrow>
+                  heap_w8 s
+                    (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b) \<and>
+                (j < len \<longrightarrow>
+                  heap_w8 s (pending +\<^sub>p uint j) \<noteq> b) \<rbrace>"
+  apply runs_to_vcg
+  subgoal
+    using pending_valid[rule_format, of "unat (i + 1)"]
+    by (auto simp: word_less_nat_alt word_unat.Rep_inverse)
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure
+      (\<lambda>((j :: 32 word, ret :: int), _). unat len - unat j)"
+      and I = "\<lambda>(j, ret) t.
+        flush_pending_scan_inner_inv s pending b (unat i) len j ret t \<and>
+        unat (i + 1) \<le> unat j"])
+    subgoal
+      by simp
+    subgoal
+      using flush_pending_scan_inner_inv_init_suc[OF i_lt_len cur_eq]
+      by simp
+   subgoal premises prems for r t
+   proof -
+     obtain j ret where r_def: "r = (j, ret)"
+       by (cases r)
+     have inv:
+       "flush_pending_scan_inner_inv s pending b (unat i) len j ret t"
+       using prems r_def by auto
+     have lower: "unat (i + 1) \<le> unat j"
+       using prems r_def by auto
+     have ret_zero: "ret = (0 :: int)"
+       using prems r_def by auto
+     obtain j' where pair: "(j, ret) = (j', 0)"
+        and t_eq: "t = s"
+        and i_le_j: "unat i \<le> unat j'"
+        and j_le_len_nat: "unat j' \<le> unat len"
+        and all_eq:
+          "\<forall>k. unat i \<le> k \<and> k < unat j' \<longrightarrow>
+            heap_w8 s
+              (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+        and stop:
+          "j' < len \<longrightarrow> heap_w8 s (pending +\<^sub>p uint j') \<noteq> b"
+       using flush_pending_scan_inner_inv_exit[OF inv ret_zero] by blast
+     have j_eq: "j = j'"
+       using pair by simp
+     have i_lt_j: "i < j'"
+     proof -
+       have "unat i < unat (i + 1)"
+         using i_lt_len unat_word_suc_of_less[OF i_lt_len] by simp
+       also have "... \<le> unat j'"
+         using lower j_eq by simp
+       finally show ?thesis
+         by (simp add: word_less_nat_alt)
+     qed
+     have j_le_len: "j' \<le> len"
+       using j_le_len_nat by (simp add: word_le_nat_alt)
+     show ?thesis
+       using r_def pair t_eq i_lt_j j_le_len all_eq stop
+       by auto
+   qed
+  subgoal for r t
+    apply (cases r)
+    apply clarsimp
+    subgoal for j ret
+      apply runs_to_vcg
+      subgoal
+        using pending_valid[rule_format, of "unat (j + 1)"]
+        by (auto simp: word_less_nat_alt word_unat.Rep_inverse
+                       flush_pending_scan_inner_inv_def)
+      subgoal
+        by (rule flush_pending_scan_inner_inv_step_true)
+           auto
+      subgoal
+        using unat_word_suc_of_less[of j len]
+        by (auto simp: flush_pending_scan_inner_inv_def)
+      subgoal
+        using unat_measure_decrease_of_word_less[of j len]
+        by (auto simp: flush_pending_scan_inner_inv_def)
+      subgoal
+        by (rule flush_pending_scan_inner_inv_step_false)
+           auto
+      subgoal
+        using unat_word_suc_of_less[of j len]
+        by (auto simp: flush_pending_scan_inner_inv_def)
+      subgoal
+        using unat_measure_decrease_of_word_less[of j len]
+        by (auto simp: flush_pending_scan_inner_inv_def)
+      done
+    done
+  subgoal premises prems
+  proof -
+    have i_lt_suc: "i < i + 1"
+      using i_lt_len unat_word_suc_of_less[OF i_lt_len]
+      by (simp add: word_less_nat_alt)
+    have suc_le_len: "i + 1 \<le> len"
+      using unat_suc_le_of_word_less[OF i_lt_len]
+      by (simp add: word_le_nat_alt)
+    have suc_unat: "unat (i + 1) = Suc (unat i)"
+      using unat_word_suc_of_less[OF i_lt_len] .
+    have all_eq:
+      "\<forall>k. unat i \<le> k \<and> k < unat (i + 1) \<longrightarrow>
+        heap_w8 s
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+    proof safe
+      fix k
+      assume "unat i \<le> k" and "k < unat (i + 1)"
+      then have k_eq: "k = unat i"
+        using suc_unat by simp
+      show "heap_w8 s
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+        using cur_eq k_eq by (simp add: word_unat.Rep_inverse)
+    qed
+    show ?thesis
+      apply (subst whileLoop_unroll)
+      using prems i_lt_suc suc_le_len all_eq
+      by (auto simp: word_unat.Rep_inverse)
+  qed
   done
 
 lemma flush_pending'_replicate_run_inner_loop_from_exn:
