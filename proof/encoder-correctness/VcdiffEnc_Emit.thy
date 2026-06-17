@@ -8263,6 +8263,201 @@ proof -
     using start_le_suc suc_le_len ret_nonzero ret_zero all_suc by blast
 qed
 
+definition flush_pending_scan_inner_inv ::
+  "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> byte \<Rightarrow> nat \<Rightarrow>
+   32 word \<Rightarrow> 32 word \<Rightarrow> int \<Rightarrow> lifted_globals \<Rightarrow> bool" where
+  "flush_pending_scan_inner_inv s pending b start len j ret t \<longleftrightarrow>
+     start \<le> unat j \<and>
+     unat j \<le> unat len \<and>
+     (ret \<noteq> 0 \<longrightarrow>
+       j < len \<and> heap_w8 s (pending +\<^sub>p uint j) = b) \<and>
+     (ret = 0 \<longrightarrow>
+       (j < len \<longrightarrow> heap_w8 s (pending +\<^sub>p uint j) \<noteq> b)) \<and>
+     (\<forall>k. start \<le> k \<and> k < unat j \<longrightarrow>
+       heap_w8 s
+         (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b) \<and>
+     t = s"
+
+lemma flush_pending_scan_inner_inv_init:
+  assumes start_lt: "start < len"
+      and start_eq: "heap_w8 s (pending +\<^sub>p uint start) = b"
+  shows "flush_pending_scan_inner_inv s pending b (unat start) len
+           start (1 :: int) s"
+  using start_lt start_eq
+  by (auto simp: flush_pending_scan_inner_inv_def word_less_nat_alt)
+
+lemma flush_pending_scan_inner_inv_exit:
+  assumes inv:
+        "flush_pending_scan_inner_inv s pending b start len j ret t"
+      and ret_zero: "ret = (0 :: int)"
+  shows "\<exists>j'. (j, ret) = (j', 0) \<and> t = s \<and>
+          start \<le> unat j' \<and> unat j' \<le> unat len \<and>
+          (\<forall>k. start \<le> k \<and> k < unat j' \<longrightarrow>
+            heap_w8 s
+              (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b) \<and>
+          (j' < len \<longrightarrow> heap_w8 s (pending +\<^sub>p uint j') \<noteq> b)"
+  using inv ret_zero
+  by (auto simp: flush_pending_scan_inner_inv_def)
+
+lemma flush_pending_scan_inner_inv_step:
+  assumes inv:
+        "flush_pending_scan_inner_inv s pending b start len j ret t"
+      and ret_run: "ret \<noteq> (0 :: int)"
+  shows "flush_pending_scan_inner_inv s pending b start len
+          (j + 1)
+          (if j + 1 < len \<and>
+              heap_w8 s (pending +\<^sub>p uint (j + 1)) = b
+           then (1 :: int) else 0)
+          t"
+proof -
+  have start_le: "start \<le> unat j"
+      and j_le: "unat j \<le> unat len"
+      and ret_imp:
+        "ret \<noteq> 0 \<longrightarrow>
+          j < len \<and> heap_w8 s (pending +\<^sub>p uint j) = b"
+      and all_prev:
+        "\<forall>k. start \<le> k \<and> k < unat j \<longrightarrow>
+          heap_w8 s
+            (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+      and t_eq: "t = s"
+    using inv by (auto simp: flush_pending_scan_inner_inv_def)
+  have j_lt: "j < len"
+    using ret_run ret_imp by simp
+  have cur: "heap_w8 s (pending +\<^sub>p uint j) = b"
+    using ret_run ret_imp by simp
+  have start_le_suc: "start \<le> unat (j + 1)"
+    apply (subst unat_word_suc_of_less)
+     apply (rule j_lt)
+    using start_le by simp
+  have suc_le_len: "unat (j + 1) \<le> unat len"
+    by (rule unat_suc_le_of_word_less[OF j_lt])
+  have all_suc:
+    "\<forall>k. start \<le> k \<and> k < unat (j + 1) \<longrightarrow>
+      heap_w8 s
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+  proof safe
+    fix k
+    assume k_ge: "start \<le> k"
+       and k_lt: "k < unat (j + 1)"
+    show "heap_w8 s
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+      by (rule pending_all_eq_extend_word_suc[
+          OF j_lt all_prev cur k_ge k_lt])
+  qed
+  show ?thesis
+    using start_le_suc suc_le_len all_suc t_eq
+    by (auto simp: flush_pending_scan_inner_inv_def)
+qed
+
+lemma flush_pending_scan_inner_inv_step_true:
+  assumes inv:
+        "flush_pending_scan_inner_inv s pending b start len j ret t"
+      and ret_run: "ret \<noteq> (0 :: int)"
+      and next_lt: "j + 1 < len"
+      and next_eq: "heap_w8 t (pending +\<^sub>p uint (j + 1)) = b"
+  shows "flush_pending_scan_inner_inv s pending b start len
+          (j + 1) (1 :: int) t"
+proof -
+  have t_eq: "t = s"
+    using inv by (simp add: flush_pending_scan_inner_inv_def)
+  show ?thesis
+    using flush_pending_scan_inner_inv_step[OF inv ret_run]
+          next_lt next_eq t_eq
+    by simp
+qed
+
+lemma flush_pending_scan_inner_inv_step_false:
+  assumes inv:
+        "flush_pending_scan_inner_inv s pending b start len j ret t"
+      and ret_run: "ret \<noteq> (0 :: int)"
+      and next_ne:
+        "j + 1 < len \<longrightarrow>
+          heap_w8 t (pending +\<^sub>p uint (j + 1)) \<noteq> b"
+  shows "flush_pending_scan_inner_inv s pending b start len
+          (j + 1) (0 :: int) t"
+proof -
+  have t_eq: "t = s"
+    using inv by (simp add: flush_pending_scan_inner_inv_def)
+  show ?thesis
+    using flush_pending_scan_inner_inv_step[OF inv ret_run]
+          next_ne t_eq
+    by auto
+qed
+
+lemma flush_pending'_scan_inner_loop_maximal_from_Res_int:
+  fixes len start :: "32 word"
+  assumes start_lt: "start < len"
+      and start_eq:
+        "heap_w8 s (pending +\<^sub>p uint start) = b"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "(whileLoop (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
+           (\<lambda>(j, ret). do {
+              x \<leftarrow> guard
+                (\<lambda>st. j + 1 < len \<longrightarrow>
+                  IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+              ret \<leftarrow> gets
+                (\<lambda>st. j + 1 < len \<and>
+                  heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
+              return (j + 1, if ret then 1 else 0)
+           }) (start, 1) :: (32 word \<times> int, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>Res r t.
+              \<exists>j. r = (j, 0) \<and> t = s \<and>
+                unat start \<le> unat j \<and> unat j \<le> unat len \<and>
+                (\<forall>k. unat start \<le> k \<and> k < unat j \<longrightarrow>
+                  heap_w8 s
+                    (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b) \<and>
+                (j < len \<longrightarrow>
+                  heap_w8 s (pending +\<^sub>p uint j) \<noteq> b) \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure
+      (\<lambda>((j :: 32 word, ret :: int), _). unat len - unat j)"
+      and I = "\<lambda>(j, ret) t.
+        flush_pending_scan_inner_inv s pending b (unat start) len j ret t"])
+    subgoal
+       by simp
+    subgoal
+       using flush_pending_scan_inner_inv_init[OF start_lt start_eq]
+       by simp
+   subgoal premises prems for r t
+   proof -
+     obtain j ret where r_def: "r = (j, ret)"
+       by (cases r)
+     have inv:
+       "flush_pending_scan_inner_inv s pending b (unat start) len j ret t"
+       using prems r_def by auto
+     have ret_zero: "ret = (0 :: int)"
+       using prems r_def by auto
+     show ?thesis
+       using flush_pending_scan_inner_inv_exit[OF inv ret_zero] r_def
+       by auto
+   qed
+  subgoal for r t
+    apply (cases r)
+    apply clarsimp
+    subgoal for j ret
+      apply runs_to_vcg
+      subgoal
+        using pending_valid[rule_format, of "unat (j + 1)"]
+        by (auto simp: word_less_nat_alt word_unat.Rep_inverse
+                       flush_pending_scan_inner_inv_def)
+      subgoal
+        by (rule flush_pending_scan_inner_inv_step_true)
+           auto
+      subgoal
+        using unat_measure_decrease_of_word_less[of j len]
+        by (auto simp: flush_pending_scan_inner_inv_def)
+      subgoal
+        by (rule flush_pending_scan_inner_inv_step_false)
+           auto
+      subgoal
+        using unat_measure_decrease_of_word_less[of j len]
+        by (auto simp: flush_pending_scan_inner_inv_def)
+      done
+    done
+  done
+
 lemma flush_pending'_replicate_run_inner_loop_from_exn:
   fixes len start :: "32 word"
   assumes start_lt: "start < len"
