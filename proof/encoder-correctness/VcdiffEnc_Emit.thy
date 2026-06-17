@@ -398,6 +398,267 @@ lemma flush_pending_spec_empty_sections:
                     emit_insts_spec_def append_add_inst_def
                     close_pending_run_def pending_scan_init_def)
 
+lemma length_dropWhile_less_Suc:
+  "length (dropWhile P xs) < Suc (length xs)"
+  by (induction xs) auto
+
+function flush_pending_groups ::
+  "byte list \<Rightarrow> byte list \<Rightarrow> raw_inst list" where
+  "flush_pending_groups add [] = append_add_inst add []"
+| "flush_pending_groups add (b # bs) =
+    (let run = b # takeWhile ((=) b) bs;
+         rest = dropWhile ((=) b) bs
+     in if min_run \<le> length run
+        then append_add_inst add [] @ [RRun b (length run)] @
+             flush_pending_groups [] rest
+        else flush_pending_groups (add @ run) rest)"
+  by pat_completeness auto
+termination
+  by (relation "measure (\<lambda>(add, rest). length rest)")
+     (auto intro: length_dropWhile_less_Suc)
+
+lemma append_add_inst_append:
+  "append_add_inst bs (out @ ys) = out @ append_add_inst bs ys"
+  by (simp add: append_add_inst_def)
+
+lemma close_pending_run_no_run[simp]:
+  "ps_run_byte (close_pending_run s) = None"
+  by (simp add: close_pending_run_def split: option.splits)
+
+lemma close_pending_run_idem[simp]:
+  "close_pending_run (close_pending_run s) = close_pending_run s"
+  by (simp add: close_pending_run_def split: option.splits)
+
+lemma takeWhile_eq_replicate:
+  "takeWhile ((=) b) bs =
+    replicate (length (takeWhile ((=) b) bs)) b"
+  by (induction bs) auto
+
+lemma dropWhile_hd_not:
+  assumes "dropWhile P xs = y # ys"
+  shows "\<not> P y"
+  using assms by (induction xs) (auto split: if_splits)
+
+lemma foldl_pending_scan_step_replicate_current:
+  assumes run_byte: "ps_run_byte s = Some b"
+  shows "foldl pending_scan_step s (replicate n b) =
+   s\<lparr>ps_run_len := ps_run_len s + n\<rparr>"
+  using run_byte
+  by (induction n arbitrary: s)
+     (simp_all add: pending_scan_step_def ac_simps)
+
+lemma foldl_pending_scan_step_replicate_none:
+  assumes none: "ps_run_byte s = None"
+  shows "foldl pending_scan_step s (replicate n b) =
+    (if n = 0 then s
+     else s\<lparr>ps_run_byte := Some b, ps_run_len := n\<rparr>)"
+  using none
+  by (cases n)
+     (simp_all add: pending_scan_step_def
+                    foldl_pending_scan_step_replicate_current)
+
+lemma pending_scan_step_close_pending_run_diff:
+  assumes rb: "ps_run_byte s = Some b"
+      and diff: "c \<noteq> b"
+  shows "pending_scan_step s c =
+    pending_scan_step (close_pending_run s) c"
+  using rb diff
+  by (simp add: pending_scan_step_def)
+
+lemma close_pending_run_foldl_diff:
+  assumes rb: "ps_run_byte s = Some b"
+      and rest_hd: "rest = [] \<or> hd rest \<noteq> b"
+  shows "close_pending_run (foldl pending_scan_step s rest) =
+    close_pending_run
+      (foldl pending_scan_step (close_pending_run s) rest)"
+  using assms
+  apply (cases rest)
+   apply simp
+  apply (simp add: pending_scan_step_close_pending_run_diff)
+  done
+
+lemma flush_pending_groups_scan:
+  "append_add_inst
+      (ps_add (close_pending_run
+        (foldl pending_scan_step
+          (pending_scan_init\<lparr>ps_add := add, ps_out := out\<rparr>) rest)))
+      (ps_out (close_pending_run
+        (foldl pending_scan_step
+          (pending_scan_init\<lparr>ps_add := add, ps_out := out\<rparr>) rest))) =
+    out @ flush_pending_groups add rest"
+proof (induction rest arbitrary: add out rule: length_induct)
+  case (1 rest)
+  show ?case
+  proof (cases rest)
+    case Nil
+    then show ?thesis
+      by (simp add: pending_scan_init_def close_pending_run_def
+                    append_add_inst_def)
+  next
+    case (Cons b bs)
+    let ?tw = "takeWhile ((=) b) bs"
+    let ?run = "b # ?tw"
+    let ?r = "dropWhile ((=) b) bs"
+    let ?n = "length ?run"
+    let ?s0 = "pending_scan_init\<lparr>ps_add := add, ps_out := out\<rparr>"
+    let ?srun =
+      "?s0\<lparr>ps_run_byte := Some b, ps_run_len := ?n\<rparr>"
+    have rest_split: "rest = ?run @ ?r"
+      using Cons by simp
+    have run_repl: "?run = replicate ?n b"
+      using takeWhile_eq_replicate[of b bs] by simp
+    have fold_run:
+      "foldl pending_scan_step ?s0 ?run = ?srun"
+    proof -
+      let ?s1 = "?s0\<lparr>ps_run_byte := Some b, ps_run_len := 1\<rparr>"
+      have tw_repl:
+        "?tw = replicate (length ?tw) b"
+        by (rule takeWhile_eq_replicate)
+      have cur:
+        "foldl pending_scan_step ?s1 (replicate (length ?tw) b) =
+          ?s1\<lparr>ps_run_len := ps_run_len ?s1 + length ?tw\<rparr>"
+        by (rule foldl_pending_scan_step_replicate_current) simp
+      show ?thesis
+        using tw_repl cur
+        by (simp add: pending_scan_step_def pending_scan_init_def)
+    qed
+    have fold_tw:
+      "foldl pending_scan_step (pending_scan_step ?s0 b) ?tw = ?srun"
+      using fold_run by simp
+    have bs_split: "bs = ?tw @ ?r"
+      by simp
+    have fold_split:
+      "foldl pending_scan_step ?s0 rest =
+        foldl pending_scan_step ?srun ?r"
+    proof -
+      have fold_tail:
+        "foldl pending_scan_step (pending_scan_step ?s0 b) bs =
+         foldl pending_scan_step
+          (foldl pending_scan_step (pending_scan_step ?s0 b) ?tw) ?r"
+        using bs_split by (metis foldl_append)
+      have "foldl pending_scan_step ?s0 rest =
+        foldl pending_scan_step (pending_scan_step ?s0 b) bs"
+        using Cons by simp
+      also have "... = foldl pending_scan_step ?srun ?r"
+        using fold_tail fold_tw by simp
+      finally show ?thesis .
+    qed
+    have r_less: "length ?r < length rest"
+      using Cons length_dropWhile_less_Suc[of "((=) b)" bs] by simp
+    have IH:
+      "\<And>add' out'.
+        append_add_inst
+          (ps_add (close_pending_run
+            (foldl pending_scan_step
+              (pending_scan_init\<lparr>ps_add := add', ps_out := out'\<rparr>) ?r)))
+          (ps_out (close_pending_run
+            (foldl pending_scan_step
+              (pending_scan_init\<lparr>ps_add := add', ps_out := out'\<rparr>) ?r))) =
+        out' @ flush_pending_groups add' ?r"
+      using "1.IH" r_less by blast
+    have r_hd: "?r = [] \<or> hd ?r \<noteq> b"
+    proof (cases ?r)
+      case Nil
+      then show ?thesis by simp
+    next
+      case (Cons c cs)
+      then have "c \<noteq> b"
+        using dropWhile_hd_not[of "((=) b)" bs c cs] by simp
+      then show ?thesis
+        using Cons by simp
+    qed
+    have close_shift:
+      "close_pending_run
+        (foldl pending_scan_step ?srun ?r) =
+       close_pending_run
+        (foldl pending_scan_step (close_pending_run ?srun) ?r)"
+      apply (rule close_pending_run_foldl_diff)
+       apply simp
+      apply (rule r_hd)
+      done
+    show ?thesis
+    proof (cases "min_run \<le> ?n")
+      case True
+      have close_run:
+        "close_pending_run ?srun =
+          pending_scan_init
+            \<lparr>ps_add := [],
+             ps_out := append_add_inst add out @ [RRun b ?n]\<rparr>"
+        using True by (simp add: close_pending_run_def
+                                pending_scan_init_def)
+      have lhs:
+        "append_add_inst
+          (ps_add (close_pending_run
+            (foldl pending_scan_step ?s0 rest)))
+          (ps_out (close_pending_run
+            (foldl pending_scan_step ?s0 rest))) =
+        (append_add_inst add out @ [RRun b ?n]) @
+          flush_pending_groups [] ?r"
+        using fold_split close_shift close_run
+              IH[where add' = "[] :: byte list"
+                 and out' = "append_add_inst add out @ [RRun b ?n]"]
+        by simp
+      show ?thesis
+        using Cons True lhs
+        by (simp add: append_add_inst_def)
+    next
+      case False
+      have close_run:
+        "close_pending_run ?srun =
+          pending_scan_init
+            \<lparr>ps_add := add @ ?run, ps_out := out\<rparr>"
+        using False run_repl
+        by (simp add: close_pending_run_def pending_scan_init_def)
+      have lhs:
+        "append_add_inst
+          (ps_add (close_pending_run
+            (foldl pending_scan_step ?s0 rest)))
+          (ps_out (close_pending_run
+            (foldl pending_scan_step ?s0 rest))) =
+        out @ flush_pending_groups (add @ ?run) ?r"
+        using fold_split close_shift close_run
+              IH[where add' = "add @ ?run" and out' = out]
+        by simp
+      show ?thesis
+        using Cons False lhs by simp
+    qed
+  qed
+qed
+
+lemma flush_pending_groups_empty_eq_insts:
+  "flush_pending_groups [] pending = flush_pending_insts pending"
+  using flush_pending_groups_scan[of "[]" "[]" pending]
+  by (simp add: flush_pending_insts_def pending_scan_init_def)
+
+lemma flush_pending_spec_groups:
+  "flush_pending_spec src_len st =
+    (emit_insts_spec src_len
+      (flush_pending_groups [] (enc_pending st)) st)
+      \<lparr>enc_pending := []\<rparr>"
+  using flush_pending_groups_empty_eq_insts[of "enc_pending st"]
+  by (simp add: flush_pending_spec_def)
+
+lemma flush_pending_groups_short_branch:
+  assumes grp_def: "grp = b # takeWhile ((=) b) bs"
+      and rest_def: "rest = dropWhile ((=) b) bs"
+      and short: "length grp < min_run"
+  shows "flush_pending_groups add (b # bs) =
+    flush_pending_groups (add @ grp) rest"
+  using assms by simp
+
+lemma flush_pending_groups_run_branch:
+  assumes grp_def: "grp = b # takeWhile ((=) b) bs"
+      and rest_def: "rest = dropWhile ((=) b) bs"
+      and long: "min_run \<le> length grp"
+  shows "flush_pending_groups add (b # bs) =
+    append_add_inst add [] @ [RRun b (length grp)] @
+      flush_pending_groups [] rest"
+  using assms by simp
+
+lemma flush_pending_groups_exit:
+  "flush_pending_groups add [] = append_add_inst add []"
+  by simp
+
 lemma flush_pending_insts_short:
   assumes len_lt: "length pending < min_run"
   shows "flush_pending_insts pending =
@@ -540,14 +801,6 @@ lemma flush_pending_spec_four_add_break3:
                 pending_scan_init_def pending_scan_step_def
                 close_pending_run_def append_add_inst_def
                 emit_insts_spec_def min_run_def numeral_eq_Suc)
-
-lemma foldl_pending_scan_step_replicate_current:
-  assumes run_byte: "ps_run_byte s = Some b"
-  shows "foldl pending_scan_step s (replicate n b) =
-   s\<lparr>ps_run_len := ps_run_len s + n\<rparr>"
-  using run_byte
-  by (induction n arbitrary: s)
-     (simp_all add: pending_scan_step_def ac_simps)
 
 lemma foldl_pending_scan_step_replicate_init_Suc:
   "foldl pending_scan_step pending_scan_init (replicate (Suc n) b) =
@@ -1902,6 +2155,236 @@ proof -
             data_byte_dist data_byte_inst_disj data_byte_addr_disj]])
     using pure_sections
     by (auto simp: enc_sections_state_rel_def)
+qed
+
+lemma emit_pending_add_chunk_enc_sections_state_rel:
+  assumes rel:
+        "enc_sections_state_rel s data inst addr sec spec_st"
+      and sz_ge: "(1 :: 32 word) \<le> sz"
+      and size: "varint_size' sz s = Some n"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_byte_dist:
+        "ptr_range_distinct inst (Suc (unat (sections_t_C.inst_pos_C sec)))"
+      and inst_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_pending_disj:
+        "\<forall>i < unat sz.
+           pending +\<^sub>p uint (off + of_nat i) \<noteq>
+           inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_varint_fits:
+        "\<not> inst_cap - (sections_t_C.inst_pos_C sec + 1) < n"
+      and inst_varint_valid: "\<forall>j < unat n.
+        ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j))"
+      and inst_varint_inj: "\<forall>i < unat n. \<forall>j < unat n.
+        i \<noteq> j \<longrightarrow>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat i) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j)"
+      and inst_varint_prefix_disj: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+        i < n \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and inst_varint_no_overflow:
+        "unat (sections_t_C.inst_pos_C sec + 1) + unat n < 2 ^ 32"
+      and inst_varint_data_disj: "\<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+        i < n \<longrightarrow>
+        data +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and inst_varint_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+        i < n \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and inst_varint_pending_disj: "\<forall>k < unat sz. \<forall>i.
+        i < n \<longrightarrow>
+        pending +\<^sub>p uint (off + of_nat k) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and data_fits:
+        "\<not> data_cap - sections_t_C.data_pos_C sec < sz"
+      and data_valid: "\<forall>j < unat sz.
+        ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j))"
+      and pending_valid: "\<forall>j < unat sz.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint (off + of_nat j))"
+      and data_pending_disj: "\<forall>i < unat sz. \<forall>j < unat sz.
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        pending +\<^sub>p uint (off + of_nat j)"
+      and data_inj: "\<forall>i < unat sz. \<forall>j < unat sz.
+        i \<noteq> j \<longrightarrow>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j)"
+      and data_prefix_disj: "\<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+        i < sz \<longrightarrow>
+        data +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_no_overflow:
+        "unat (sections_t_C.data_pos_C sec) + unat sz < 2 ^ 32"
+      and data_inst_disj_small: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+        i < sz \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_inst_disj_large: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1 + n). \<forall>i.
+        i < sz \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+        i < sz \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+  shows "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                sections_t_C.err_C sec' = ENC_OK \<and>
+                enc_sections_state_rel t data inst addr sec'
+                  (emit_inst_spec src_len
+                    (RAdd (heap_bytes_word s pending off sz)) spec_st)) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof (cases "sz \<le> (17 :: 32 word)")
+  case True
+  have small:
+    "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            sections_result sec'
+              (sections_t_C.data_pos_C sec + sz)
+              (sections_t_C.inst_pos_C sec + 1)
+              (sections_t_C.addr_pos_C sec)
+              ENC_OK \<and>
+            enc_sections_state_rel t data inst addr sec'
+              (emit_inst_spec src_len
+                (RAdd (heap_bytes_word s pending off sz)) spec_st)) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+    by (rule emit_add'_small_success_enc_sections_state_rel[
+      OF rel sz_ge True sec_ok inst_byte_fits inst_byte_ptr
+         inst_byte_dist inst_byte_data_disj inst_byte_addr_disj
+         inst_byte_pending_disj data_fits data_valid pending_valid
+         data_pending_disj data_inj data_prefix_disj data_no_overflow
+         data_inst_disj_small data_addr_disj])
+  show ?thesis
+    by (rule runs_to_weaken[OF small])
+       (auto simp: sections_result_def)
+next
+  case False
+  have large:
+    "\<not> ((1 :: 32 word) \<le> sz \<and> sz \<le> (17 :: 32 word))"
+    using False by simp
+  have add_large:
+    "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            sections_result sec'
+              (sections_t_C.data_pos_C sec + sz)
+              (sections_t_C.inst_pos_C sec + 1 + n)
+              (sections_t_C.addr_pos_C sec)
+              ENC_OK \<and>
+            enc_sections_state_rel t data inst addr sec'
+              (emit_inst_spec src_len
+                (RAdd (heap_bytes_word s pending off sz)) spec_st)) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+    by (rule emit_add'_large_success_enc_sections_state_rel[
+      OF rel large size sec_ok inst_byte_fits inst_byte_ptr
+         inst_byte_dist inst_byte_data_disj inst_byte_addr_disj
+         inst_byte_pending_disj inst_varint_fits inst_varint_valid
+         inst_varint_inj inst_varint_prefix_disj inst_varint_no_overflow
+         inst_varint_data_disj inst_varint_addr_disj
+         inst_varint_pending_disj data_fits data_valid pending_valid
+         data_pending_disj data_inj data_prefix_disj data_no_overflow
+         data_inst_disj_large data_addr_disj])
+  show ?thesis
+    by (rule runs_to_weaken[OF add_large])
+       (auto simp: sections_result_def)
+qed
+
+lemma emit_pending_run_chunk_enc_sections_state_rel:
+  assumes rel:
+        "enc_sections_state_rel s data inst addr sec spec_st"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_byte_dist:
+        "ptr_range_distinct inst (Suc (unat (sections_t_C.inst_pos_C sec)))"
+      and inst_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_varint_fits:
+        "\<And>n. varint_size' sz s = Some n \<Longrightarrow>
+          \<not> inst_cap - (sections_t_C.inst_pos_C sec + 1) < n"
+      and inst_varint_valid: "\<And>n. varint_size' sz s = Some n \<Longrightarrow> \<forall>j < unat n.
+        ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j))"
+      and inst_varint_inj: "\<And>n. varint_size' sz s = Some n \<Longrightarrow> \<forall>i < unat n. \<forall>j < unat n.
+        i \<noteq> j \<longrightarrow>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat i) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j)"
+      and inst_varint_prefix_disj: "\<And>n. varint_size' sz s = Some n \<Longrightarrow> \<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+        i < n \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and inst_varint_no_overflow:
+        "\<And>n. varint_size' sz s = Some n \<Longrightarrow>
+          unat (sections_t_C.inst_pos_C sec + 1) + unat n < 2 ^ 32"
+      and inst_varint_data_disj: "\<And>n. varint_size' sz s = Some n \<Longrightarrow> \<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+        i < n \<longrightarrow>
+        data +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and inst_varint_addr_disj: "\<And>n. varint_size' sz s = Some n \<Longrightarrow> \<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+        i < n \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and data_byte_fits: "sections_t_C.data_pos_C sec < data_cap"
+      and data_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec))"
+      and data_byte_dist:
+        "ptr_range_distinct data (Suc (unat (sections_t_C.data_pos_C sec)))"
+      and data_byte_inst_disj:
+        "\<And>n. varint_size' sz s = Some n \<Longrightarrow>
+        \<forall>i < unat (sections_t_C.inst_pos_C sec + 1 + n).
+           inst +\<^sub>p int i \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec)"
+      and data_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec)"
+  shows "emit_run' sec data data_cap inst inst_cap fill sz \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                sections_t_C.err_C sec' = ENC_OK \<and>
+                enc_sections_state_rel t data inst addr sec'
+                  (emit_inst_spec src_len (RRun fill (unat sz)) spec_st)) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  obtain n where size: "varint_size' sz s = Some n"
+    using varint_size'_some by blast
+  have run:
+    "emit_run' sec data data_cap inst inst_cap fill sz \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            sections_result sec'
+              (sections_t_C.data_pos_C sec + 1)
+              (sections_t_C.inst_pos_C sec + 1 + n)
+              (sections_t_C.addr_pos_C sec)
+              ENC_OK \<and>
+            enc_sections_state_rel t data inst addr sec'
+              (emit_inst_spec src_len (RRun fill (unat sz)) spec_st)) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+    by (rule emit_run'_success_enc_sections_state_rel[
+      OF rel size sec_ok inst_byte_fits inst_byte_ptr inst_byte_dist
+         inst_byte_data_disj inst_byte_addr_disj
+         inst_varint_fits[OF size] inst_varint_valid[OF size]
+         inst_varint_inj[OF size] inst_varint_prefix_disj[OF size]
+         inst_varint_no_overflow[OF size] inst_varint_data_disj[OF size]
+         inst_varint_addr_disj[OF size] data_byte_fits data_byte_ptr
+         data_byte_dist data_byte_inst_disj[OF size] data_byte_addr_disj])
+  show ?thesis
+    by (rule runs_to_weaken[OF run])
+       (auto simp: sections_result_def)
 qed
 
 lemma emit_add'_small_success_enc_sections_inv:
@@ -7783,6 +8266,9 @@ proof -
          (RRun ?fill (unat len)) spec_st)"
     by (rule flush_pending_spec_heap_all_eq_run_sections[
         OF pending_eq len_ge pending_all_eq])+
+  have size_unique:
+    "\<And>n'. varint_size' len s = Some n' \<Longrightarrow> n' = n"
+    using size by simp
   show ?thesis
     apply (rule runs_to_bind_exception)
     apply (rule runs_to_weaken[
@@ -7791,27 +8277,26 @@ proof -
     apply clarsimp
     apply runs_to_vcg
     apply (rule runs_to_weaken)
-     apply (rule emit_run'_success_enc_sections_state_rel[
-        where src_len = src_len and n = n])
-                       apply (rule rel)
-                      apply (rule size)
-                     apply (rule sec_ok)
-                    apply (rule inst_byte_fits)
-                   apply (rule inst_byte_ptr)
-                  apply (rule inst_byte_dist)
-                 apply (rule inst_byte_data_disj)
-                apply (rule inst_byte_addr_disj)
-               apply (rule inst_varint_fits)
-              apply (rule inst_varint_valid)
-             apply (rule inst_varint_inj)
-            apply (rule inst_varint_prefix_disj)
-           apply (rule inst_varint_no_overflow)
-          apply (rule inst_varint_data_disj)
-         apply (rule inst_varint_addr_disj)
-        apply (rule data_byte_fits)
-       apply (rule data_byte_ptr)
-      apply (rule data_byte_dist)
-     apply (rule data_byte_inst_disj)
+     apply (rule emit_pending_run_chunk_enc_sections_state_rel[
+        where src_len = src_len])
+                    apply (rule rel)
+                   apply (rule sec_ok)
+                  apply (rule inst_byte_fits)
+                 apply (rule inst_byte_ptr)
+                apply (rule inst_byte_dist)
+               apply (rule inst_byte_data_disj)
+              apply (rule inst_byte_addr_disj)
+             using size_unique inst_varint_fits apply blast
+            using size_unique inst_varint_valid apply blast
+           using size_unique inst_varint_inj apply blast
+          using size_unique inst_varint_prefix_disj apply blast
+         using size_unique inst_varint_no_overflow apply blast
+        using size_unique inst_varint_data_disj apply blast
+       using size_unique inst_varint_addr_disj apply blast
+      apply (rule data_byte_fits)
+     apply (rule data_byte_ptr)
+    apply (rule data_byte_dist)
+    using size_unique data_byte_inst_disj apply blast
     apply (rule data_byte_addr_disj)
     using pure_sections len_ge
     apply (auto simp: enc_sections_state_rel_def
@@ -7974,6 +8459,9 @@ proof -
          (RRun ?fill (unat len)) spec_st)"
     by (rule flush_pending_spec_heap_all_eq_run_sections[
         OF pending_eq len_ge pending_all_eq])+
+  have size_unique:
+    "\<And>n'. varint_size' len s = Some n' \<Longrightarrow> n' = n"
+    using size by simp
   show ?thesis
     apply runs_to_vcg
     subgoal using v0 by simp
@@ -7988,27 +8476,26 @@ proof -
       apply clarsimp
       apply runs_to_vcg
       apply (rule runs_to_weaken)
-       apply (rule emit_run'_success_enc_sections_state_rel[
-          where src_len = src_len and n = n])
-                         apply (rule rel)
-                        apply (rule size)
-                       apply (rule sec_ok)
-                      apply (rule inst_byte_fits)
-                     apply (rule inst_byte_ptr)
-                    apply (rule inst_byte_dist)
-                   apply (rule inst_byte_data_disj)
-                  apply (rule inst_byte_addr_disj)
-                 apply (rule inst_varint_fits)
-                apply (rule inst_varint_valid)
-               apply (rule inst_varint_inj)
-              apply (rule inst_varint_prefix_disj)
-             apply (rule inst_varint_no_overflow)
-            apply (rule inst_varint_data_disj)
-           apply (rule inst_varint_addr_disj)
-          apply (rule data_byte_fits)
-         apply (rule data_byte_ptr)
-        apply (rule data_byte_dist)
-       apply (rule data_byte_inst_disj)
+       apply (rule emit_pending_run_chunk_enc_sections_state_rel[
+          where src_len = src_len])
+                      apply (rule rel)
+                     apply (rule sec_ok)
+                    apply (rule inst_byte_fits)
+                   apply (rule inst_byte_ptr)
+                  apply (rule inst_byte_dist)
+                 apply (rule inst_byte_data_disj)
+                apply (rule inst_byte_addr_disj)
+               using size_unique inst_varint_fits apply blast
+              using size_unique inst_varint_valid apply blast
+             using size_unique inst_varint_inj apply blast
+            using size_unique inst_varint_prefix_disj apply blast
+           using size_unique inst_varint_no_overflow apply blast
+          using size_unique inst_varint_data_disj apply blast
+         using size_unique inst_varint_addr_disj apply blast
+        apply (rule data_byte_fits)
+       apply (rule data_byte_ptr)
+      apply (rule data_byte_dist)
+      using size_unique data_byte_inst_disj apply blast
       apply (rule data_byte_addr_disj)
       using pure_sections len_ge
       apply (auto simp: enc_sections_state_rel_def
@@ -8177,6 +8664,9 @@ proof -
          (RRun ?fill (unat len)) spec_st)"
     by (rule flush_pending_spec_heap_all_eq_run_sections[
         OF pending_eq len_ge pending_all_eq])+
+  have size_unique:
+    "\<And>n'. varint_size' len s = Some n' \<Longrightarrow> n' = n"
+    using size by simp
   show ?thesis
     apply runs_to_vcg
     subgoal using v0 by simp
@@ -8191,27 +8681,26 @@ proof -
       apply clarsimp
       apply runs_to_vcg
       apply (rule runs_to_weaken)
-       apply (rule emit_run'_success_enc_sections_state_rel[
-          where src_len = src_len and n = n])
-                         apply (rule rel)
-                        apply (rule size)
-                       apply (rule sec_ok)
-                      apply (rule inst_byte_fits)
-                     apply (rule inst_byte_ptr)
-                    apply (rule inst_byte_dist)
-                   apply (rule inst_byte_data_disj)
-                  apply (rule inst_byte_addr_disj)
-                 apply (rule inst_varint_fits)
-                apply (rule inst_varint_valid)
-               apply (rule inst_varint_inj)
-              apply (rule inst_varint_prefix_disj)
-             apply (rule inst_varint_no_overflow)
-            apply (rule inst_varint_data_disj)
-           apply (rule inst_varint_addr_disj)
-          apply (rule data_byte_fits)
-         apply (rule data_byte_ptr)
-        apply (rule data_byte_dist)
-       apply (rule data_byte_inst_disj)
+       apply (rule emit_pending_run_chunk_enc_sections_state_rel[
+          where src_len = src_len])
+                      apply (rule rel)
+                     apply (rule sec_ok)
+                    apply (rule inst_byte_fits)
+                   apply (rule inst_byte_ptr)
+                  apply (rule inst_byte_dist)
+                 apply (rule inst_byte_data_disj)
+                apply (rule inst_byte_addr_disj)
+               using size_unique inst_varint_fits apply blast
+              using size_unique inst_varint_valid apply blast
+             using size_unique inst_varint_inj apply blast
+            using size_unique inst_varint_prefix_disj apply blast
+           using size_unique inst_varint_no_overflow apply blast
+          using size_unique inst_varint_data_disj apply blast
+         using size_unique inst_varint_addr_disj apply blast
+        apply (rule data_byte_fits)
+       apply (rule data_byte_ptr)
+      apply (rule data_byte_dist)
+      using size_unique data_byte_inst_disj apply blast
       apply (rule data_byte_addr_disj)
       using pure_sections len_ge
       apply (auto simp: enc_sections_state_rel_def
