@@ -659,6 +659,158 @@ lemma flush_pending_groups_exit:
   "flush_pending_groups add [] = append_add_inst add []"
   by simp
 
+lemma takeWhile_eq_take_maximal_from:
+  assumes i_lt_j: "i < j"
+      and j_le: "j \<le> length xs"
+      and all_eq: "\<And>k. \<lbrakk> i \<le> k; k < j \<rbrakk> \<Longrightarrow> xs ! k = b"
+      and stop: "j < length xs \<Longrightarrow> xs ! j \<noteq> b"
+  shows "takeWhile ((=) b) (drop i xs) =
+         take (j - i) (drop i xs)"
+proof (rule takeWhile_eq_take_P_nth)
+  fix k
+  assume k_lt: "k < j - i" and k_drop: "k < length (drop i xs)"
+  have i_le_len: "i \<le> length xs"
+    using i_lt_j j_le by simp
+  have ik_lt: "i + k < j"
+    using i_lt_j k_lt by simp
+  have eq: "xs ! (i + k) = b"
+    apply (rule all_eq)
+     apply simp
+    apply (rule ik_lt)
+    done
+  show "((=) b) ((drop i xs) ! k)"
+    using i_le_len eq by simp
+next
+  assume n_lt: "j - i < length (drop i xs)"
+  have i_le_len: "i \<le> length xs"
+    using i_lt_j j_le by simp
+  have j_lt: "j < length xs"
+    using n_lt i_lt_j j_le by simp
+  have idx: "i + (j - i) = j"
+    using i_lt_j by simp
+  show "\<not> ((=) b) ((drop i xs) ! (j - i))"
+    using stop[OF j_lt] i_le_len idx by simp
+qed
+
+lemma dropWhile_eq_drop_maximal_from:
+  assumes i_lt_j: "i < j"
+      and j_le: "j \<le> length xs"
+      and all_eq: "\<And>k. \<lbrakk> i \<le> k; k < j \<rbrakk> \<Longrightarrow> xs ! k = b"
+      and stop: "j < length xs \<Longrightarrow> xs ! j \<noteq> b"
+  shows "dropWhile ((=) b) (drop i xs) =
+         drop (j - i) (drop i xs)"
+proof -
+  have tw:
+    "takeWhile ((=) b) (drop i xs) =
+     take (j - i) (drop i xs)"
+    by (rule takeWhile_eq_take_maximal_from[
+        OF i_lt_j j_le all_eq stop])
+  have len_le: "j - i \<le> length (drop i xs)"
+    using i_lt_j j_le by simp
+  show ?thesis
+    using tw len_le by (simp add: dropWhile_eq_drop)
+qed
+
+lemma flush_pending_groups_run_from_maximal:
+  assumes i_lt_j: "i < j"
+      and j_le: "j \<le> length xs"
+      and min_len: "min_run \<le> j - i"
+      and all_eq: "\<And>k. \<lbrakk> i \<le> k; k < j \<rbrakk> \<Longrightarrow> xs ! k = b"
+      and stop: "j < length xs \<Longrightarrow> xs ! j \<noteq> b"
+  shows "flush_pending_groups add (drop i xs) =
+         append_add_inst add [] @ [RRun b (j - i)] @
+         flush_pending_groups [] (drop j xs)"
+proof -
+  have i_lt_len: "i < length xs"
+    using i_lt_j j_le by simp
+  have drop_i:
+    "drop i xs = b # drop (Suc i) xs"
+    using Cons_nth_drop_Suc[OF i_lt_len] all_eq[of i] i_lt_j by simp
+  have tw:
+    "takeWhile ((=) b) (drop i xs) =
+     take (j - i) (drop i xs)"
+    by (rule takeWhile_eq_take_maximal_from[
+        OF i_lt_j j_le all_eq stop])
+  have dw:
+    "dropWhile ((=) b) (drop i xs) =
+     drop (j - i) (drop i xs)"
+    by (rule dropWhile_eq_drop_maximal_from[
+        OF i_lt_j j_le all_eq stop])
+  have run_len:
+    "length (take (j - i) (drop i xs)) = j - i"
+    using i_lt_j j_le by simp
+  have rest:
+    "drop (j - i) (drop i xs) = drop j xs"
+    using i_lt_j by (simp add: drop_drop)
+  show ?thesis
+    using drop_i tw dw min_len run_len rest
+    by (simp add: Cons_nth_drop_Suc i_lt_len)
+qed
+
+lemma flush_pending_groups_short_from_maximal:
+  assumes i_lt_j: "i < j"
+      and j_le: "j \<le> length xs"
+      and short: "j - i < min_run"
+      and all_eq: "\<And>k. \<lbrakk> i \<le> k; k < j \<rbrakk> \<Longrightarrow> xs ! k = b"
+      and stop: "j < length xs \<Longrightarrow> xs ! j \<noteq> b"
+  shows "flush_pending_groups add (drop i xs) =
+         flush_pending_groups
+           (add @ take (j - i) (drop i xs)) (drop j xs)"
+proof -
+  have i_lt_len: "i < length xs"
+    using i_lt_j j_le by simp
+  have drop_i:
+    "drop i xs = b # drop (Suc i) xs"
+    using Cons_nth_drop_Suc[OF i_lt_len] all_eq[of i] i_lt_j by simp
+  have tw:
+    "takeWhile ((=) b) (drop i xs) =
+     take (j - i) (drop i xs)"
+    by (rule takeWhile_eq_take_maximal_from[
+        OF i_lt_j j_le all_eq stop])
+  have dw:
+    "dropWhile ((=) b) (drop i xs) =
+     drop (j - i) (drop i xs)"
+    by (rule dropWhile_eq_drop_maximal_from[
+        OF i_lt_j j_le all_eq stop])
+  have run_len:
+    "length (take (j - i) (drop i xs)) = j - i"
+    using i_lt_j j_le by simp
+  have rest:
+    "drop (j - i) (drop i xs) = drop j xs"
+    using i_lt_j by (simp add: drop_drop)
+  show ?thesis
+    using drop_i tw dw short run_len rest
+    by (simp add: Cons_nth_drop_Suc i_lt_len)
+qed
+
+lemma heap_bytes_word_zero_take_drop:
+  fixes off sz len :: "32 word"
+  assumes range: "unat off + unat sz \<le> unat len"
+  shows "heap_bytes_word s buf off sz =
+         take (unat sz) (drop (unat off) (heap_bytes_word s buf 0 len))"
+proof -
+  have bytes:
+    "heap_bytes s buf (unat len) = heap_bytes_word s buf 0 len"
+    by (simp add: heap_bytes_word_zero)
+  show ?thesis
+    by (rule heap_bytes_word_eq_take_drop_heap_bytes[OF bytes range])
+qed
+
+lemma heap_bytes_word_zero_take_drop_between:
+  fixes i j len :: "32 word"
+  assumes i_le_j: "i \<le> j"
+      and j_le_len: "j \<le> len"
+  shows "heap_bytes_word s buf i (j - i) =
+         take (unat (j - i))
+           (drop (unat i) (heap_bytes_word s buf 0 len))"
+proof -
+  have range: "unat i + unat (j - i) \<le> unat len"
+    using i_le_j j_le_len
+    by (simp add: unat_sub word_le_nat_alt)
+  show ?thesis
+    by (rule heap_bytes_word_zero_take_drop[OF range])
+qed
+
 lemma flush_pending_insts_short:
   assumes len_lt: "length pending < min_run"
   shows "flush_pending_insts pending =
@@ -6761,6 +6913,9 @@ proof -
          (RRun ?fill (unat (4 :: 32 word))) spec_st)"
     using flush_pending_spec_four_run[OF pending_four]
     by simp_all
+  have size_unique:
+    "\<And>n'. varint_size' (4 :: 32 word) s = Some n' \<Longrightarrow> n' = n"
+    using size by simp
   show ?thesis
     unfolding flush_pending'_def
     apply runs_to_vcg
@@ -6789,27 +6944,26 @@ proof -
     apply runs_to_vcg
     apply (auto simp: word_less_nat_alt word_le_nat_alt)
     apply (rule runs_to_weaken)
-     apply (rule emit_run'_success_enc_sections_state_rel[
-        where src_len = src_len and n = n])
-                       apply (rule rel)
-                      apply (rule size)
-                     apply (rule sec_ok)
-                    apply (rule inst_byte_fits)
-                   apply (rule inst_byte_ptr)
-                  apply (rule inst_byte_dist)
-                 apply (rule inst_byte_data_disj)
-                apply (rule inst_byte_addr_disj)
-               apply (rule inst_varint_fits)
-              apply (rule inst_varint_valid)
-             apply (rule inst_varint_inj)
-            apply (rule inst_varint_prefix_disj)
-           apply (rule inst_varint_no_overflow)
-          apply (rule inst_varint_data_disj)
-         apply (rule inst_varint_addr_disj)
-        apply (rule data_byte_fits)
-       apply (rule data_byte_ptr)
+     apply (rule emit_pending_run_chunk_enc_sections_state_rel[
+        where src_len = src_len])
+                     apply (rule rel)
+                    apply (rule sec_ok)
+                   apply (rule inst_byte_fits)
+                  apply (rule inst_byte_ptr)
+                 apply (rule inst_byte_dist)
+                apply (rule inst_byte_data_disj)
+               apply (rule inst_byte_addr_disj)
+              using size_unique inst_varint_fits apply blast
+             using size_unique inst_varint_valid apply blast
+            using size_unique inst_varint_inj apply blast
+           using size_unique inst_varint_prefix_disj apply blast
+          using size_unique inst_varint_no_overflow apply blast
+         using size_unique inst_varint_data_disj apply blast
+        using size_unique inst_varint_addr_disj apply blast
+       apply (rule data_byte_fits)
+      apply (rule data_byte_ptr)
      apply (rule data_byte_dist)
-    apply (rule data_byte_inst_disj)
+    using size_unique data_byte_inst_disj apply blast
    apply (rule data_byte_addr_disj)
     using pure_sections
     apply (clarsimp simp: enc_sections_state_rel_def sections_result_def)
@@ -7836,6 +7990,67 @@ lemma flush_pending'_replicate_run_inner_loop_from_Res_int:
   apply (rule flush_pending'_replicate_run_inner_loop_from_int[
       OF start_lt pending_all_eq pending_valid])
   by auto
+
+lemma flush_pending'_scan_inner_loop_bounds_from_Res_int:
+  fixes len start :: "32 word"
+  assumes start_lt: "start < len"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "(whileLoop (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
+           (\<lambda>(j, ret). do {
+              x \<leftarrow> guard
+                (\<lambda>st. j + 1 < len \<longrightarrow>
+                  IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+              ret \<leftarrow> gets
+                (\<lambda>st. j + 1 < len \<and>
+                  heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
+              return (j + 1, if ret then 1 else 0)
+           }) (start, 1) :: (32 word \<times> int, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>Res r t.
+              \<exists>j. r = (j, 0) \<and> t = s \<and>
+                unat start \<le> unat j \<and> unat j \<le> unat len \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure
+      (\<lambda>((j :: 32 word, ret :: int), _). unat len - unat j)"
+      and I = "\<lambda>(j, ret) t.
+        unat start \<le> unat j \<and>
+        unat j \<le> unat len \<and>
+        (ret \<noteq> 0 \<longrightarrow> j < len) \<and>
+        t = s"])
+     subgoal
+       using start_lt by (simp add: word_less_nat_alt)
+    subgoal
+      using start_lt by unat_arith
+   subgoal premises prems for r t
+   proof -
+     obtain j ret where r_def: "r = (j, ret)"
+       by (cases r)
+     have ret_zero: "ret = 0"
+       using prems r_def by auto
+     show ?thesis
+       using prems ret_zero r_def by auto
+   qed
+  subgoal for r t
+    apply (cases r)
+    apply clarsimp
+    subgoal for j ret
+      apply runs_to_vcg
+      subgoal
+        using pending_valid[rule_format, of "unat (j + 1)"]
+        by (simp add: word_less_nat_alt word_unat.Rep_inverse)
+      subgoal
+        apply (subst unat_word_suc_of_less)
+         apply assumption
+        apply simp
+        done
+      subgoal
+        by (simp add: unat_suc_le_of_word_less)
+      subgoal
+        by (simp add: unat_measure_decrease_of_word_less)
+      done
+    done
+  done
 
 lemma flush_pending'_replicate_run_inner_loop_from_Res_unat:
   fixes len start :: "32 word"
