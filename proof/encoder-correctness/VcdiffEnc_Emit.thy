@@ -1341,6 +1341,74 @@ proof -
     using slice by simp
 qed
 
+lemma pending_run_end_eq_maximal:
+  assumes i_lt_j: "i < j"
+      and j_le_len: "j \<le> length pending"
+      and all_eq:
+        "\<And>k. \<lbrakk> i \<le> k; k < j \<rbrakk> \<Longrightarrow>
+          pending ! k = pending ! i"
+      and stop:
+        "j < length pending \<Longrightarrow> pending ! j \<noteq> pending ! i"
+  shows "pending_run_end pending i = j"
+proof -
+  have tw:
+    "takeWhile ((=) (pending ! i)) (drop i pending) =
+     take (j - i) (drop i pending)"
+    by (rule takeWhile_eq_take_maximal_from[
+      OF i_lt_j j_le_len all_eq stop])
+  have len_tw:
+    "length (takeWhile ((=) (pending ! i)) (drop i pending)) = j - i"
+    using tw i_lt_j j_le_len by simp
+  show ?thesis
+    using i_lt_j len_tw by (simp add: pending_run_end_def)
+qed
+
+lemma pending_run_end_eq_heap_scan:
+  fixes i j len :: "32 word"
+  assumes i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and all_eq:
+        "\<And>k. \<lbrakk> unat i \<le> k; k < unat j \<rbrakk> \<Longrightarrow>
+          heap_w8 s
+            (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) =
+          heap_w8 s (pending +\<^sub>p uint i)"
+      and stop:
+        "j < len \<Longrightarrow>
+          heap_w8 s (pending +\<^sub>p uint j) \<noteq>
+          heap_w8 s (pending +\<^sub>p uint i)"
+  shows "pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+         unat j"
+proof (rule pending_run_end_eq_maximal)
+  show "unat i < unat j"
+    using i_lt_j by (simp add: word_less_nat_alt)
+  show "unat j \<le> length (heap_bytes_word s pending 0 len)"
+    using j_le_len by (simp add: word_le_nat_alt)
+next
+  fix k
+  assume i_le_k: "unat i \<le> k" and k_lt_j: "k < unat j"
+  then have k_lt_len: "k < unat len"
+    using j_le_len by (simp add: word_le_nat_alt)
+  have i_lt_len: "unat i < unat len"
+    using i_lt_j j_le_len
+    by (simp add: word_less_nat_alt word_le_nat_alt)
+  show "heap_bytes_word s pending 0 len ! k =
+        heap_bytes_word s pending 0 len ! unat i"
+    using all_eq[OF i_le_k k_lt_j] k_lt_len i_lt_len
+    by (simp add: heap_bytes_word_nth word_unat.Rep_inverse)
+next
+  assume j_lt_len_nat:
+    "unat j < length (heap_bytes_word s pending 0 len)"
+  then have j_lt_len: "j < len"
+    by (simp add: word_less_nat_alt)
+  have i_lt_len: "unat i < unat len"
+    using i_lt_j j_le_len
+    by (simp add: word_less_nat_alt word_le_nat_alt)
+  show "heap_bytes_word s pending 0 len ! unat j \<noteq>
+        heap_bytes_word s pending 0 len ! unat i"
+    using stop[OF j_lt_len] j_lt_len_nat i_lt_len
+    by (simp add: heap_bytes_word_nth word_unat.Rep_inverse)
+qed
+
 lemma flush_pending_groups_run_from_pending_run_end:
   assumes i_lt_len: "i < length pending"
       and run_ge: "min_run \<le> pending_run_end pending i - i"
@@ -1676,6 +1744,35 @@ qed
 
 declare flush_pending_loop_spec_eq_groups[enc_flush_simps]
 declare flush_pending_loop_spec_eq_flush_pending_spec[enc_flush_simps]
+
+lemma flush_pending_loop_spec_run_step:
+  assumes i_lt_len: "i < length pending"
+      and run_ge: "min_run \<le> pending_run_end pending i - i"
+  shows "flush_pending_loop_spec src_len pending add_start i st =
+         flush_pending_loop_spec src_len pending
+          (pending_run_end pending i) (pending_run_end pending i)
+          (flush_pending_emit_run_spec src_len pending i
+            (pending_run_end pending i)
+            (flush_pending_emit_add_spec src_len pending add_start i st))"
+  by (subst flush_pending_loop_spec.simps)
+     (simp add: i_lt_len run_ge Let_def)
+
+lemma flush_pending_loop_spec_short_step:
+  assumes i_lt_len: "i < length pending"
+      and run_lt: "\<not> min_run \<le> pending_run_end pending i - i"
+  shows "flush_pending_loop_spec src_len pending add_start i st =
+         flush_pending_loop_spec src_len pending add_start
+          (pending_run_end pending i) st"
+  by (subst flush_pending_loop_spec.simps)
+     (simp add: i_lt_len run_lt Let_def)
+
+lemma flush_pending_loop_spec_exit:
+  assumes i_ge_len: "\<not> i < length pending"
+  shows "flush_pending_loop_spec src_len pending add_start i st =
+         (flush_pending_emit_add_spec src_len pending add_start
+          (length pending) st)\<lparr>enc_pending := []\<rparr>"
+  by (subst flush_pending_loop_spec.simps)
+     (simp add: i_ge_len)
 
 lemma flush_pending_insts_short:
   assumes len_lt: "length pending < min_run"

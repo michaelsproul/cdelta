@@ -166,6 +166,18 @@ an instruction-list loop that mirrors `add_start`, `i`, and `j`. This keeps the
 semantic grouping proof separate from the state-threading proof and avoids a
 large nested Isar script.
 
+The C-proof-prep facts now available are:
+
+- `pending_run_end_eq_maximal`
+- `pending_run_end_eq_heap_scan`
+- `flush_pending_loop_spec_run_step`
+- `flush_pending_loop_spec_short_step`
+- `flush_pending_loop_spec_exit`
+
+These facts are intended to let the AutoCorres proof rewrite one outer-loop
+iteration from the concrete `j` scan result to the corresponding
+`flush_pending_loop_spec` branch.
+
 ## Guardrails
 
 - Stop adding one-off length special cases unless they are used to debug the
