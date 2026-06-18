@@ -3861,6 +3861,48 @@ proof -
        (auto simp: sections_result_def)
 qed
 
+lemma emit_pending_run_chunk_preserves_heap_bytes_word:
+  assumes size: "varint_size' sz s = Some n"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_varint_fits:
+        "\<not> inst_cap - (sections_t_C.inst_pos_C sec + 1) < n"
+      and inst_varint_valid: "\<forall>j < unat n.
+        ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j))"
+      and data_byte_fits: "sections_t_C.data_pos_C sec < data_cap"
+      and data_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec))"
+      and pending_frame_inst_byte_disj: "\<forall>i < unat pending_frame_len.
+        pending +\<^sub>p uint (pending_frame_off + of_nat i) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and pending_frame_inst_varint_disj: "\<forall>k < unat pending_frame_len. \<forall>i.
+        i < n \<longrightarrow>
+        pending +\<^sub>p uint (pending_frame_off + of_nat k) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and pending_frame_data_byte_disj: "\<forall>i < unat pending_frame_len.
+        pending +\<^sub>p uint (pending_frame_off + of_nat i) \<noteq>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec)"
+  shows "emit_run' sec data data_cap inst inst_cap fill sz \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                sections_t_C.err_C sec' = ENC_OK) \<and>
+              heap_bytes_word t pending pending_frame_off pending_frame_len =
+                heap_bytes_word s pending pending_frame_off pending_frame_len \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF emit_run'_success_preserves_heap_bytes_word[
+      OF size sec_ok inst_byte_fits inst_byte_ptr inst_varint_fits
+         inst_varint_valid data_byte_fits data_byte_ptr
+         pending_frame_inst_byte_disj pending_frame_inst_varint_disj
+         pending_frame_data_byte_disj]])
+  by (auto simp: sections_result_def)
+
 lemma emit_add'_small_success_enc_sections_inv:
   assumes inv:
         "enc_sections_inv s data inst addr sec src_seg tgt_len
