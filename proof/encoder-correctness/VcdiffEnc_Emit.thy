@@ -3684,6 +3684,95 @@ next
        (auto simp: sections_result_def)
 qed
 
+lemma emit_pending_add_chunk_preserves_heap_bytes_word:
+  assumes sz_ge: "(1 :: 32 word) \<le> sz"
+      and size: "varint_size' sz s = Some n"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_varint_fits:
+        "\<not> inst_cap - (sections_t_C.inst_pos_C sec + 1) < n"
+      and inst_varint_valid: "\<forall>j < unat n.
+        ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j))"
+      and data_fits:
+        "\<not> data_cap - sections_t_C.data_pos_C sec < sz"
+      and data_valid: "\<forall>j < unat sz.
+        ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j))"
+      and pending_valid: "\<forall>j < unat sz.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint (off + of_nat j))"
+      and pending_frame_inst_byte_disj: "\<forall>i < unat pending_frame_len.
+        pending +\<^sub>p uint (pending_frame_off + of_nat i) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and pending_frame_inst_varint_disj: "\<forall>k < unat pending_frame_len. \<forall>i.
+        i < n \<longrightarrow>
+        pending +\<^sub>p uint (pending_frame_off + of_nat k) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and pending_frame_data_disj: "\<forall>k < unat pending_frame_len. \<forall>i.
+        i < sz \<longrightarrow>
+        pending +\<^sub>p uint (pending_frame_off + of_nat k) \<noteq>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+  shows "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                sections_t_C.err_C sec' = ENC_OK) \<and>
+              heap_bytes_word t pending pending_frame_off pending_frame_len =
+                heap_bytes_word s pending pending_frame_off pending_frame_len \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof (cases "sz \<le> (17 :: 32 word)")
+  case True
+  have small:
+    "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            sections_result sec'
+              (sections_t_C.data_pos_C sec + sz)
+              (sections_t_C.inst_pos_C sec + 1)
+              (sections_t_C.addr_pos_C sec)
+              ENC_OK) \<and>
+          heap_bytes_word t pending pending_frame_off pending_frame_len =
+            heap_bytes_word s pending pending_frame_off pending_frame_len \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+    by (rule emit_add'_small_success_preserves_heap_bytes_word[
+      OF sz_ge True sec_ok inst_byte_fits inst_byte_ptr data_fits
+         data_valid pending_valid pending_frame_inst_byte_disj
+         pending_frame_data_disj])
+  show ?thesis
+    by (rule runs_to_weaken[OF small])
+       (auto simp: sections_result_def)
+next
+  case False
+  have large: "\<not> ((1 :: 32 word) \<le> sz \<and> sz \<le> (17 :: 32 word))"
+    using False by simp
+  have add_large:
+    "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            sections_result sec'
+              (sections_t_C.data_pos_C sec + sz)
+              (sections_t_C.inst_pos_C sec + 1 + n)
+              (sections_t_C.addr_pos_C sec)
+              ENC_OK) \<and>
+          heap_bytes_word t pending pending_frame_off pending_frame_len =
+            heap_bytes_word s pending pending_frame_off pending_frame_len \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+    by (rule emit_add'_large_success_preserves_heap_bytes_word[
+      OF large size sec_ok inst_byte_fits inst_byte_ptr
+         inst_varint_fits inst_varint_valid data_fits data_valid
+         pending_valid pending_frame_inst_byte_disj
+         pending_frame_inst_varint_disj pending_frame_data_disj])
+  show ?thesis
+    by (rule runs_to_weaken[OF add_large])
+       (auto simp: sections_result_def)
+qed
+
 lemma emit_pending_run_chunk_enc_sections_state_rel:
   assumes rel:
         "enc_sections_state_rel s data inst addr sec spec_st"

@@ -182,6 +182,7 @@ The C-proof-prep facts now available are:
 - `flush_pending_loop_spec_run_step_heap_emit_word`
 - `flush_pending_loop_spec_short_step_heap_word`
 - `flush_pending_loop_spec_exit_heap_emit_word`
+- `emit_pending_add_chunk_preserves_heap_bytes_word`
 - `flush_pending'_len_zero_enc_sections_state_rel_loop_spec`
 - `flush_pending'_scan_from_Res_int_pending_run_end`
 
@@ -203,6 +204,9 @@ The branch-level heap emit lemmas combine the scan result, branch condition,
 and emit-shape rewrites. The outer-loop proof should use those directly after
 the C branch has established `j`, rather than unfolding
 `flush_pending_loop_spec`.
+
+The ADD preservation helper hides the small/large ADD split when the outer
+invariant only needs to know that the pending input frame is unchanged.
 
 ## Guardrails
 
