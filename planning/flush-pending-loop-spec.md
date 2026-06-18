@@ -176,6 +176,9 @@ The C-proof-prep facts now available are:
 - `flush_pending_loop_spec_run_step_word`
 - `flush_pending_loop_spec_short_step_word`
 - `flush_pending_loop_spec_exit_word`
+- `pending_slice_heap_bytes_word`
+- `flush_pending_emit_add_spec_heap_word`
+- `flush_pending_emit_run_spec_heap_word`
 - `flush_pending'_len_zero_enc_sections_state_rel_loop_spec`
 - `flush_pending'_scan_from_Res_int_pending_run_end`
 
@@ -188,6 +191,10 @@ hide the recurring `unat`, `word_le_nat_alt`, and heap-buffer length
 conversions. The scan wrapper should be used immediately after the inner scan
 loop, so the outer proof receives both the concrete `j` and the pure
 `pending_run_end` equality.
+
+The heap-word emit helpers are the preferred bridge when composing
+`emit_add'`/`emit_run'`: they rewrite the loop-shaped pure state update to the
+exact heap slice or byte used by the C emitter call.
 
 ## Guardrails
 

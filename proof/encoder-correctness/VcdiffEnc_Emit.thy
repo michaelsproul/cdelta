@@ -1248,6 +1248,82 @@ lemma pending_slice_append:
   unfolding pending_slice_def
   by (rule take_drop_append_between[OF a_le_i i_le_j j_le_len])
 
+lemma pending_slice_heap_bytes_word:
+  fixes a i len :: "32 word"
+  assumes a_le_i: "a \<le> i"
+      and i_le_len: "i \<le> len"
+  shows "pending_slice (heap_bytes_word s pending 0 len)
+          (unat a) (unat i) =
+         heap_bytes_word s pending a (i - a)"
+proof -
+  have slice:
+    "heap_bytes_word s pending a (i - a) =
+     take (unat (i - a))
+       (drop (unat a) (heap_bytes_word s pending 0 len))"
+    by (rule heap_bytes_word_zero_take_drop_between[OF a_le_i i_le_len])
+  show ?thesis
+    using slice a_le_i
+    by (simp add: pending_slice_def unat_sub word_le_nat_alt)
+qed
+
+lemma flush_pending_emit_add_spec_heap_word:
+  fixes add_start i len :: "32 word"
+  assumes add_start_le_i: "add_start \<le> i"
+      and i_le_len: "i \<le> len"
+  shows "flush_pending_emit_add_spec src_len
+          (heap_bytes_word s pending 0 len) (unat add_start) (unat i) st =
+         (if add_start < i
+          then emit_inst_spec src_len
+            (RAdd (heap_bytes_word s pending add_start (i - add_start))) st
+          else st)"
+proof (cases "add_start < i")
+  case True
+  then have add_start_lt_i_nat: "unat add_start < unat i"
+    by (simp add: word_less_nat_alt)
+  have slice:
+    "pending_slice (heap_bytes_word s pending 0 len)
+      (unat add_start) (unat i) =
+     heap_bytes_word s pending add_start (i - add_start)"
+    by (rule pending_slice_heap_bytes_word[
+      OF add_start_le_i i_le_len])
+  show ?thesis
+    using True add_start_lt_i_nat slice
+    by (simp add: flush_pending_emit_add_spec_def)
+next
+  case False
+  then have "\<not> unat add_start < unat i"
+    by (simp add: word_less_nat_alt)
+  then show ?thesis
+    using False by (simp add: flush_pending_emit_add_spec_def)
+qed
+
+lemma flush_pending_emit_run_spec_heap_word:
+  fixes i j len :: "32 word"
+  assumes i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+  shows "flush_pending_emit_run_spec src_len
+          (heap_bytes_word s pending 0 len) (unat i) (unat j) st =
+         emit_inst_spec src_len
+          (RRun (heap_w8 s (pending +\<^sub>p uint i)) (unat (j - i))) st"
+proof -
+  have i_lt_len:
+    "unat i < unat len"
+    using i_lt_j j_le_len
+    by (simp add: word_less_nat_alt word_le_nat_alt)
+  have nth_i:
+    "heap_bytes_word s pending 0 len ! unat i =
+     heap_w8 s (pending +\<^sub>p uint i)"
+    using heap_bytes_word_nth[OF i_lt_len, of s pending 0]
+    by (simp add: word_unat.Rep_inverse)
+  have diff:
+    "unat j - unat i = unat (j - i)"
+    using i_lt_j
+    by (simp add: unat_sub word_less_nat_alt word_le_nat_alt)
+  show ?thesis
+    using nth_i diff
+    by (simp add: flush_pending_emit_run_spec_def)
+qed
+
 lemma emit_insts_spec_append_add_pending_slice:
   assumes a_le_i: "a \<le> i"
       and i_le_len: "i \<le> length pending"
