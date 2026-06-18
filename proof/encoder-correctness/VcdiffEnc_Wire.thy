@@ -1156,6 +1156,29 @@ lemma enc_sections_state_relI:
   shows "enc_sections_state_rel s data inst addr sec st"
   using assms by (simp add: enc_sections_state_rel_def)
 
+lemma enc_sections_state_rel_after:
+  assumes emitted: "emitted_sections s data inst addr sec
+        data_bytes inst_bytes addr_bytes"
+      and data_eq: "enc_data st = data_bytes"
+      and inst_eq: "enc_inst st = inst_bytes"
+      and addr_eq: "enc_addr st = addr_bytes"
+  shows "enc_sections_state_rel s data inst addr sec st"
+  using emitted data_eq inst_eq addr_eq
+  by (simp add: enc_sections_state_rel_def)
+
+lemma enc_sections_state_rel_after_sym:
+  assumes emitted: "emitted_sections s data inst addr sec
+        data_bytes inst_bytes addr_bytes"
+      and data_eq: "data_bytes = enc_data st"
+      and inst_eq: "inst_bytes = enc_inst st"
+      and addr_eq: "addr_bytes = enc_addr st"
+  shows "enc_sections_state_rel s data inst addr sec st"
+  using emitted data_eq inst_eq addr_eq
+  by (simp add: enc_sections_state_rel_def)
+
+declare enc_sections_state_rel_after[enc_vcg]
+declare enc_sections_state_rel_after_sym[enc_vcg]
+
 lemma enc_sections_state_relD:
   assumes "enc_sections_state_rel s data inst addr sec st"
   shows "emitted_sections s data inst addr sec

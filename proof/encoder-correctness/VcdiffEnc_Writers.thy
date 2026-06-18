@@ -4,6 +4,15 @@ theory VcdiffEnc_Writers
     CdeltaSpecRoundtrip.Spec_Roundtrip
 begin
 
+named_theorems enc_vcg
+  "Stable encoder helper rules intended for local runs_to_vcg setup"
+named_theorems enc_emit_simps
+  "Pure encoder emitter projection rules"
+named_theorems enc_flush_simps
+  "Pure encoder flush projection rules"
+named_theorems enc_fused_simps
+  "Pure encoder fused ADD+COPY projection rules"
+
 context vcdiff_enc_global_addresses begin
 
 abbreviation ENC_OK :: "32 word" where
@@ -3863,6 +3872,106 @@ proof -
     apply (rule runs_to_weaken[OF combined])
     by auto
 qed
+
+definition section_byte_step_ok ::
+  "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> nat \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> bool" where
+  "section_byte_step_ok s buf cap pos keep1 keep1_n keep2 keep2_n \<longleftrightarrow>
+     pos < cap \<and>
+     ptr_valid (heap_typing s) (buf +\<^sub>p uint pos) \<and>
+     ptr_range_distinct buf (Suc (unat pos)) \<and>
+     (\<forall>i < keep1_n. keep1 +\<^sub>p int i \<noteq> buf +\<^sub>p uint pos) \<and>
+     (\<forall>i < keep2_n. keep2 +\<^sub>p int i \<noteq> buf +\<^sub>p uint pos)"
+
+definition section_varint_step_ok ::
+  "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   32 word \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> nat \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> bool" where
+  "section_varint_step_ok s buf cap pos v n keep1 keep1_n keep2 keep2_n \<longleftrightarrow>
+     varint_size' v s = Some n \<and>
+     \<not> cap - pos < n \<and>
+     (\<forall>j < unat n.
+        ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))) \<and>
+     (\<forall>i < unat n. \<forall>j < unat n.
+        i \<noteq> j \<longrightarrow>
+        buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+        buf +\<^sub>p uint (pos + of_nat j)) \<and>
+     (\<forall>k < unat pos. \<forall>i.
+        i < n \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)) \<and>
+     unat pos + unat n < 2 ^ 32 \<and>
+     (\<forall>k < keep1_n. \<forall>i.
+        i < n \<longrightarrow> keep1 +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)) \<and>
+     (\<forall>k < keep2_n. \<forall>i.
+        i < n \<longrightarrow> keep2 +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i))"
+
+definition section_copy_step_ok ::
+  "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> nat \<Rightarrow> 8 word ptr \<Rightarrow> nat \<Rightarrow> bool" where
+  "section_copy_step_ok s buf cap pos src src_off len keep1 keep1_n keep2 keep2_n \<longleftrightarrow>
+     \<not> cap - pos < len \<and>
+     (\<forall>j < unat len.
+        ptr_valid (heap_typing s) (buf +\<^sub>p uint (pos + of_nat j))) \<and>
+     (\<forall>j < unat len.
+        ptr_valid (heap_typing s) (src +\<^sub>p uint (src_off + of_nat j))) \<and>
+     (\<forall>i < unat len. \<forall>j < unat len.
+        buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+        src +\<^sub>p uint (src_off + of_nat j)) \<and>
+     (\<forall>i < unat len. \<forall>j < unat len.
+        i \<noteq> j \<longrightarrow>
+        buf +\<^sub>p uint (pos + of_nat i) \<noteq>
+        buf +\<^sub>p uint (pos + of_nat j)) \<and>
+     (\<forall>k < unat pos. \<forall>i.
+        i < len \<longrightarrow> buf +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)) \<and>
+     unat pos + unat len < 2 ^ 32 \<and>
+     (\<forall>k < keep1_n. \<forall>i.
+        i < len \<longrightarrow> keep1 +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i)) \<and>
+     (\<forall>k < keep2_n. \<forall>i.
+        i < len \<longrightarrow> keep2 +\<^sub>p int k \<noteq> buf +\<^sub>p uint (pos + i))"
+
+lemma section_byte_step:
+  assumes ok: "section_byte_step_ok s buf cap pos keep1 keep1_n keep2 keep2_n"
+  shows "write_byte' buf cap pos b \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + 1) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + 1)) =
+                   heap_bytes s buf (unat pos) @ [b] \<and>
+                   heap_bytes t keep1 keep1_n = heap_bytes s keep1 keep1_n \<and>
+                   heap_bytes t keep2 keep2_n = heap_bytes s keep2 keep2_n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  using ok
+  unfolding section_byte_step_ok_def
+  by (intro write_byte'_heap_bytes_append_next_typing_preserves2) auto
+
+lemma section_varint_step:
+  assumes ok: "section_varint_step_ok s buf cap pos v n keep1 keep1_n keep2 keep2_n"
+  shows "write_varint' buf cap pos v \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + n) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + n)) =
+                   heap_bytes s buf (unat pos) @ varint_bytes32 v n \<and>
+                   heap_bytes t keep1 keep1_n = heap_bytes s keep1 keep1_n \<and>
+                   heap_bytes t keep2 keep2_n = heap_bytes s keep2 keep2_n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  using ok
+  unfolding section_varint_step_ok_def
+  by (intro write_varint'_success_heap_bytes_append_wordpos_preserves2) auto
+
+lemma section_copy_step:
+  assumes ok: "section_copy_step_ok s buf cap pos src src_off len keep1 keep1_n keep2 keep2_n"
+  shows "write_bytes' buf cap pos src src_off len \<bullet> s
+           \<lbrace> \<lambda>r t. r = Result (wr_t_C (pos + len) ENC_OK) \<and>
+                   heap_bytes t buf (unat (pos + len)) =
+                   heap_bytes s buf (unat pos) @
+                   heap_bytes_word s src src_off len \<and>
+                   heap_bytes t keep1 keep1_n = heap_bytes s keep1 keep1_n \<and>
+                   heap_bytes t keep2 keep2_n = heap_bytes s keep2 keep2_n \<and>
+                   heap_typing t = heap_typing s \<rbrace>"
+  using ok
+  unfolding section_copy_step_ok_def
+  by (intro write_bytes'_success_heap_bytes_append_wordpos_preserves2) auto
+
+declare section_byte_step[enc_vcg]
+declare section_varint_step[enc_vcg]
+declare section_copy_step[enc_vcg]
 
 end
 

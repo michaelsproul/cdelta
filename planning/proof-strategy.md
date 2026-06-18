@@ -153,7 +153,7 @@ The intermediate representation between encoder and decoder:
 ### 6. `Encoder_Spec.thy` / `Decoder_Spec.thy`
 Top-level pure functions:
 
-    encode_spec :: "byte list ⇒ byte list ⇒ byte list + encode_error"
+    encode_spec :: "byte list ⇒ byte list ⇒ byte list"
     decode_spec :: "byte list ⇒ byte list ⇒ byte list + decode_error"
 
 The shapes mirror the C entry points but return pure values. They're thin
@@ -163,17 +163,18 @@ detection, pending ADD buffering, COPY emission, address-cache mode choice,
 opcode fusion, window section construction, and serialization.
 
 Crucially, the specs must be **executable** — use Isabelle's `code_generator`
-so we can test that `encode_spec src tgt = Inl patch` and
-`decode_spec patch src = Inl tgt` on concrete inputs before investing proof
-effort, and so we can compare pure encoder output against C encoder output.
+so we can test that `patch = encode_spec src tgt` and `decode_spec patch src =
+Inl tgt` on concrete inputs before investing proof effort, and so we can
+compare pure encoder output against C encoder output.
 
 ### 7. `Spec_Roundtrip.thy`
 The main pure-level theorem:
 
     theorem encode_spec_roundtrip:
-      assumes "length src < 2^32" "length tgt < 2^32"
-              "encode_spec src tgt = Inl patch"
-      shows   "decode_spec patch src = Inl tgt"
+      assumes "length src < 2^32"
+              "length tgt < 2^32 - 32"
+              "length src + length tgt < 2^32"
+      shows   "decode_spec (encode_spec src tgt) src = Inl tgt"
 
 Proof decomposition:
 1. Cache roundtrip (§4 lemma above).
@@ -239,7 +240,7 @@ The encoder refinement target is byte equality with the non-degenerate pure
 encoder spec on success:
 
     lemma vcdiff_encode_refine:
-      "...preconditions... ⟹ encode_spec src_bytes tgt_bytes = Inl patch ⟹
+      "...preconditions... ⟹ patch = encode_spec src_bytes tgt_bytes ⟹
        vcdiff_encode' out out_cap src src_len tgt tgt_len scratch ⦃s⦄
         ⦃λrv s'. rv = length patch
                ∧ heap_bytes s' out (length patch) = patch⦄"
@@ -274,8 +275,8 @@ starts with a `sorry` upstream.
 | A.4 | `Instructions.thy` + `exec_inst` correctness | 2–4 days | A.2, A.3 |
 | A.5 | Baseline `Encoder_Spec.thy`, `Decoder_Spec.thy`, executable via `code_generator`; sanity-check with `value` against test corpus | done | A.4 |
 | A.6 | Baseline `Spec_Roundtrip.thy` for the single-ADD encoder | done | A.5 |
-| A.7 | Non-degenerate pure encoder spec matching the C algorithm | 1–2 weeks | A.1–A.6 |
-| A.8 | Non-degenerate spec roundtrip theorem | 1–3 weeks | A.7 |
+| A.7 | Non-degenerate pure encoder spec matching the C algorithm | done | A.1–A.6 |
+| A.8 | Non-degenerate spec roundtrip theorem | done | A.7 |
 | B.1 | Refine all leaf helpers in `vcdiff_dec.c` (read_byte, read_varint, decode_address) | 3–5 days | A.1, A.2 |
 | B.2 | Refine `vcdiff_decode'` main loop (the instruction-dispatch invariant) | 1–2 weeks | A.4, B.1 |
 | B.3 | Retarget encoder leaf helpers to pure section builders; refine hash index, matcher, best_mode, and emit helpers | 1–2 weeks | A.7, Memcpy patterns |

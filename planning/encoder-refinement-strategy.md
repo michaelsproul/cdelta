@@ -1,5 +1,17 @@
 # Encoder Refinement Strategy
 
+## 2026-06-18 status
+
+The pure encoder spec is now non-degenerate and total:
+
+```isabelle
+encode_spec :: byte list \<Rightarrow> byte list \<Rightarrow> byte list
+```
+
+`proof/roundtrip/Spec_Roundtrip.thy` proves the public `spec_roundtrip`
+theorem for this `encode_spec`. The active remaining work is C-to-pure encoder
+refinement, not pure semantic roundtrip.
+
 ## 2026-06-14 decision
 
 The active plan is to make the pure encoder spec non-degenerate, prove all
@@ -16,15 +28,15 @@ but it is no longer the top-level proof target.
 
 ## Why change direction
 
-- The current pure encoder is degenerate:
+- The earlier pure encoder was degenerate:
 
   ```isabelle
   generate_instructions src tgt = [RAdd tgt]
   ```
 
-  It is enough for a baseline roundtrip theorem, but it cannot be the final C
-  refinement target because the C encoder emits COPY, RUN, ADD+COPY fusion, and
-  cache-selected address modes.
+  That was enough for a baseline roundtrip theorem, but it could not be the
+  final C refinement target because the C encoder emits COPY, RUN, ADD+COPY
+  fusion, and cache-selected address modes.
 
 - The direct C proof path carries `section_decodes` and target-prefix facts
   through low-level routines such as `flush_pending'`. That makes local buffer
@@ -49,7 +61,7 @@ Pure encoder spec
         |
         | roundtrip theorem, entirely in pure HOL
         v
-  encode_spec src tgt = Inl patch
+  patch = encode_spec src tgt
   decode_spec patch src = Inl tgt
 
 C encoder
@@ -71,9 +83,9 @@ Spec-level theorem:
 ```isabelle
 theorem encode_spec_roundtrip:
   assumes "length src < 2 ^ 32"
-          "length tgt < 2 ^ 32"
-          "encode_spec src tgt = Inl patch"
-  shows   "decode_spec patch src = Inl tgt"
+          "length tgt < 2 ^ 32 - 32"
+          "length src + length tgt < 2 ^ 32"
+  shows   "decode_spec (encode_spec src tgt) src = Inl tgt"
 ```
 
 C encoder refinement theorem, success form:
@@ -83,7 +95,7 @@ theorem vcdiff_encode'_refines_encode_spec:
   assumes "encoder_buffers_ok s src src_len tgt tgt_len out out_cap scratch"
           "heap_bytes s src src_len = src_bytes"
           "heap_bytes s tgt tgt_len = tgt_bytes"
-          "encode_spec src_bytes tgt_bytes = Inl patch"
+          "patch = encode_spec src_bytes tgt_bytes"
           "length patch <= unat out_cap"
   shows
     "vcdiff_encode' out out_cap src src_len tgt tgt_len scratch \<bullet> s
@@ -100,7 +112,7 @@ Composition theorem:
 
 ```isabelle
 theorem c_encoder_then_decoder_roundtrip:
-  assumes "encode_spec src tgt = Inl patch"
+  assumes "patch = encode_spec src tgt"
           "vcdiff_encode' writes patch"
           "vcdiff_decode' refines decode_spec"
           "decode_spec patch src = Inl tgt"
@@ -111,9 +123,9 @@ theorem c_encoder_then_decoder_roundtrip:
 
 ### 1. Replace the degenerate encoder with a realistic one
 
-`spec/pure/Encoder_Spec.thy` should stop treating `[RAdd tgt]` as the main
-encoder. Keep the old degenerate encoder as a small sanity theorem or test
-case, but introduce a new deterministic encoder that models the C algorithm:
+Done. `spec/pure/Encoder_Spec.thy` keeps the old degenerate encoder as a small
+sanity theorem/fallback path, but the public `encode_spec` now uses a
+deterministic C-shaped encoder that models:
 
 - source index construction;
 - greedy match search;
@@ -124,8 +136,8 @@ case, but introduce a new deterministic encoder that models the C algorithm:
 - final pending flush;
 - section serialization.
 
-The pure spec should expose smaller functions that correspond to C helper
-boundaries. The exact names can follow the C side:
+The pure spec exposes smaller functions that correspond to C helper
+boundaries:
 
 ```isabelle
 build_index_spec
@@ -136,32 +148,34 @@ emit_run_spec
 emit_copy_spec
 flush_pending_spec
 try_emit_add_copy_spec
-encode_window_spec
+encode_window_full_spec
 encode_spec
 ```
 
 ### 2. Decide the spec state representation
 
-Use an explicit pure encoder state rather than threading unrelated tuples:
+Done. The current state is `enc_full_state`:
 
 ```isabelle
-record enc_spec_state =
-  tp       :: nat
-  pending  :: "byte list"
-  data_sec :: "byte list"
-  inst_sec :: "byte list"
-  addr_sec :: "byte list"
-  cache    :: cache
-  index    :: index_state
+record enc_full_state =
+  enc_tp      :: nat
+  enc_flushed :: nat
+  enc_pending :: "byte list"
+  enc_data    :: "byte list"
+  enc_inst    :: "byte list"
+  enc_addr    :: "byte list"
+  enc_cache   :: cache
+  enc_trace   :: "raw_inst list"
 ```
 
-The state should track the same observable pieces the C loop mutates. That
+The state tracks the same observable pieces the C loop mutates. That
 makes refinement invariants mostly field equality between heap slices and pure
 state fields.
 
 ### 3. Prove roundtrip at the spec layer
 
-The semantic invariant belongs here, not in the C proof:
+Done for the public `encode_spec`. The semantic invariant belongs here, not in
+the C proof:
 
 - the instruction/section stream represented by `data_sec`, `inst_sec`, and
   `addr_sec` decodes to the target prefix already processed;
@@ -171,9 +185,8 @@ The semantic invariant belongs here, not in the C proof:
 - RUN segments are byte-replicates of the target segment;
 - address-cache encode/decode stays synchronized.
 
-The theorem can be proved either over a ghost instruction trace or directly
-over serialized sections. A ghost trace is likely easier for semantic proofs;
-the section bytes are still needed for final serialization.
+The checked-in proof uses `enc_trace` plus section-byte decode invariants; the
+section bytes are still used for final serialization.
 
 ### 4. Keep the degenerate proof as a baseline
 
@@ -204,12 +217,17 @@ not `decode_spec` success.
 
 ### 2. Refine `flush_pending'` to `flush_pending_spec`
 
-The current final-flush `sorry` is a symptom of the old proof shape. The new
-local theorem should say:
+The old final-flush `section_decodes` target is obsolete. The local theorem
+should say:
 
 ```isabelle
 flush_pending' ... refines flush_pending_spec ...
 ```
+
+Use the intermediate `flush_pending_loop_spec` approach documented in
+`planning/flush-pending-loop-spec.md`.  The C proof should refine the
+loop-shaped spec first, then a pure bridge lemma should rewrite that result to
+`flush_pending_spec`.
 
 Its invariant should track:
 
@@ -249,11 +267,11 @@ that success writes exactly `encode_spec src tgt`.
 
 | Phase | Goal | Result |
 |-------|------|--------|
-| A.7 | Add the non-degenerate pure encoder spec | Executable spec follows the C algorithm |
-| A.8 | Prove non-degenerate spec roundtrip | `encode_spec src tgt = Inl patch ==> decode_spec patch src = Inl tgt` |
-| B.3a | Retarget writer/emit proofs to pure builders | Leaf C helpers refine spec helpers |
+| A.7 | Add the non-degenerate pure encoder spec | Done: executable spec follows the C algorithm |
+| A.8 | Prove non-degenerate spec roundtrip | Done: `decode_spec (encode_spec src tgt) src = Inl tgt` |
+| B.3a | Retarget writer/emit proofs to pure builders | In progress: leaf emit helpers and reusable infrastructure exist |
 | B.3b | Prove `build_index'` and `find_best_match'` refinement | C matcher follows pure matcher |
-| B.3c | Prove `flush_pending'` refinement | Final flush is a local simulation lemma |
+| B.3c | Prove `flush_pending'` refinement | C loop refines `flush_pending_loop_spec`, then bridges to `flush_pending_spec` |
 | B.4 | Prove `encode_window'` refinement | Window loop writes spec sections |
 | B.5 | Prove `vcdiff_encode'` refinement | C encoder writes `encode_spec` bytes |
 | C | Compose with decoder refinement | C encode followed by C decode recovers target |
@@ -274,10 +292,9 @@ pure spec proof.
 
 ## Open questions
 
-1. Should the pure encoder spec return `Inl patch`/`Inr encode_error`, or
-   remain total under explicit size bounds? Prefer `Inl`/`Inr` if it makes C
-   error refinement cleaner, but do not let error handling block the first
-   success theorem.
+1. The pure encoder spec currently remains total under explicit size bounds.
+   Do not change it to `Inl`/`Inr` unless error-path refinement becomes a
+   concrete blocker.
 2. Should the pure proof use a ghost instruction trace in addition to section
    bytes? Prefer yes if it substantially simplifies target-prefix proofs.
 3. How exact should overflow behavior be? Initial theorem can assume enough

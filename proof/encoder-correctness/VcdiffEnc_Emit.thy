@@ -388,6 +388,17 @@ proof -
     by (simp add: try_emit_add_copy_spec_def min_match_def Let_def)
 qed
 
+declare emit_inst_spec_RAdd_small_sections[enc_emit_simps]
+declare emit_inst_spec_RAdd_large_sections[enc_emit_simps]
+declare emit_inst_spec_RRun_sections[enc_emit_simps]
+declare emit_copy_spec_small_sections[enc_emit_simps]
+declare emit_copy_spec_large_sections[enc_emit_simps]
+declare try_emit_add_copy_spec_pending_empty_none[enc_fused_simps]
+declare try_emit_add_copy_spec_early_none[enc_fused_simps]
+declare try_emit_add_copy_spec_mode_gt5_copy_ne4_none[enc_fused_simps]
+declare try_emit_add_copy_spec_mode_le5_success[enc_fused_simps]
+declare try_emit_add_copy_spec_mode_gt5_success[enc_fused_simps]
+
 lemma flush_pending_spec_empty_sections:
   assumes pending_empty: "enc_pending st = []"
   shows "enc_data (flush_pending_spec src_len st) = enc_data st"
@@ -1108,6 +1119,260 @@ proof -
       OF add_start_le_i i_lt_j j_le_len short_nat all_eq stop])
 qed
 
+lemma length_takeWhile_le_self:
+  "length (takeWhile P xs) \<le> length xs"
+  by (induction xs) auto
+
+lemma take_length_takeWhile:
+  "take (length (takeWhile P xs)) xs = takeWhile P xs"
+  by (induction xs) auto
+
+definition pending_slice :: "byte list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> byte list" where
+  "pending_slice pending a b = take (b - a) (drop a pending)"
+
+definition pending_run_end :: "byte list \<Rightarrow> nat \<Rightarrow> nat" where
+  "pending_run_end pending i =
+     (let b = pending ! i in
+      i + length (takeWhile ((=) b) (drop i pending)))"
+
+definition flush_pending_emit_add_spec ::
+  "nat \<Rightarrow> byte list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow>
+   enc_full_state \<Rightarrow> enc_full_state" where
+  "flush_pending_emit_add_spec src_len pending add_start i st =
+     (if add_start < i
+      then emit_inst_spec src_len
+        (RAdd (pending_slice pending add_start i)) st
+      else st)"
+
+definition flush_pending_emit_run_spec ::
+  "nat \<Rightarrow> byte list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow>
+   enc_full_state \<Rightarrow> enc_full_state" where
+  "flush_pending_emit_run_spec src_len pending i j st =
+     emit_inst_spec src_len (RRun (pending ! i) (j - i)) st"
+
+lemma pending_run_end_gt:
+  assumes i_lt_len: "i < length pending"
+  shows "i < pending_run_end pending i"
+proof -
+  have drop_i:
+    "drop i pending = pending ! i # drop (Suc i) pending"
+    using Cons_nth_drop_Suc[OF i_lt_len] by simp
+  show ?thesis
+    using drop_i by (simp add: pending_run_end_def)
+qed
+
+lemma pending_run_end_le:
+  assumes i_lt_len: "i < length pending"
+  shows "pending_run_end pending i \<le> length pending"
+proof -
+  let ?tw = "takeWhile ((=) (pending ! i)) (drop i pending)"
+  have "length ?tw \<le> length (drop i pending)"
+    by (rule length_takeWhile_le_self)
+  then have "length ?tw \<le> length pending - i"
+    by simp
+  then show ?thesis
+    using i_lt_len by (simp add: pending_run_end_def)
+qed
+
+lemma pending_run_end_diff:
+  assumes i_lt_len: "i < length pending"
+  shows "pending_run_end pending i - i =
+         length (takeWhile ((=) (pending ! i)) (drop i pending))"
+  using pending_run_end_gt[OF i_lt_len]
+  by (simp add: pending_run_end_def)
+
+function flush_pending_loop_spec ::
+  "nat \<Rightarrow> byte list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow>
+   enc_full_state \<Rightarrow> enc_full_state" where
+  "flush_pending_loop_spec src_len pending add_start i st =
+     (if i < length pending then
+        (let j = pending_run_end pending i in
+         if min_run \<le> j - i
+         then flush_pending_loop_spec src_len pending j j
+           (flush_pending_emit_run_spec src_len pending i j
+             (flush_pending_emit_add_spec src_len pending add_start i st))
+         else flush_pending_loop_spec src_len pending add_start j st)
+      else
+        (flush_pending_emit_add_spec src_len pending add_start
+          (length pending) st)\<lparr>enc_pending := []\<rparr>)"
+  by pat_completeness auto
+termination
+  apply (relation "measure
+    (\<lambda>(src_len, pending, add_start, i, st). length pending - i)")
+   apply simp
+  subgoal
+    by (simp add: min_run_def)
+  subgoal for src_len pending add_start i st
+    using pending_run_end_gt[of i pending] pending_run_end_le[of i pending]
+    by simp
+  done
+
+declare flush_pending_loop_spec.simps[simp del]
+
+lemma pending_slice_empty_same[simp]:
+  "pending_slice pending i i = []"
+  by (simp add: pending_slice_def)
+
+lemma pending_slice_append:
+  assumes a_le_i: "a \<le> i"
+      and i_le_j: "i \<le> j"
+      and j_le_len: "j \<le> length pending"
+  shows "pending_slice pending a i @ pending_slice pending i j =
+         pending_slice pending a j"
+  unfolding pending_slice_def
+  by (rule take_drop_append_between[OF a_le_i i_le_j j_le_len])
+
+lemma emit_insts_spec_append_add_pending_slice:
+  assumes a_le_i: "a \<le> i"
+      and i_le_len: "i \<le> length pending"
+  shows "emit_insts_spec src_len
+          (append_add_inst (pending_slice pending a i) []) st =
+         flush_pending_emit_add_spec src_len pending a i st"
+proof (cases "a < i")
+  case True
+  then have slice_nonempty:
+    "pending_slice pending a i \<noteq> []"
+    using i_le_len by (simp add: pending_slice_def)
+  then show ?thesis
+    using True by (simp add: flush_pending_emit_add_spec_def)
+next
+  case False
+  then have "a = i"
+    using a_le_i by simp
+  then show ?thesis
+    by (simp add: flush_pending_emit_add_spec_def)
+qed
+
+lemma emit_insts_spec_append_add_pending_slice_append:
+  assumes a_le_i: "a \<le> i"
+      and i_le_len: "i \<le> length pending"
+  shows "emit_insts_spec src_len
+          (append_add_inst (pending_slice pending a i) [] @ insts) st =
+         emit_insts_spec src_len insts
+          (flush_pending_emit_add_spec src_len pending a i st)"
+proof -
+  have base:
+    "emit_insts_spec src_len
+      (append_add_inst (pending_slice pending a i) []) st =
+     flush_pending_emit_add_spec src_len pending a i st"
+    by (rule emit_insts_spec_append_add_pending_slice[
+      OF a_le_i i_le_len])
+  show ?thesis
+    using base by (simp only: emit_insts_spec_append)
+qed
+
+lemma emit_insts_spec_append_add_run_pending_slice:
+  assumes a_le_i: "a \<le> i"
+      and i_le_len: "i \<le> length pending"
+  shows "emit_insts_spec src_len
+          (append_add_inst (pending_slice pending a i) [] @
+           [RRun (pending ! i) (j - i)] @ insts) st =
+         emit_insts_spec src_len insts
+          (flush_pending_emit_run_spec src_len pending i j
+            (flush_pending_emit_add_spec src_len pending a i st))"
+proof -
+  have add_seq:
+    "emit_insts_spec src_len
+      (append_add_inst (pending_slice pending a i) [] @
+       ([RRun (pending ! i) (j - i)] @ insts)) st =
+     emit_insts_spec src_len ([RRun (pending ! i) (j - i)] @ insts)
+      (flush_pending_emit_add_spec src_len pending a i st)"
+    by (rule emit_insts_spec_append_add_pending_slice_append[
+      OF a_le_i i_le_len])
+  show ?thesis
+    using add_seq
+    by (simp add: flush_pending_emit_run_spec_def emit_insts_spec_def)
+qed
+
+lemma pending_run_end_dropWhile:
+  assumes i_lt_len: "i < length pending"
+  shows "dropWhile ((=) (pending ! i)) (drop i pending) =
+         drop (pending_run_end pending i) pending"
+proof -
+  have drop_take:
+    "dropWhile ((=) (pending ! i)) (drop i pending) =
+     drop (length (takeWhile ((=) (pending ! i)) (drop i pending)))
+       (drop i pending)"
+    by (simp add: dropWhile_eq_drop)
+  show ?thesis
+    using drop_take by (simp add: pending_run_end_def drop_drop ac_simps)
+qed
+
+lemma pending_run_end_takeWhile:
+  assumes i_lt_len: "i < length pending"
+  shows "takeWhile ((=) (pending ! i)) (drop i pending) =
+         pending_slice pending i (pending_run_end pending i)"
+proof -
+  let ?tw = "takeWhile ((=) (pending ! i)) (drop i pending)"
+  have slice:
+    "pending_slice pending i (pending_run_end pending i) =
+     take (length ?tw) (drop i pending)"
+    using pending_run_end_le[OF i_lt_len]
+    by (simp add: pending_slice_def pending_run_end_def)
+  have "take (length ?tw) (drop i pending) = ?tw"
+    by (rule take_length_takeWhile)
+  then show ?thesis
+    using slice by simp
+qed
+
+lemma flush_pending_groups_run_from_pending_run_end:
+  assumes i_lt_len: "i < length pending"
+      and run_ge: "min_run \<le> pending_run_end pending i - i"
+  shows "flush_pending_groups add (drop i pending) =
+         append_add_inst add [] @
+         [RRun (pending ! i) (pending_run_end pending i - i)] @
+         flush_pending_groups [] (drop (pending_run_end pending i) pending)"
+proof -
+  have drop_i:
+    "drop i pending = pending ! i # drop (Suc i) pending"
+    using Cons_nth_drop_Suc[OF i_lt_len] by simp
+  have run_eq:
+    "pending ! i # takeWhile ((=) (pending ! i)) (drop (Suc i) pending) =
+     pending_slice pending i (pending_run_end pending i)"
+    using pending_run_end_takeWhile[OF i_lt_len] drop_i by simp
+  have rest_eq:
+    "dropWhile ((=) (pending ! i)) (drop (Suc i) pending) =
+     drop (pending_run_end pending i) pending"
+    using pending_run_end_dropWhile[OF i_lt_len] drop_i by simp
+  have run_len:
+    "length (pending ! i # takeWhile ((=) (pending ! i))
+       (drop (Suc i) pending)) =
+     pending_run_end pending i - i"
+    using pending_run_end_diff[OF i_lt_len] drop_i by simp
+  show ?thesis
+    using drop_i run_ge run_eq rest_eq run_len
+    by (simp add: Let_def)
+qed
+
+lemma flush_pending_groups_short_from_pending_run_end:
+  assumes i_lt_len: "i < length pending"
+      and short: "pending_run_end pending i - i < min_run"
+  shows "flush_pending_groups add (drop i pending) =
+         flush_pending_groups
+           (add @ pending_slice pending i (pending_run_end pending i))
+           (drop (pending_run_end pending i) pending)"
+proof -
+  have drop_i:
+    "drop i pending = pending ! i # drop (Suc i) pending"
+    using Cons_nth_drop_Suc[OF i_lt_len] by simp
+  have run_eq:
+    "pending ! i # takeWhile ((=) (pending ! i)) (drop (Suc i) pending) =
+     pending_slice pending i (pending_run_end pending i)"
+    using pending_run_end_takeWhile[OF i_lt_len] drop_i by simp
+  have rest_eq:
+    "dropWhile ((=) (pending ! i)) (drop (Suc i) pending) =
+     drop (pending_run_end pending i) pending"
+    using pending_run_end_dropWhile[OF i_lt_len] drop_i by simp
+  have run_len:
+    "length (pending ! i # takeWhile ((=) (pending ! i))
+       (drop (Suc i) pending)) =
+     pending_run_end pending i - i"
+    using pending_run_end_diff[OF i_lt_len] drop_i by simp
+  show ?thesis
+    using drop_i short run_eq rest_eq run_len
+    by (simp add: Let_def)
+qed
+
 lemma flush_pending_insts_short:
   assumes len_lt: "length pending < min_run"
   shows "flush_pending_insts pending =
@@ -1369,6 +1634,18 @@ proof -
     by (rule flush_pending_spec_replicate_run[
         OF pending_replicate min_run_len])
 qed
+
+declare flush_pending_spec_empty_sections[enc_flush_simps]
+declare flush_pending_spec_short[enc_flush_simps]
+declare flush_pending_spec_short_nonempty_sections[enc_flush_simps]
+declare flush_pending_spec_four_run[enc_flush_simps]
+declare flush_pending_spec_four_add_break1[enc_flush_simps]
+declare flush_pending_spec_four_add_break2[enc_flush_simps]
+declare flush_pending_spec_four_add_break3[enc_flush_simps]
+declare flush_pending_spec_replicate_run[enc_flush_simps]
+declare flush_pending_spec_replicate_run_sections[enc_flush_simps]
+declare flush_pending_spec_heap_all_eq_run_sections[enc_flush_simps]
+declare flush_pending_spec_heap_all_eq_run[enc_flush_simps]
 
 lemma write_byte'_heap_bytes_append_next_typing_preserves2_word:
   assumes pos_lt: "pos < cap"

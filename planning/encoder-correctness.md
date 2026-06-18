@@ -15,7 +15,7 @@ through low-level C helpers such as `flush_pending'`.
 ## Current status
 
 - `CdeltaSpecRoundtrip` builds and contains the pure success theorem
-  `spec_roundtrip` plus matcher-parametric infrastructure.
+  `spec_roundtrip` for the public, total `encode_spec`.
 - `CdeltaRefine` builds, including with `-o quick_and_dirty=false`.
 - `proof/decoder-refine/VcdiffDec_Refine.thy` has the success-path decoder
   refinement theorem `vcdiff_decode'_spec_inl`:
@@ -28,8 +28,13 @@ through low-level C helpers such as `flush_pending'`.
   refinement against the pure encoder spec.
 - The first pure-state refinement bridge is in place:
   `enc_sections_state_rel` relates emitted C section prefixes to an
-  `enc_full_state`; ADD, RUN, COPY, zero-length final flush, and no-op
-  ADD+COPY fusion wrappers now advance or preserve that relation.
+  `enc_full_state`; ADD, RUN, COPY, zero-length final flush, short pending
+  flushes, replicated-run flushes, and ADD+COPY fusion wrappers now advance or
+  preserve that relation in the cases currently proved.
+- Shared proof-infrastructure helpers are in place:
+  `section_byte_step_ok`, `section_varint_step_ok`, `section_copy_step_ok`,
+  `enc_sections_state_rel_after`, and named theorem sets `enc_vcg`,
+  `enc_emit_simps`, `enc_flush_simps`, and `enc_fused_simps`.
 - The reusable varint bridge
   `varint_size' v s = Some n ==> varint_bytes32 v n = varint_encode (unat v)`
   is proved, so large ADD/RUN pure-state wrappers no longer need an explicit
@@ -74,6 +79,10 @@ through low-level C helpers such as `flush_pending'`.
   wrappers:
   `flush_pending'_len_zero_enc_sections_cache_inv` and
   `flush_pending'_len_zero_enc_sections_state_rel`.
+- `flush_pending'` also has pure-state wrappers for pending lengths 1, 2, 3,
+  all length-4 branches, and replicated RUN buffers of arbitrary length.  The
+  remaining flush gap is the mixed arbitrary-length case with interleaved ADD
+  chunks and RUN chunks.
 - `try_emit_add_copy'` has no-op pure-state wrappers for pending length zero,
   the early-exit guard, and the mode-greater-than-5/copy-not-4 guard, alongside
   the existing combined invariant wrappers.
@@ -95,7 +104,10 @@ through low-level C helpers such as `flush_pending'`.
 
 Remaining encoder-refinement proof debt:
 
-- Prove nonzero `flush_pending` over the pure encoder-state relation shape.
+- Prove the general mixed-buffer `flush_pending'` refinement over the pure
+  encoder-state relation shape.  Use the C-shaped intermediate loop spec in
+  `planning/flush-pending-loop-spec.md`; do not continue adding one-off
+  pending-length scripts except as debugging aids.
 - Prove `build_index'` and `find_best_match'` refinement against the pure
   matcher/index spec.
 - Rebuild the window-loop theorem as a simulation against the pure
@@ -106,13 +118,15 @@ Remaining encoder-refinement proof debt:
 
 ## Active proof shape
 
-The pure encoder spec should be upgraded so that byte-level refinement from the
-C encoder is true. The roundtrip theorem then belongs entirely in the spec
-layer:
+The pure encoder spec is now a total byte-list function. The roundtrip theorem
+belongs entirely in the spec layer:
 
 ```isabelle
-encode_spec src tgt = Inl patch
-  ==> decode_spec patch src = Inl tgt
+spec_roundtrip:
+  length src < 2 ^ 32 ==>
+  length tgt < 2 ^ 32 - 32 ==>
+  length src + length tgt < 2 ^ 32 ==>
+  decode_spec (encode_spec src tgt) src = Inl tgt
 ```
 
 The C encoder theorem should state that, under buffer validity, disjointness,
@@ -130,23 +144,25 @@ relation to pure encoder state, not a direct `section_decodes` invariant.
 
 ## Implementation steps
 
-1. Refactor `spec/pure/Encoder_Spec.thy` into a non-degenerate deterministic
-   encoder spec that models source indexing, greedy matching, RUN detection,
-   pending flushes, COPY emission, address-cache mode choice, opcode fusion,
-   window section construction, and serialization.
+1. Done: `spec/pure/Encoder_Spec.thy` now contains a non-degenerate
+   deterministic encoder spec that models source indexing, greedy matching,
+   RUN detection, pending flushes, COPY emission, address-cache mode choice,
+   opcode fusion, window section construction, and serialization.
 
-2. Prove the non-degenerate spec roundtrip theorem in
-   `proof/roundtrip/Spec_Roundtrip.thy`. The target-prefix, COPY-validity,
-   RUN-validity, and cache synchronization arguments should live here.
+2. Done: `proof/roundtrip/Spec_Roundtrip.thy` proves `spec_roundtrip` for the
+   public `encode_spec`. The target-prefix, COPY-validity, RUN-validity, and
+   cache synchronization arguments live in the pure layer.
 
 3. Retarget existing writer and emitter C lemmas so they prove refinement to
    pure section-builder functions. They should still preserve buffer, cursor,
    and cache facts, but they should not be responsible for global decode
    correctness.
 
-4. Prove `flush_pending'` refines `flush_pending_spec`. This replaces the
-   old nonzero final-flush `section_decodes` target with a local simulation
-   theorem.
+4. Prove `flush_pending'` refines `flush_pending_spec` via the intermediate
+   `flush_pending_loop_spec` described in
+   `planning/flush-pending-loop-spec.md`.  This replaces the old final-flush
+   `section_decodes` target with a local simulation theorem and keeps the C
+   invariant aligned with `add_start`, `i`, and `j`.
 
 5. Prove `build_index'`, `find_best_match'`, and the main `encode_window'`
    loop refine their pure spec counterparts.
@@ -164,13 +180,15 @@ Run these before considering the implementation closed:
 ```bash
 isabelle build -d . CdeltaSpecRoundtrip
 isabelle build -d . CdeltaEncoder
+isabelle build -d . CdeltaEncoderCorrectness
 isabelle build -o quick_and_dirty=false -d . CdeltaRefine
 rg -n "^\s*(sorry|oops)\b" proof spec
 ```
 
 ## Assumptions
 
-- Scope is success only: `decode (encode ...) = Inl ...`.
+- Scope is success only: `decode_spec (encode_spec src tgt) src = Inl tgt`
+  and the C encoder writes those bytes on success.
 - Error-path `Inr` refinement is deliberately out of scope.
 - Keep current C encoder behavior, including COPY, RUN, and ADD+COPY fusion.
 - Use conservative capacity, disjointness, and 32-bit no-overflow premises

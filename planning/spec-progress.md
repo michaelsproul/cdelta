@@ -1,10 +1,10 @@
-# Pure-spec layer: Phase A baseline complete
+# Pure-spec layer: non-degenerate encoder roundtrip complete
 
 ## Status
 
 All eight current theories in `spec/` build sorry-free under
-`quick_and_dirty = false`. This is the baseline pure-spec milestone, not the
-final encoder spec needed for C encoder refinement.
+`quick_and_dirty = false`. The public encoder spec is now the C-shaped
+non-degenerate spec, not the old single-ADD baseline.
 
 | Theory | Status |
 |--------|--------|
@@ -23,6 +23,7 @@ Top-level theorem (`Spec_Roundtrip.thy`):
 theorem spec_roundtrip:
   assumes "length src < 2 ^ 32"
           "length tgt < 2 ^ 32 - 32"
+          "length src + length tgt < 2 ^ 32"
   shows   "decode_spec (encode_spec src tgt) src = Inl tgt"
 ```
 
@@ -31,51 +32,32 @@ in the `dlen` (length of the delta encoding) field: a bound of
 `2^32 - 32` leaves room for up to 5 five-byte varints plus single-byte
 constants, all well within 32-bit arithmetic.
 
-## Important caveat: degenerate matcher
+## Encoder shape
 
-The encoder's instruction generator is deliberately degenerate:
+`encode_spec` is total and delegates to `encode_spec_full`, which uses
+`encode_window_full_spec` when the generated sections fit in the 32-bit wire
+format and falls back to the older RUN-aware baseline otherwise.
 
 ```isabelle
-definition generate_instructions :: "byte list \<Rightarrow> byte list \<Rightarrow> raw_inst list" where
-  "generate_instructions src tgt = [RAdd tgt]"
+definition encode_spec :: "byte list \<Rightarrow> byte list \<Rightarrow> byte list" where
+  "encode_spec src tgt = encode_spec_full src tgt"
 ```
 
-i.e. it always emits a single ADD covering the whole target. This is
-enough to prove the roundtrip theorem but produces patches that are the
-same size as the target — no actual delta compression. A realistic
-matcher would emit COPY/RUN instructions against the source and within
-the target.
+The old single-ADD path remains under `encode_spec_degenerate`, and the
+RUN-aware baseline remains under `encode_spec_run`. They are now regression
+or fallback facts, not the public C-refinement target.
 
-**Why this was OK for the baseline:** The theorem validates the
-wire-format, parser, instruction-dispatch, and serialization plumbing. It is a
-useful executable sanity check and should be kept as a small corollary.
+## Next: C encoder refinement
 
-**Why it is not enough now:** The C encoder should refine the encoder spec in
-the same sense that the C decoder refines the decoder spec. A single-ADD
-encoder cannot be that target, because the C encoder emits RUN, COPY,
-ADD+COPY-fused opcodes, and cache-selected address modes. The next pure-spec
-phase is therefore to replace the main encoder spec with a non-degenerate,
-deterministic model of the C encoder.
+Use `encode_spec` as the byte-level refinement target:
 
-## Next: Phase A.7 non-degenerate encoder spec
+```isabelle
+patch = encode_spec src_bytes tgt_bytes
+```
 
-Add a realistic pure encoder spec before resuming the C encoder proof:
-
-1. Define pure counterparts for source indexing, match search, RUN detection,
-   pending ADD buffering, `flush_pending`, COPY emission, address-cache mode
-   selection, opcode fusion, window section construction, and serialization.
-2. Make `encode_spec` call that non-degenerate encoder. Keep the current
-   single-ADD encoder under a separate name such as `encode_spec_degenerate`.
-3. Prove the non-degenerate spec roundtrip theorem:
-
-   ```isabelle
-   encode_spec src tgt = Inl patch
-     ==> decode_spec patch src = Inl tgt
-   ```
-
-4. Prove any target-prefix, COPY-validity, RUN-validity, and cache
-   synchronization lemmas entirely in the spec layer.
-5. Use the resulting `encode_spec` as the C encoder refinement target.
+The next proof layer should show that a successful `vcdiff_encode'` call writes
+exactly `patch`, then compose that with `spec_roundtrip` and the existing
+decoder refinement theorem.
 
 ## Size (spec/)
 
@@ -83,16 +65,15 @@ Add a realistic pure encoder spec before resuming the C encoder proof:
 - AddressCache.thy: 577 lines (Phase A.2)
 - CodeTable.thy: 237 lines (Phase A.3)
 - Instructions.thy: 123 lines (Phase A.4)
-- Encoder_Spec.thy: 155 lines (Phase A.5)
+- Encoder_Spec.thy: 579 lines (Phase A.7)
 - Decoder_Spec.thy: 246 lines (Phase A.5)
-- Spec_Roundtrip.thy: 800 lines (Phase A.6)
-- Total: ~2600 lines of Isabelle
+- Spec_Roundtrip.thy: 5636 lines (Phase A.8)
+- Total: ~8900 lines of pure/spec roundtrip Isabelle
 
 Compare to Lean-bdiff (`~/Programming/lean-bdiff`):
 - Pure proofs: ~10000 lines of Lean.
-- Ratio: ~0.25× Isabelle-to-Lean. Mostly because our Isabelle spec uses
-  the degenerate matcher; Lean proved the full realistic matcher's
-  roundtrip. When we do the same in Isabelle, expect ~2-4× growth.
+- Ratio: now roughly comparable; most of the remaining project size is in
+  AutoCorres refinement rather than pure semantic roundtrip.
 
 ## Design notes
 
