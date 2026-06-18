@@ -1929,6 +1929,109 @@ lemma flush_pending_loop_spec_exit_word:
   by (subst flush_pending_loop_spec.simps)
      (use i_ge_len in \<open>simp add: word_less_nat_alt\<close>)
 
+lemma flush_pending_loop_spec_run_step_heap_emit_word:
+  fixes add_start i j len :: "32 word"
+  assumes add_start_le_i: "add_start \<le> i"
+      and i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and run_end:
+        "pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+         unat j"
+      and run_ge: "(4 :: 32 word) \<le> j - i"
+      and b_eq: "b = heap_w8 s (pending +\<^sub>p uint i)"
+  shows "flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+          (unat add_start) (unat i) st =
+         flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+          (unat j) (unat j)
+          (emit_inst_spec src_len (RRun b (unat (j - i)))
+            (if add_start < i
+             then emit_inst_spec src_len
+               (RAdd (heap_bytes_word s pending add_start
+                 (i - add_start))) st
+             else st))"
+proof -
+  have i_le_len: "i \<le> len"
+    using i_lt_j j_le_len by simp
+  have step:
+    "flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+      (unat add_start) (unat i) st =
+     flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+      (unat j) (unat j)
+      (flush_pending_emit_run_spec src_len
+        (heap_bytes_word s pending 0 len) (unat i) (unat j)
+        (flush_pending_emit_add_spec src_len
+          (heap_bytes_word s pending 0 len) (unat add_start) (unat i)
+          st))"
+    by (rule flush_pending_loop_spec_run_step_word[
+      OF i_lt_j j_le_len run_end run_ge])
+  have add_step:
+    "flush_pending_emit_add_spec src_len
+      (heap_bytes_word s pending 0 len) (unat add_start) (unat i) st =
+     (if add_start < i
+      then emit_inst_spec src_len
+        (RAdd (heap_bytes_word s pending add_start (i - add_start))) st
+      else st)"
+    by (rule flush_pending_emit_add_spec_heap_word[
+      OF add_start_le_i i_le_len])
+  have run_step:
+    "\<And>st'. flush_pending_emit_run_spec src_len
+      (heap_bytes_word s pending 0 len) (unat i) (unat j) st' =
+     emit_inst_spec src_len
+      (RRun (heap_w8 s (pending +\<^sub>p uint i)) (unat (j - i))) st'"
+    by (rule flush_pending_emit_run_spec_heap_word[
+      OF i_lt_j j_le_len])
+  show ?thesis
+    using step add_step b_eq by (simp add: run_step)
+qed
+
+lemma flush_pending_loop_spec_short_step_heap_word:
+  fixes i j len :: "32 word"
+  assumes i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and run_end:
+        "pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+         unat j"
+      and short: "\<not> (4 :: 32 word) \<le> j - i"
+  shows "flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+          add_start (unat i) st =
+         flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+          add_start (unat j) st"
+  by (rule flush_pending_loop_spec_short_step_word[
+    OF i_lt_j j_le_len run_end short])
+
+lemma flush_pending_loop_spec_exit_heap_emit_word:
+  fixes add_start i len :: "32 word"
+  assumes add_start_le_len: "add_start \<le> len"
+      and i_ge_len: "\<not> i < len"
+  shows "flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+          (unat add_start) (unat i) st =
+         ((if add_start < len
+           then emit_inst_spec src_len
+             (RAdd (heap_bytes_word s pending add_start
+               (len - add_start))) st
+           else st)\<lparr>enc_pending := []\<rparr>)"
+proof -
+  have exit:
+    "flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+      (unat add_start) (unat i) st =
+     (flush_pending_emit_add_spec src_len
+       (heap_bytes_word s pending 0 len) (unat add_start) (unat len) st)
+      \<lparr>enc_pending := []\<rparr>"
+    by (rule flush_pending_loop_spec_exit_word[OF i_ge_len])
+  have add_step:
+    "flush_pending_emit_add_spec src_len
+      (heap_bytes_word s pending 0 len) (unat add_start) (unat len) st =
+     (if add_start < len
+      then emit_inst_spec src_len
+        (RAdd (heap_bytes_word s pending add_start
+          (len - add_start))) st
+      else st)"
+    by (rule flush_pending_emit_add_spec_heap_word[
+      OF add_start_le_len order.refl])
+  show ?thesis
+    using exit add_step by simp
+qed
+
 lemma flush_pending_insts_short:
   assumes len_lt: "length pending < min_run"
   shows "flush_pending_insts pending =

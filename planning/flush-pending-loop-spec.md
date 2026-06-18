@@ -179,6 +179,9 @@ The C-proof-prep facts now available are:
 - `pending_slice_heap_bytes_word`
 - `flush_pending_emit_add_spec_heap_word`
 - `flush_pending_emit_run_spec_heap_word`
+- `flush_pending_loop_spec_run_step_heap_emit_word`
+- `flush_pending_loop_spec_short_step_heap_word`
+- `flush_pending_loop_spec_exit_heap_emit_word`
 - `flush_pending'_len_zero_enc_sections_state_rel_loop_spec`
 - `flush_pending'_scan_from_Res_int_pending_run_end`
 
@@ -195,6 +198,11 @@ loop, so the outer proof receives both the concrete `j` and the pure
 The heap-word emit helpers are the preferred bridge when composing
 `emit_add'`/`emit_run'`: they rewrite the loop-shaped pure state update to the
 exact heap slice or byte used by the C emitter call.
+
+The branch-level heap emit lemmas combine the scan result, branch condition,
+and emit-shape rewrites. The outer-loop proof should use those directly after
+the C branch has established `j`, rather than unfolding
+`flush_pending_loop_spec`.
 
 ## Guardrails
 
