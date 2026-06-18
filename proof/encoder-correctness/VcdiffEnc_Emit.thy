@@ -1209,6 +1209,32 @@ termination
 
 declare flush_pending_loop_spec.simps[simp del]
 
+function flush_pending_loop_insts ::
+  "byte list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> raw_inst list" where
+  "flush_pending_loop_insts pending add_start i =
+     (if i < length pending then
+        (let j = pending_run_end pending i in
+         if min_run \<le> j - i
+         then append_add_inst (pending_slice pending add_start i) [] @
+              [RRun (pending ! i) (j - i)] @
+              flush_pending_loop_insts pending j j
+         else flush_pending_loop_insts pending add_start j)
+      else append_add_inst
+        (pending_slice pending add_start (length pending)) [])"
+  by pat_completeness auto
+termination
+  apply (relation "measure
+    (\<lambda>(pending, add_start, i). length pending - i)")
+   apply simp
+  subgoal
+    by (simp add: min_run_def)
+  subgoal for pending add_start i
+    using pending_run_end_gt[of i pending] pending_run_end_le[of i pending]
+    by simp
+  done
+
+declare flush_pending_loop_insts.simps[simp del]
+
 lemma pending_slice_empty_same[simp]:
   "pending_slice pending i i = []"
   by (simp add: pending_slice_def)
@@ -1372,6 +1398,284 @@ proof -
     using drop_i short run_eq rest_eq run_len
     by (simp add: Let_def)
 qed
+
+lemma flush_pending_loop_insts_eq_groups_aux:
+  "\<forall>i add_start.
+      fuel = length pending - i \<longrightarrow>
+      add_start \<le> i \<longrightarrow>
+      i \<le> length pending \<longrightarrow>
+      flush_pending_loop_insts pending add_start i =
+        flush_pending_groups
+          (pending_slice pending add_start i) (drop i pending)"
+proof (induction "fuel :: nat" rule: nat_less_induct)
+  case (1 fuel)
+  show ?case
+  proof (intro allI impI)
+    fix i add_start
+    assume fuel_eq: "fuel = length pending - i"
+       and add_start_le_i: "add_start \<le> i"
+       and i_le_len: "i \<le> length pending"
+    show "flush_pending_loop_insts pending add_start i =
+      flush_pending_groups
+        (pending_slice pending add_start i) (drop i pending)"
+    proof (cases "i < length pending")
+      case True
+      let ?j = "pending_run_end pending i"
+      have i_lt_j: "i < ?j"
+        by (rule pending_run_end_gt[OF True])
+      have j_le_len: "?j \<le> length pending"
+        by (rule pending_run_end_le[OF True])
+      have fuel_j_lt: "length pending - ?j < fuel"
+        using fuel_eq i_lt_j j_le_len True by simp
+      show ?thesis
+      proof (cases "min_run \<le> ?j - i")
+        case run_ge: True
+        have IH:
+          "flush_pending_loop_insts pending ?j ?j =
+           flush_pending_groups
+            (pending_slice pending ?j ?j) (drop ?j pending)"
+          using "1.IH" fuel_j_lt j_le_len by auto
+        have groups:
+          "flush_pending_groups (pending_slice pending add_start i)
+            (drop i pending) =
+           append_add_inst (pending_slice pending add_start i) [] @
+           [RRun (pending ! i) (?j - i)] @
+           flush_pending_groups [] (drop ?j pending)"
+          by (rule flush_pending_groups_run_from_pending_run_end[
+            OF True run_ge])
+        show ?thesis
+          using IH groups
+          by (subst flush_pending_loop_insts.simps)
+             (simp add: True run_ge Let_def)
+      next
+        case run_lt: False
+        have short: "?j - i < min_run"
+          using run_lt by simp
+        have add_start_le_j: "add_start \<le> ?j"
+          using add_start_le_i i_lt_j by simp
+        have IH:
+          "flush_pending_loop_insts pending add_start ?j =
+           flush_pending_groups
+            (pending_slice pending add_start ?j) (drop ?j pending)"
+          using "1.IH" fuel_j_lt add_start_le_j j_le_len
+          by auto
+        have groups:
+          "flush_pending_groups (pending_slice pending add_start i)
+            (drop i pending) =
+           flush_pending_groups
+            (pending_slice pending add_start i @ pending_slice pending i ?j)
+            (drop ?j pending)"
+          by (rule flush_pending_groups_short_from_pending_run_end[
+            OF True short])
+        have slice:
+          "pending_slice pending add_start i @ pending_slice pending i ?j =
+           pending_slice pending add_start ?j"
+          by (rule pending_slice_append[OF add_start_le_i _ j_le_len])
+             (use i_lt_j in simp)
+        show ?thesis
+          using IH groups slice
+          by (subst flush_pending_loop_insts.simps)
+             (simp add: True run_lt Let_def)
+      qed
+    next
+      case False
+      then have i_eq_len: "i = length pending"
+        using i_le_len by simp
+      show ?thesis
+        using i_eq_len
+        by (subst flush_pending_loop_insts.simps)
+           (simp add: False)
+    qed
+qed
+qed
+
+lemma flush_pending_loop_insts_eq_groups:
+  assumes add_start_le_i: "add_start \<le> i"
+      and i_le_len: "i \<le> length pending"
+  shows "flush_pending_loop_insts pending add_start i =
+         flush_pending_groups
+          (pending_slice pending add_start i) (drop i pending)"
+  using flush_pending_loop_insts_eq_groups_aux[of "length pending - i" pending]
+        add_start_le_i i_le_len
+  by auto
+
+lemma flush_pending_loop_spec_eq_insts_aux:
+  "\<forall>i add_start st.
+      fuel = length pending - i \<longrightarrow>
+      add_start \<le> i \<longrightarrow>
+      i \<le> length pending \<longrightarrow>
+      flush_pending_loop_spec src_len pending add_start i st =
+        (emit_insts_spec src_len
+          (flush_pending_loop_insts pending add_start i) st)
+          \<lparr>enc_pending := []\<rparr>"
+proof (induction "fuel :: nat" rule: nat_less_induct)
+  case (1 fuel)
+  show ?case
+  proof (intro allI impI)
+    fix i add_start st
+    assume fuel_eq: "fuel = length pending - i"
+       and add_start_le_i: "add_start \<le> i"
+       and i_le_len: "i \<le> length pending"
+    show "flush_pending_loop_spec src_len pending add_start i st =
+      (emit_insts_spec src_len
+        (flush_pending_loop_insts pending add_start i) st)
+        \<lparr>enc_pending := []\<rparr>"
+    proof (cases "i < length pending")
+      case True
+      let ?j = "pending_run_end pending i"
+      have i_lt_j: "i < ?j"
+        by (rule pending_run_end_gt[OF True])
+      have j_le_len: "?j \<le> length pending"
+        by (rule pending_run_end_le[OF True])
+      have fuel_j_lt: "length pending - ?j < fuel"
+        using fuel_eq i_lt_j j_le_len True by simp
+      show ?thesis
+      proof (cases "min_run \<le> ?j - i")
+        case run_ge: True
+        let ?st' =
+          "flush_pending_emit_run_spec src_len pending i ?j
+            (flush_pending_emit_add_spec src_len pending add_start i st)"
+        have IH:
+          "flush_pending_loop_spec src_len pending ?j ?j ?st' =
+           (emit_insts_spec src_len
+             (flush_pending_loop_insts pending ?j ?j) ?st')
+            \<lparr>enc_pending := []\<rparr>"
+          using "1.IH" fuel_j_lt j_le_len by auto
+        have spec_unfold:
+          "flush_pending_loop_spec src_len pending add_start i st =
+           flush_pending_loop_spec src_len pending ?j ?j ?st'"
+          by (subst flush_pending_loop_spec.simps)
+             (simp add: True run_ge Let_def)
+        have insts_unfold:
+          "flush_pending_loop_insts pending add_start i =
+           append_add_inst (pending_slice pending add_start i) [] @
+           [RRun (pending ! i) (?j - i)] @
+           flush_pending_loop_insts pending ?j ?j"
+          by (subst flush_pending_loop_insts.simps)
+             (simp add: True run_ge Let_def)
+        have emit_seq:
+          "emit_insts_spec src_len
+            (flush_pending_loop_insts pending add_start i) st =
+           emit_insts_spec src_len
+            (flush_pending_loop_insts pending ?j ?j) ?st'"
+          using insts_unfold
+                emit_insts_spec_append_add_run_pending_slice[
+                  OF add_start_le_i i_le_len,
+                  of src_len ?j "flush_pending_loop_insts pending ?j ?j" st]
+          by simp
+        show ?thesis
+          using spec_unfold IH emit_seq by simp
+      next
+        case run_lt: False
+        have add_start_le_j: "add_start \<le> ?j"
+          using add_start_le_i i_lt_j by simp
+        have IH:
+          "flush_pending_loop_spec src_len pending add_start ?j st =
+           (emit_insts_spec src_len
+             (flush_pending_loop_insts pending add_start ?j) st)
+            \<lparr>enc_pending := []\<rparr>"
+          using "1.IH" fuel_j_lt add_start_le_j j_le_len by auto
+        have spec_unfold:
+          "flush_pending_loop_spec src_len pending add_start i st =
+           flush_pending_loop_spec src_len pending add_start ?j st"
+          by (subst flush_pending_loop_spec.simps)
+             (simp add: True run_lt Let_def)
+        have insts_unfold:
+          "flush_pending_loop_insts pending add_start i =
+           flush_pending_loop_insts pending add_start ?j"
+          by (subst flush_pending_loop_insts.simps)
+             (simp add: True run_lt Let_def)
+        show ?thesis
+          using spec_unfold IH insts_unfold by simp
+      qed
+    next
+      case False
+      then have i_eq_len: "i = length pending"
+        using i_le_len by simp
+      have spec_unfold:
+        "flush_pending_loop_spec src_len pending add_start i st =
+         (flush_pending_emit_add_spec src_len pending add_start
+          (length pending) st)\<lparr>enc_pending := []\<rparr>"
+        by (subst flush_pending_loop_spec.simps)
+           (simp add: False)
+      have insts_unfold:
+        "flush_pending_loop_insts pending add_start i =
+         append_add_inst
+          (pending_slice pending add_start (length pending)) []"
+        using i_eq_len
+        by (subst flush_pending_loop_insts.simps)
+           (simp add: False)
+      have emit_tail:
+        "emit_insts_spec src_len
+          (append_add_inst
+            (pending_slice pending add_start (length pending)) []) st =
+         flush_pending_emit_add_spec src_len pending add_start
+          (length pending) st"
+        by (rule emit_insts_spec_append_add_pending_slice[
+          OF _ order.refl])
+           (use add_start_le_i i_eq_len in simp)
+      show ?thesis
+        using spec_unfold insts_unfold emit_tail by simp
+    qed
+  qed
+qed
+
+lemma flush_pending_loop_spec_eq_insts:
+  assumes add_start_le_i: "add_start \<le> i"
+      and i_le_len: "i \<le> length pending"
+  shows "flush_pending_loop_spec src_len pending add_start i st =
+        (emit_insts_spec src_len
+          (flush_pending_loop_insts pending add_start i) st)
+          \<lparr>enc_pending := []\<rparr>"
+  using flush_pending_loop_spec_eq_insts_aux[
+        of "length pending - i" pending src_len]
+        add_start_le_i i_le_len
+  by auto
+
+lemma flush_pending_loop_spec_eq_groups:
+  assumes add_start_le_i: "add_start \<le> i"
+      and i_le_len: "i \<le> length pending"
+  shows "flush_pending_loop_spec src_len pending add_start i st =
+         (emit_insts_spec src_len
+           (flush_pending_groups (pending_slice pending add_start i)
+             (drop i pending)) st)\<lparr>enc_pending := []\<rparr>"
+proof -
+  have spec:
+    "flush_pending_loop_spec src_len pending add_start i st =
+     (emit_insts_spec src_len
+      (flush_pending_loop_insts pending add_start i) st)
+      \<lparr>enc_pending := []\<rparr>"
+    by (rule flush_pending_loop_spec_eq_insts[
+      OF add_start_le_i i_le_len])
+  have insts:
+    "flush_pending_loop_insts pending add_start i =
+     flush_pending_groups
+      (pending_slice pending add_start i) (drop i pending)"
+    by (rule flush_pending_loop_insts_eq_groups[
+      OF add_start_le_i i_le_len])
+  show ?thesis
+    using spec insts by simp
+qed
+
+lemma flush_pending_loop_spec_eq_flush_pending_spec:
+  assumes pending_eq: "enc_pending st = pending"
+  shows "flush_pending_loop_spec src_len pending 0 0 st =
+         flush_pending_spec src_len st"
+proof -
+  have loop:
+    "flush_pending_loop_spec src_len pending 0 0 st =
+     (emit_insts_spec src_len
+       (flush_pending_groups (pending_slice pending 0 0) pending) st)
+      \<lparr>enc_pending := []\<rparr>"
+    using flush_pending_loop_spec_eq_groups[of 0 0 pending src_len st]
+    by simp
+  show ?thesis
+    using loop pending_eq
+    by (simp add: flush_pending_spec_groups)
+qed
+
+declare flush_pending_loop_spec_eq_groups[enc_flush_simps]
+declare flush_pending_loop_spec_eq_flush_pending_spec[enc_flush_simps]
 
 lemma flush_pending_insts_short:
   assumes len_lt: "length pending < min_run"

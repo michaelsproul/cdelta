@@ -154,11 +154,17 @@ The first proof-layer slice is now in `proof/encoder-correctness/VcdiffEnc_Emit.
 - `flush_pending_loop_spec.simps` is deliberately removed from the global simp
   set; unfold it with `subst` at the specific loop head.
 
-The bridge lemmas `flush_pending_loop_spec_eq_groups` and
-`flush_pending_loop_spec_eq_flush_pending_spec` are still the next proof task.
-The first attempt showed that the proof should avoid large nested Isar `cases`
-blocks and should probably factor the run/short/tail sequencing equalities into
-small named lemmas before proving the main bridge.
+The bridge lemmas are now proved:
+
+- `flush_pending_loop_insts_eq_groups`
+- `flush_pending_loop_spec_eq_insts`
+- `flush_pending_loop_spec_eq_groups`
+- `flush_pending_loop_spec_eq_flush_pending_spec`
+
+The successful structure factors the proof through `flush_pending_loop_insts`,
+an instruction-list loop that mirrors `add_start`, `i`, and `j`. This keeps the
+semantic grouping proof separate from the state-threading proof and avoids a
+large nested Isar script.
 
 ## Guardrails
 
