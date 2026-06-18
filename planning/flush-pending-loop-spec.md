@@ -173,10 +173,21 @@ The C-proof-prep facts now available are:
 - `flush_pending_loop_spec_run_step`
 - `flush_pending_loop_spec_short_step`
 - `flush_pending_loop_spec_exit`
+- `flush_pending_loop_spec_run_step_word`
+- `flush_pending_loop_spec_short_step_word`
+- `flush_pending_loop_spec_exit_word`
+- `flush_pending'_len_zero_enc_sections_state_rel_loop_spec`
+- `flush_pending'_scan_from_Res_int_pending_run_end`
 
 These facts are intended to let the AutoCorres proof rewrite one outer-loop
 iteration from the concrete `j` scan result to the corresponding
 `flush_pending_loop_spec` branch.
+
+The word-indexed variants are the preferred entry points for the C proof: they
+hide the recurring `unat`, `word_le_nat_alt`, and heap-buffer length
+conversions. The scan wrapper should be used immediately after the inner scan
+loop, so the outer proof receives both the concrete `j` and the pure
+`pending_run_end` equality.
 
 ## Guardrails
 

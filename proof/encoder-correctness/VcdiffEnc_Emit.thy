@@ -1774,6 +1774,85 @@ lemma flush_pending_loop_spec_exit:
   by (subst flush_pending_loop_spec.simps)
      (simp add: i_ge_len)
 
+lemma flush_pending_loop_spec_run_step_word:
+  fixes i j len :: "32 word"
+  assumes i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and run_end:
+        "pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+         unat j"
+      and run_ge: "(4 :: 32 word) \<le> j - i"
+  shows "flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+          add_start (unat i) st =
+         flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+          (unat j) (unat j)
+          (flush_pending_emit_run_spec src_len
+            (heap_bytes_word s pending 0 len) (unat i) (unat j)
+            (flush_pending_emit_add_spec src_len
+              (heap_bytes_word s pending 0 len) add_start (unat i) st))"
+proof -
+  have i_lt_len:
+    "unat i < length (heap_bytes_word s pending 0 len)"
+    using i_lt_j j_le_len
+    by (simp add: word_less_nat_alt word_le_nat_alt)
+  have diff:
+    "unat (j - i) = unat j - unat i"
+    using i_lt_j
+    by (simp add: unat_sub word_less_nat_alt word_le_nat_alt)
+  have run_ge_nat:
+    "min_run \<le>
+     pending_run_end (heap_bytes_word s pending 0 len) (unat i) - unat i"
+    using run_ge run_end diff
+    by (simp add: min_run_def word_le_nat_alt)
+  show ?thesis
+    using flush_pending_loop_spec_run_step[OF i_lt_len run_ge_nat,
+        of src_len add_start st] run_end
+    by simp
+qed
+
+lemma flush_pending_loop_spec_short_step_word:
+  fixes i j len :: "32 word"
+  assumes i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and run_end:
+        "pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+         unat j"
+      and short: "\<not> (4 :: 32 word) \<le> j - i"
+  shows "flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+          add_start (unat i) st =
+         flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+          add_start (unat j) st"
+proof -
+  have i_lt_len:
+    "unat i < length (heap_bytes_word s pending 0 len)"
+    using i_lt_j j_le_len
+    by (simp add: word_less_nat_alt word_le_nat_alt)
+  have diff:
+    "unat (j - i) = unat j - unat i"
+    using i_lt_j
+    by (simp add: unat_sub word_less_nat_alt word_le_nat_alt)
+  have run_lt_nat:
+    "\<not> min_run \<le>
+     pending_run_end (heap_bytes_word s pending 0 len) (unat i) - unat i"
+    using short run_end diff
+    by (auto simp: min_run_def word_le_nat_alt)
+  show ?thesis
+    using flush_pending_loop_spec_short_step[OF i_lt_len run_lt_nat,
+        of src_len add_start st] run_end
+    by simp
+qed
+
+lemma flush_pending_loop_spec_exit_word:
+  fixes i len :: "32 word"
+  assumes i_ge_len: "\<not> i < len"
+  shows "flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+          add_start (unat i) st =
+         (flush_pending_emit_add_spec src_len
+           (heap_bytes_word s pending 0 len) add_start (unat len) st)
+          \<lparr>enc_pending := []\<rparr>"
+  by (subst flush_pending_loop_spec.simps)
+     (use i_ge_len in \<open>simp add: word_less_nat_alt\<close>)
+
 lemma flush_pending_insts_short:
   assumes len_lt: "length pending < min_run"
   shows "flush_pending_insts pending =
@@ -7334,6 +7413,36 @@ proof -
     by (auto simp: enc_sections_state_rel_def)
 qed
 
+lemma flush_pending'_len_zero_enc_sections_state_rel_loop_spec:
+  assumes rel:
+        "enc_sections_state_rel s data inst addr sec spec_st"
+      and pending_eq:
+        "enc_pending spec_st =
+         heap_bytes_word s pending 0 (0 :: 32 word)"
+  shows "flush_pending' sec data data_cap inst inst_cap pending 0 \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                enc_sections_state_rel t data inst addr sec'
+                  (flush_pending_loop_spec src_len
+                    (heap_bytes_word s pending 0 (0 :: 32 word)) 0 0
+                    spec_st)) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have pending_empty: "enc_pending spec_st = []"
+    using pending_eq by (simp add: heap_bytes_word_def)
+  have loop_eq:
+    "flush_pending_loop_spec src_len
+       (heap_bytes_word s pending 0 (0 :: 32 word)) 0 0 spec_st =
+     flush_pending_spec src_len spec_st"
+    by (rule flush_pending_loop_spec_eq_flush_pending_spec[OF pending_eq])
+  show ?thesis
+    apply (rule runs_to_weaken[
+      OF flush_pending'_len_zero_enc_sections_state_rel[
+        OF rel pending_empty]])
+    using loop_eq by auto
+qed
+
 lemma runs_to_liftE_bind_throw_result:
   assumes f: "f \<bullet> s \<lbrace>\<lambda>Res v t. P v t\<rbrace>"
   shows "(liftE f >>= throw) \<bullet> s
@@ -9613,6 +9722,80 @@ lemma flush_pending'_scan_from_Res_int:
       apply (subst whileLoop_unroll)
       using prems i_lt_suc suc_le_len all_eq
       by (auto simp: word_unat.Rep_inverse)
+  qed
+  done
+
+lemma flush_pending'_scan_from_Res_int_pending_run_end:
+  fixes len i :: "32 word"
+  assumes i_lt_len: "i < len"
+      and cur_eq: "heap_w8 s (pending +\<^sub>p uint i) = b"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "((do {
+            j \<leftarrow> return (i + 1);
+            ret \<leftarrow> do {
+              x \<leftarrow> guard
+                (\<lambda>st. j < len \<longrightarrow>
+                  IS_VALID(8 word) st (pending +\<^sub>p uint j));
+              gets
+                (\<lambda>st. if j < len \<and>
+                  heap_w8 st (pending +\<^sub>p uint j) = b
+                 then (1 :: int) else 0)
+            };
+            whileLoop (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
+              (\<lambda>(j, ret). do {
+                 x \<leftarrow> guard
+                   (\<lambda>st. j + 1 < len \<longrightarrow>
+                     IS_VALID(8 word) st (pending +\<^sub>p uint (j + 1)));
+                 ret \<leftarrow> gets
+                   (\<lambda>st. j + 1 < len \<and>
+                     heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
+                 return (j + 1, if ret then 1 else 0)
+              }) (j, ret)
+          }) :: (32 word \<times> int, lifted_globals) res_monad) \<bullet> s
+         \<lbrace> \<lambda>Res r t.
+              \<exists>j. r = (j, 0) \<and> t = s \<and>
+                i < j \<and> j \<le> len \<and>
+                pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+                  unat j \<and>
+                (\<forall>k. unat i \<le> k \<and> k < unat j \<longrightarrow>
+                  heap_w8 s
+                    (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b) \<and>
+                (j < len \<longrightarrow>
+                  heap_w8 s (pending +\<^sub>p uint j) \<noteq> b) \<rbrace>"
+  apply (rule runs_to_weaken[
+    OF flush_pending'_scan_from_Res_int[
+      OF i_lt_len cur_eq pending_valid]])
+  apply clarsimp
+  subgoal premises prems for j
+  proof -
+    have i_lt_j: "i < j"
+      using prems by simp
+    have j_le_len: "j \<le> len"
+      using prems by simp
+    have all_eq:
+      "\<forall>k. unat i \<le> k \<and> k < unat j \<longrightarrow>
+        heap_w8 s
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+      using prems by simp
+    have stop:
+      "j < len \<longrightarrow> heap_w8 s (pending +\<^sub>p uint j) \<noteq> b"
+      using prems by simp
+    show ?thesis
+    proof (rule pending_run_end_eq_heap_scan[OF i_lt_j j_le_len])
+      fix k
+      assume i_le_k: "unat i \<le> k" and k_lt_j: "k < unat j"
+      show "heap_w8 s
+              (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) =
+            heap_w8 s (pending +\<^sub>p uint i)"
+        using all_eq i_le_k k_lt_j cur_eq by auto
+    next
+      assume j_lt_len: "j < len"
+      show "heap_w8 s (pending +\<^sub>p uint j) \<noteq>
+            heap_w8 s (pending +\<^sub>p uint i)"
+        using stop j_lt_len cur_eq by auto
+    qed
   qed
   done
 
