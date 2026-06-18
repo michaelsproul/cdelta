@@ -184,6 +184,7 @@ The C-proof-prep facts now available are:
 - `flush_pending_loop_spec_exit_heap_emit_word`
 - `emit_pending_add_chunk_preserves_heap_bytes_word`
 - `emit_pending_run_chunk_preserves_heap_bytes_word`
+- `emit_pending_run_chunk_enc_sections_state_rel_preserves_heap_bytes_word`
 - `flush_pending'_len_zero_enc_sections_state_rel_loop_spec`
 - `flush_pending'_scan_from_Res_int_pending_run_end`
 
