@@ -10568,6 +10568,48 @@ lemma flush_pending'_scan_from_liftE_split_pending_run_end:
     by auto
   done
 
+lemma flush_pending'_scan_tail_from_liftE_split_pending_run_end:
+  fixes len i :: "32 word"
+  assumes i_lt_len: "i < len"
+      and cur_eq: "heap_w8 s (pending +\<^sub>p uint i) = b"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "((do {
+            ret \<leftarrow> liftE
+              ((do {
+                 x \<leftarrow> guard
+                   (\<lambda>st. i + 1 < len \<longrightarrow>
+                     IS_VALID(8 word) st (pending +\<^sub>p uint (i + 1)));
+                 gets
+                   (\<lambda>st. if i + 1 < len \<and>
+                     heap_w8 st (pending +\<^sub>p uint (i + 1)) = b
+                    then (1 :: int) else 0)
+               }) :: (int, lifted_globals) res_monad);
+            liftE
+              ((whileLoop
+                (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
+                (\<lambda>(j, ret). do {
+                   x \<leftarrow> guard
+                     (\<lambda>st. j + 1 < len \<longrightarrow>
+                       IS_VALID(8 word) st
+                         (pending +\<^sub>p uint (j + 1)));
+                   ret \<leftarrow> gets
+                     (\<lambda>st. j + 1 < len \<and>
+                       heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
+                   return (j + 1, if ret then 1 else 0)
+                })
+                (i + 1, ret)) :: (32 word \<times> int, lifted_globals) res_monad)
+          }) :: ('e, 32 word \<times> int, lifted_globals) exn_monad) \<bullet> s
+         \<lbrace> \<lambda>r t.
+              \<exists>j. r = Result (j, 0) \<and> t = s \<and>
+                i < j \<and> j \<le> len \<and>
+                pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+                  unat j \<rbrace>"
+  using flush_pending'_scan_from_liftE_split_pending_run_end[
+      OF i_lt_len cur_eq pending_valid, where ?'e = 'e]
+  by simp
+
 lemma heap_bytes_word_frame_heap_w8_zero:
   fixes i len :: "32 word"
   assumes bytes:
