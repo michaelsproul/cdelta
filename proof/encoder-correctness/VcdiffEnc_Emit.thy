@@ -10927,6 +10927,114 @@ proof -
     using step eq by simp
 qed
 
+lemma flush_pending_outer_after_scan_preserves_inv:
+  assumes inv:
+        "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+          spec_st add_start i sec_cur t"
+      and i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and run_end:
+        "pending_run_end (heap_bytes_word s0 pending 0 len) (unat i) =
+         unat j"
+      and b_eq: "b = heap_w8 s0 (pending +\<^sub>p uint i)"
+      and emit_pre:
+        "flush_pending_outer_emit_pre src_len s0 data data_cap inst inst_cap
+          addr pending len spec_st add_start i sec_cur t"
+  shows "condition (\<lambda>st. (4 :: 32 word) \<le> j - i)
+            (flush_pending_outer_run_branch data data_cap inst inst_cap
+              pending add_start i j b sec_cur)
+            (return (add_start, j, sec_cur)) \<bullet> t
+         \<lbrace> \<lambda>r u.
+              \<exists>add_start' i' sec_cur'.
+                r = Result (add_start', i', sec_cur') \<and>
+                i < i' \<and> i' \<le> len \<and>
+                flush_pending_outer_loop_inv src_len s0 data inst addr
+                  pending len spec_st add_start' i' sec_cur' u \<rbrace>"
+proof (cases "(4 :: 32 word) \<le> j - i")
+  case True
+  obtain loop_st where
+      add_start_le_i: "add_start \<le> i"
+      and rel: "enc_sections_state_rel t data inst addr sec_cur loop_st"
+      and eq:
+        "flush_pending_loop_spec src_len
+          (heap_bytes_word s0 pending 0 len) (unat add_start) (unat i)
+          loop_st =
+         flush_pending_loop_spec src_len
+          (heap_bytes_word s0 pending 0 len) 0 0 spec_st"
+    using inv by (auto simp: flush_pending_outer_loop_inv_def)
+  have branch:
+    "flush_pending_outer_run_branch data data_cap inst inst_cap pending
+        add_start i j b sec_cur \<bullet> t
+     \<lbrace> \<lambda>r u.
+          \<exists>sec'.
+            r = Result (j, j, sec') \<and>
+            sections_t_C.err_C sec' = ENC_OK \<and>
+            heap_bytes_word u pending 0 len =
+              heap_bytes_word s0 pending 0 len \<and>
+            heap_typing u = heap_typing s0 \<and>
+            enc_sections_state_rel u data inst addr sec'
+              (flush_pending_outer_run_state src_len s0 pending
+                add_start i j b loop_st) \<rbrace>"
+    using emit_pre i_lt_j j_le_len run_end True b_eq rel eq
+    by (auto simp: flush_pending_outer_emit_pre_def)
+  show ?thesis
+    using True
+    apply simp
+    apply (rule runs_to_weaken[OF branch])
+    apply clarsimp
+    subgoal for u sec'
+    proof -
+      assume sec_ok': "sections_t_C.err_C sec' = ENC_OK"
+      assume pending_frame':
+        "heap_bytes_word u pending 0 len =
+         heap_bytes_word s0 pending 0 len"
+      assume typing': "heap_typing u = heap_typing s0"
+      assume rel':
+        "enc_sections_state_rel u data inst addr sec'
+          (flush_pending_outer_run_state src_len s0 pending
+            add_start i j b loop_st)"
+      have step:
+        "flush_pending_loop_spec src_len
+          (heap_bytes_word s0 pending 0 len) (unat add_start) (unat i)
+          loop_st =
+         flush_pending_loop_spec src_len
+          (heap_bytes_word s0 pending 0 len) (unat j) (unat j)
+          (flush_pending_outer_run_state src_len s0 pending
+            add_start i j b loop_st)"
+        unfolding flush_pending_outer_run_state_def
+        by (rule flush_pending_loop_spec_run_step_heap_emit_word[
+          OF add_start_le_i i_lt_j j_le_len run_end True b_eq])
+      have inv':
+        "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+          spec_st j j sec' u"
+        unfolding flush_pending_outer_loop_inv_def
+        apply (intro conjI)
+            apply simp
+           apply (rule j_le_len)
+          apply (rule typing')
+         apply (rule pending_frame')
+        apply (rule sec_ok')
+        apply (intro exI[where x =
+          "flush_pending_outer_run_state src_len s0 pending add_start i j b
+            loop_st"] conjI)
+         apply (rule rel')
+        using step eq by simp
+      show ?thesis
+        using i_lt_j j_le_len inv' by auto
+    qed
+    done
+next
+  case False
+  have inv':
+    "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+      spec_st add_start j sec_cur t"
+    by (rule flush_pending_outer_loop_inv_short_step[
+      OF inv i_lt_j j_le_len run_end False])
+  show ?thesis
+    using False i_lt_j j_le_len inv'
+    by simp
+qed
+
 lemma flush_pending_outer_body_preserves_inv:
   assumes inv:
         "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
