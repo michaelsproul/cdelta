@@ -10591,12 +10591,13 @@ definition flush_pending_outer_body ::
         ((whileLoop
           (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
           (\<lambda>(j, ret). do {
-             x \<leftarrow> guard (\<lambda>st. j + 1 < len \<longrightarrow>
+             j \<leftarrow> return (j + 1);
+             x \<leftarrow> guard (\<lambda>st. j < len \<longrightarrow>
                IS_VALID(8 word) st
-                 (pending +\<^sub>p uint (j + 1)));
-             ret \<leftarrow> gets (\<lambda>st. j + 1 < len \<and>
-               heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
-             return (j + 1, if ret then 1 else 0)
+                 (pending +\<^sub>p uint j));
+             ret \<leftarrow> gets (\<lambda>st. j < len \<and>
+               heap_w8 st (pending +\<^sub>p uint j) = b);
+             return (j, if ret then 1 else 0)
           })
           (j, ret)) :: (32 word \<times> int, lifted_globals) res_monad);
       condition (\<lambda>st. (4 :: 32 word) \<le> j - i)
@@ -10623,12 +10624,12 @@ definition flush_pending_outer_body ::
 definition flush_pending_outer_tail ::
   "8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
    8 word ptr \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> sections_t_C \<Rightarrow>
-   (sections_t_C, sections_t_C, lifted_globals) exn_monad" where
+   (sections_t_C, lifted_globals) res_monad" where
   "flush_pending_outer_tail data data_cap inst inst_cap pending len
       add_start sec_cur =
     condition (\<lambda>st. add_start < len)
-      (liftE (emit_add' sec_cur data data_cap inst inst_cap pending
-        add_start (len - add_start)))
+      (emit_add' sec_cur data data_cap inst inst_cap pending
+        add_start (len - add_start))
       (return sec_cur)"
 
 definition flush_pending_outer_loop_inv ::
@@ -10812,13 +10813,11 @@ lemma flush_pending_outer_tail_finishes_inv:
           addr pending len spec_st add_start len sec_cur t"
   shows "flush_pending_outer_tail data data_cap inst inst_cap pending len
             add_start sec_cur \<bullet> t
-         \<lbrace> \<lambda>r u.
-              \<exists>sec'.
-                r = Result sec' \<and>
-                enc_sections_state_rel u data inst addr sec'
-                  (flush_pending_loop_spec src_len
-                    (heap_bytes_word s0 pending 0 len) 0 0 spec_st) \<and>
-                heap_typing u = heap_typing s0 \<rbrace>"
+         \<lbrace> \<lambda>Res sec' u.
+              enc_sections_state_rel u data inst addr sec'
+                (flush_pending_loop_spec src_len
+                  (heap_bytes_word s0 pending 0 len) 0 0 spec_st) \<and>
+              heap_typing u = heap_typing s0 \<rbrace>"
   sorry
 
 lemma flush_pending'_enc_sections_state_rel_loop_spec_topdown:
@@ -10843,7 +10842,63 @@ lemma flush_pending'_enc_sections_state_rel_loop_spec_topdown:
                   (flush_pending_loop_spec src_len
                     (heap_bytes_word s pending 0 len) 0 0 spec_st) \<and>
                 heap_typing t = heap_typing s \<rbrace>"
-  sorry
+proof -
+  have inv0:
+    "flush_pending_outer_loop_inv src_len s data inst addr pending len
+      spec_st 0 0 sec s"
+    by (rule flush_pending_outer_loop_inv_start[OF rel sec_ok])
+  have loop:
+    "(whileLoop
+       (\<lambda>(add_start :: 32 word, i :: 32 word,
+            sec_cur :: sections_t_C) st. i < len)
+       (flush_pending_outer_body data data_cap inst inst_cap pending len)
+       (0, 0, sec) ::
+         (sections_t_C, 32 word \<times> 32 word \<times> sections_t_C,
+           lifted_globals) exn_monad) \<bullet> s
+     \<lbrace> \<lambda>r t.
+          \<exists>add_start sec'.
+            r = Result (add_start, len, sec') \<and>
+            flush_pending_outer_loop_inv src_len s data inst addr
+              pending len spec_st add_start len sec' t \<rbrace>"
+    by (rule flush_pending_outer_loop_preserves_inv[OF inv0 pending_valid])
+       (auto intro: emit_pre)
+  show ?thesis
+    unfolding flush_pending'_def flush_pending_outer_body_def
+    apply runs_to_vcg
+    apply (rule runs_to_weaken[OF loop[unfolded flush_pending_outer_body_def]])
+    subgoal premises loop_post for r t
+    proof -
+      obtain add_start sec' where
+          r_def: "r = Result (add_start, len, sec')"
+        and inv:
+          "flush_pending_outer_loop_inv src_len s data inst addr pending len
+            spec_st add_start len sec' t"
+        using loop_post by auto
+      have tail:
+        "flush_pending_outer_tail data data_cap inst inst_cap pending len
+            add_start sec' \<bullet> t
+         \<lbrace> \<lambda>Res sec'' u.
+              enc_sections_state_rel u data inst addr sec''
+                (flush_pending_loop_spec src_len
+                  (heap_bytes_word s pending 0 len) 0 0 spec_st) \<and>
+              heap_typing u = heap_typing s \<rbrace>"
+        by (rule flush_pending_outer_tail_finishes_inv[OF inv])
+           (rule emit_pre[OF inv order_refl])
+      show ?thesis
+        apply (simp add: r_def)
+        apply (rule runs_to_weaken[
+          OF runs_to_liftE_bind_throw_result[
+            OF tail[unfolded flush_pending_outer_tail_def],
+            where Q = "\<lambda>sec'' u.
+              enc_sections_state_rel u data inst addr sec''
+                (flush_pending_loop_spec src_len
+                  (heap_bytes_word s pending 0 len) 0 0 spec_st) \<and>
+              heap_typing u = heap_typing s"]])
+        apply auto
+        done
+    qed
+    done
+qed
 
 lemma flush_pending'_enc_sections_state_rel_topdown:
   assumes rel: "enc_sections_state_rel s data inst addr sec spec_st"
@@ -10867,7 +10922,11 @@ lemma flush_pending'_enc_sections_state_rel_topdown:
                 enc_sections_state_rel t data inst addr sec'
                   (flush_pending_spec src_len spec_st) \<and>
                 heap_typing t = heap_typing s \<rbrace>"
-  sorry
+  apply (rule runs_to_weaken[
+    OF flush_pending'_enc_sections_state_rel_loop_spec_topdown[
+      OF rel sec_ok pending_valid emit_pre]])
+  using flush_pending_loop_spec_eq_flush_pending_spec[OF pending_eq]
+  by auto
 
 lemma flush_pending'_replicate_run_inner_loop_from_exn:
   fixes len start :: "32 word"
