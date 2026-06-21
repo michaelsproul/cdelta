@@ -10752,7 +10752,46 @@ lemma flush_pending_outer_loop_inv_run_step:
       and sec_ok: "sections_t_C.err_C sec' = ENC_OK"
   shows "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
           spec_st j j sec' u"
-  sorry
+proof -
+  obtain loop_st where
+      add_start_le_i: "add_start \<le> i"
+      and rel: "enc_sections_state_rel t data inst addr sec_cur loop_st"
+      and eq:
+        "flush_pending_loop_spec src_len
+          (heap_bytes_word s0 pending 0 len) (unat add_start) (unat i)
+          loop_st =
+         flush_pending_loop_spec src_len
+          (heap_bytes_word s0 pending 0 len) 0 0 spec_st"
+    using inv by (auto simp: flush_pending_outer_loop_inv_def)
+  let ?loop_st' =
+    "emit_inst_spec src_len (RRun b (unat (j - i)))
+      (if add_start < i
+       then emit_inst_spec src_len
+         (RAdd (heap_bytes_word s0 pending add_start (i - add_start)))
+         loop_st
+       else loop_st)"
+  have rel':
+    "enc_sections_state_rel u data inst addr sec' ?loop_st'"
+    by (rule emitted[OF rel eq])
+  have step:
+    "flush_pending_loop_spec src_len (heap_bytes_word s0 pending 0 len)
+      (unat add_start) (unat i) loop_st =
+     flush_pending_loop_spec src_len (heap_bytes_word s0 pending 0 len)
+      (unat j) (unat j) ?loop_st'"
+    by (rule flush_pending_loop_spec_run_step_heap_emit_word[
+      OF add_start_le_i i_lt_j j_le_len run_end run_ge b_eq])
+  show ?thesis
+    unfolding flush_pending_outer_loop_inv_def
+    apply (intro conjI)
+        apply simp
+       apply (rule j_le_len)
+      apply (rule typing)
+     apply (rule pending_frame)
+    apply (rule sec_ok)
+    apply (intro exI[where x = ?loop_st'] conjI)
+     apply (rule rel')
+    using step eq by simp
+qed
 
 lemma flush_pending_outer_body_preserves_inv:
   assumes inv:
