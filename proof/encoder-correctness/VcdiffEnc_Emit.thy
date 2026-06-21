@@ -3773,6 +3773,158 @@ next
        (auto simp: sections_result_def)
 qed
 
+lemma emit_pending_add_chunk_enc_sections_state_rel_preserves_heap_bytes_word:
+  assumes rel:
+        "enc_sections_state_rel s data inst addr sec spec_st"
+      and sz_ge: "(1 :: 32 word) \<le> sz"
+      and size: "varint_size' sz s = Some n"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_byte_dist:
+        "ptr_range_distinct inst (Suc (unat (sections_t_C.inst_pos_C sec)))"
+      and inst_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_pending_disj:
+        "\<forall>i < unat sz.
+           pending +\<^sub>p uint (off + of_nat i) \<noteq>
+           inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_varint_fits:
+        "\<not> inst_cap - (sections_t_C.inst_pos_C sec + 1) < n"
+      and inst_varint_valid: "\<forall>j < unat n.
+        ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j))"
+      and inst_varint_inj: "\<forall>i < unat n. \<forall>j < unat n.
+        i \<noteq> j \<longrightarrow>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat i) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + of_nat j)"
+      and inst_varint_prefix_disj: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+        i < n \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and inst_varint_no_overflow:
+        "unat (sections_t_C.inst_pos_C sec + 1) + unat n < 2 ^ 32"
+      and inst_varint_data_disj: "\<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+        i < n \<longrightarrow>
+        data +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and inst_varint_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+        i < n \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and inst_varint_pending_disj: "\<forall>k < unat sz. \<forall>i.
+        i < n \<longrightarrow>
+        pending +\<^sub>p uint (off + of_nat k) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and data_fits:
+        "\<not> data_cap - sections_t_C.data_pos_C sec < sz"
+      and data_valid: "\<forall>j < unat sz.
+        ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j))"
+      and pending_valid: "\<forall>j < unat sz.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint (off + of_nat j))"
+      and data_pending_disj: "\<forall>i < unat sz. \<forall>j < unat sz.
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        pending +\<^sub>p uint (off + of_nat j)"
+      and data_inj: "\<forall>i < unat sz. \<forall>j < unat sz.
+        i \<noteq> j \<longrightarrow>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j)"
+      and data_prefix_disj: "\<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+        i < sz \<longrightarrow>
+        data +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_no_overflow:
+        "unat (sections_t_C.data_pos_C sec) + unat sz < 2 ^ 32"
+      and data_inst_disj_small: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+        i < sz \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_inst_disj_large: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1 + n). \<forall>i.
+        i < sz \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+        i < sz \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and pending_frame_inst_byte_disj: "\<forall>i < unat pending_frame_len.
+        pending +\<^sub>p uint (pending_frame_off + of_nat i) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and pending_frame_inst_varint_disj: "\<forall>k < unat pending_frame_len. \<forall>i.
+        i < n \<longrightarrow>
+        pending +\<^sub>p uint (pending_frame_off + of_nat k) \<noteq>
+        inst +\<^sub>p uint (sections_t_C.inst_pos_C sec + 1 + i)"
+      and pending_frame_data_disj: "\<forall>k < unat pending_frame_len. \<forall>i.
+        i < sz \<longrightarrow>
+        pending +\<^sub>p uint (pending_frame_off + of_nat k) \<noteq>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+  shows "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec'.
+                r = Result sec' \<and>
+                sections_t_C.err_C sec' = ENC_OK \<and>
+                enc_sections_state_rel t data inst addr sec'
+                  (emit_inst_spec src_len
+                    (RAdd (heap_bytes_word s pending off sz)) spec_st)) \<and>
+              heap_bytes_word t pending pending_frame_off pending_frame_len =
+                heap_bytes_word s pending pending_frame_off pending_frame_len \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have state_rel:
+    "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            sections_t_C.err_C sec' = ENC_OK \<and>
+            enc_sections_state_rel t data inst addr sec'
+              (emit_inst_spec src_len
+                (RAdd (heap_bytes_word s pending off sz)) spec_st)) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+    by (rule emit_pending_add_chunk_enc_sections_state_rel[
+      OF rel sz_ge size sec_ok inst_byte_fits inst_byte_ptr
+         inst_byte_dist inst_byte_data_disj inst_byte_addr_disj
+         inst_byte_pending_disj inst_varint_fits inst_varint_valid
+         inst_varint_inj inst_varint_prefix_disj inst_varint_no_overflow
+         inst_varint_data_disj inst_varint_addr_disj
+         inst_varint_pending_disj data_fits data_valid pending_valid
+         data_pending_disj data_inj data_prefix_disj data_no_overflow
+         data_inst_disj_small data_inst_disj_large data_addr_disj])
+  have pending_pres:
+    "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            sections_t_C.err_C sec' = ENC_OK) \<and>
+          heap_bytes_word t pending pending_frame_off pending_frame_len =
+            heap_bytes_word s pending pending_frame_off pending_frame_len \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+    by (rule emit_pending_add_chunk_preserves_heap_bytes_word[
+      OF sz_ge size sec_ok inst_byte_fits inst_byte_ptr inst_varint_fits
+         inst_varint_valid data_fits data_valid pending_valid
+         pending_frame_inst_byte_disj pending_frame_inst_varint_disj
+         pending_frame_data_disj])
+  have combined:
+    "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s
+       \<lbrace> \<lambda>r t.
+          ((\<exists>sec'.
+            r = Result sec' \<and>
+            sections_t_C.err_C sec' = ENC_OK \<and>
+            enc_sections_state_rel t data inst addr sec'
+              (emit_inst_spec src_len
+                (RAdd (heap_bytes_word s pending off sz)) spec_st)) \<and>
+          heap_typing t = heap_typing s) \<and>
+          ((\<exists>sec'.
+            r = Result sec' \<and>
+            sections_t_C.err_C sec' = ENC_OK) \<and>
+          heap_bytes_word t pending pending_frame_off pending_frame_len =
+            heap_bytes_word s pending pending_frame_off pending_frame_len \<and>
+          heap_typing t = heap_typing s) \<rbrace>"
+    using state_rel pending_pres by (simp add: runs_to_conj)
+  show ?thesis
+    by (rule runs_to_weaken[OF combined]) auto
+qed
+
 lemma emit_pending_run_chunk_enc_sections_state_rel:
   assumes rel:
         "enc_sections_state_rel s data inst addr sec spec_st"
@@ -10234,6 +10386,488 @@ lemma flush_pending'_scan_from_Res_int_pending_run_end:
     qed
   qed
   done
+
+lemma pending_run_end_eq_heap_scan_from_suc:
+  fixes i j len :: "32 word"
+  assumes i_lt_len: "i < len"
+      and start_le_j: "unat (i + 1) \<le> unat j"
+      and j_le_len_nat: "unat j \<le> unat len"
+      and cur_eq: "heap_w8 s (pending +\<^sub>p uint i) = b"
+      and all_eq_tail:
+        "\<forall>k. unat (i + 1) \<le> k \<and> k < unat j \<longrightarrow>
+          heap_w8 s
+            (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+      and stop:
+        "j < len \<longrightarrow> heap_w8 s (pending +\<^sub>p uint j) \<noteq> b"
+  shows "i < j \<and> j \<le> len \<and>
+         pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+           unat j"
+proof -
+  have suc_unat: "unat (i + 1) = Suc (unat i)"
+    using unat_word_suc_of_less[OF i_lt_len] .
+  have i_lt_j: "i < j"
+  proof -
+    have "unat i < unat (i + 1)"
+      using suc_unat by simp
+    also have "... \<le> unat j"
+      by (rule start_le_j)
+    finally show ?thesis
+      by (simp add: word_less_nat_alt)
+  qed
+  have j_le_len: "j \<le> len"
+    using j_le_len_nat by (simp add: word_le_nat_alt)
+  have all_eq:
+    "\<And>k. \<lbrakk>unat i \<le> k; k < unat j\<rbrakk> \<Longrightarrow>
+      heap_w8 s
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) =
+      heap_w8 s (pending +\<^sub>p uint i)"
+  proof -
+    fix k
+    assume i_le_k: "unat i \<le> k" and k_lt_j: "k < unat j"
+    show "heap_w8 s
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) =
+      heap_w8 s (pending +\<^sub>p uint i)"
+    proof (cases "k = unat i")
+      case True
+      then show ?thesis
+        by simp
+    next
+      case False
+      then have "unat (i + 1) \<le> k"
+        using i_le_k suc_unat by simp
+      then have "heap_w8 s
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) = b"
+        using all_eq_tail k_lt_j by auto
+      then show ?thesis
+        using cur_eq by simp
+    qed
+  qed
+  have stop_i:
+    "j < len \<Longrightarrow>
+      heap_w8 s (pending +\<^sub>p uint j) \<noteq>
+      heap_w8 s (pending +\<^sub>p uint i)"
+    using stop cur_eq by auto
+  have run_end:
+    "pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+     unat j"
+    by (rule pending_run_end_eq_heap_scan[
+        OF i_lt_j j_le_len all_eq stop_i])
+  show ?thesis
+    using i_lt_j j_le_len run_end by simp
+qed
+
+lemma pending_run_end_eq_heap_scan_suc_stop:
+  fixes i len :: "32 word"
+  assumes i_lt_len: "i < len"
+      and cur_eq: "heap_w8 s (pending +\<^sub>p uint i) = b"
+      and stop:
+        "i + 1 < len \<longrightarrow>
+          heap_w8 s (pending +\<^sub>p uint (i + 1)) \<noteq> b"
+  shows "i < i + 1 \<and> i + 1 \<le> len \<and>
+         pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+           unat (i + 1)"
+proof -
+  have i_lt_suc: "i < i + 1"
+    using i_lt_len unat_word_suc_of_less[OF i_lt_len]
+    by (simp add: word_less_nat_alt)
+  have suc_le_len: "i + 1 \<le> len"
+    using unat_suc_le_of_word_less[OF i_lt_len]
+    by (simp add: word_le_nat_alt)
+  have suc_unat: "unat (i + 1) = Suc (unat i)"
+    using unat_word_suc_of_less[OF i_lt_len] .
+  have all_eq:
+    "\<And>k. \<lbrakk>unat i \<le> k; k < unat (i + 1)\<rbrakk> \<Longrightarrow>
+      heap_w8 s
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) =
+      heap_w8 s (pending +\<^sub>p uint i)"
+  proof -
+    fix k
+    assume "unat i \<le> k" and "k < unat (i + 1)"
+    then have "k = unat i"
+      using suc_unat by simp
+    then show "heap_w8 s
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat k)) =
+      heap_w8 s (pending +\<^sub>p uint i)"
+      by simp
+  qed
+  have stop_i:
+    "i + 1 < len \<Longrightarrow>
+      heap_w8 s (pending +\<^sub>p uint (i + 1)) \<noteq>
+      heap_w8 s (pending +\<^sub>p uint i)"
+    using stop cur_eq by auto
+  have run_end:
+    "pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+     unat (i + 1)"
+    by (rule pending_run_end_eq_heap_scan[
+        OF i_lt_suc suc_le_len all_eq stop_i])
+  show ?thesis
+    using i_lt_suc suc_le_len run_end by simp
+qed
+
+lemma flush_pending'_scan_from_liftE_split_pending_run_end:
+  fixes len i :: "32 word"
+  assumes i_lt_len: "i < len"
+      and cur_eq: "heap_w8 s (pending +\<^sub>p uint i) = b"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+  shows "((do {
+            j \<leftarrow> return (i + 1);
+            ret \<leftarrow> liftE
+              ((do {
+                 x \<leftarrow> guard
+                   (\<lambda>st. j < len \<longrightarrow>
+                     IS_VALID(8 word) st (pending +\<^sub>p uint j));
+                 gets
+                   (\<lambda>st. if j < len \<and>
+                     heap_w8 st (pending +\<^sub>p uint j) = b
+                    then (1 :: int) else 0)
+               }) :: (int, lifted_globals) res_monad);
+            liftE
+              ((whileLoop
+                (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
+                (\<lambda>(j, ret). do {
+                   x \<leftarrow> guard
+                     (\<lambda>st. j + 1 < len \<longrightarrow>
+                       IS_VALID(8 word) st
+                         (pending +\<^sub>p uint (j + 1)));
+                   ret \<leftarrow> gets
+                     (\<lambda>st. j + 1 < len \<and>
+                       heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
+                   return (j + 1, if ret then 1 else 0)
+                })
+                (j, ret)) :: (32 word \<times> int, lifted_globals) res_monad)
+          }) :: ('e, 32 word \<times> int, lifted_globals) exn_monad) \<bullet> s
+         \<lbrace> \<lambda>r t.
+              \<exists>j. r = Result (j, 0) \<and> t = s \<and>
+                i < j \<and> j \<le> len \<and>
+                pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+                  unat j \<rbrace>"
+  apply runs_to_vcg
+  subgoal
+    using pending_valid[rule_format, of "unat (i + 1)"]
+    by (auto simp: word_less_nat_alt word_unat.Rep_inverse)
+  subgoal
+    apply (rule runs_to_weaken[
+      OF flush_pending'_scan_inner_loop_maximal_from_Res_int])
+       apply assumption
+      apply assumption
+     apply (rule pending_valid)
+    apply clarsimp
+    apply (rule pending_run_end_eq_heap_scan_from_suc[
+      OF i_lt_len])
+        apply assumption
+       apply assumption
+      apply (rule cur_eq)
+     apply simp
+    apply simp
+    done
+  subgoal
+    apply (subst whileLoop_unroll)
+    using pending_run_end_eq_heap_scan_suc_stop[OF i_lt_len cur_eq]
+    by auto
+  done
+
+definition flush_pending_outer_body ::
+  "8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   32 word \<times> 32 word \<times> sections_t_C \<Rightarrow>
+   (sections_t_C, 32 word \<times> 32 word \<times> sections_t_C,
+     lifted_globals) exn_monad" where
+  "flush_pending_outer_body data data_cap inst inst_cap pending len =
+    (\<lambda>(add_start, i, sec_cur). do {
+      guard (\<lambda>st. IS_VALID(8 word) st (pending +\<^sub>p uint i));
+      b \<leftarrow> gets (\<lambda>st. heap_w8 st (pending +\<^sub>p uint i));
+      j \<leftarrow> return (i + 1);
+      ret \<leftarrow> liftE
+        ((do {
+           guard (\<lambda>st. j < len \<longrightarrow>
+             IS_VALID(8 word) st (pending +\<^sub>p uint j));
+           gets (\<lambda>st. if j < len \<and>
+             heap_w8 st (pending +\<^sub>p uint j) = b
+            then (1 :: int) else 0)
+         }) :: (int, lifted_globals) res_monad);
+      (j, ret) \<leftarrow> liftE
+        ((whileLoop
+          (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
+          (\<lambda>(j, ret). do {
+             x \<leftarrow> guard (\<lambda>st. j + 1 < len \<longrightarrow>
+               IS_VALID(8 word) st
+                 (pending +\<^sub>p uint (j + 1)));
+             ret \<leftarrow> gets (\<lambda>st. j + 1 < len \<and>
+               heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
+             return (j + 1, if ret then 1 else 0)
+          })
+          (j, ret)) :: (32 word \<times> int, lifted_globals) res_monad);
+      condition (\<lambda>st. (4 :: 32 word) \<le> j - i)
+        (do {
+           sec_cur \<leftarrow> condition (\<lambda>st. add_start < i)
+             (do {
+                sec_cur \<leftarrow> liftE
+                  (emit_add' sec_cur data data_cap inst inst_cap
+                    pending add_start (i - add_start));
+                unless (sections_t_C.err_C sec_cur = ENC_OK)
+                  (throw sec_cur);
+                return sec_cur
+             })
+             (return sec_cur);
+           sec_cur \<leftarrow> liftE
+             (emit_run' sec_cur data data_cap inst inst_cap b (j - i));
+           unless (sections_t_C.err_C sec_cur = ENC_OK)
+             (throw sec_cur);
+           return (j, j, sec_cur)
+        })
+        (return (add_start, j, sec_cur))
+    })"
+
+definition flush_pending_outer_tail ::
+  "8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> sections_t_C \<Rightarrow>
+   (sections_t_C, sections_t_C, lifted_globals) exn_monad" where
+  "flush_pending_outer_tail data data_cap inst inst_cap pending len
+      add_start sec_cur =
+    condition (\<lambda>st. add_start < len)
+      (liftE (emit_add' sec_cur data data_cap inst inst_cap pending
+        add_start (len - add_start)))
+      (return sec_cur)"
+
+definition flush_pending_outer_loop_inv ::
+  "nat \<Rightarrow> lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow>
+   8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   enc_full_state \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   sections_t_C \<Rightarrow> lifted_globals \<Rightarrow> bool" where
+  "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+      spec_st add_start i sec_cur t \<longleftrightarrow>
+     add_start \<le> i \<and>
+     i \<le> len \<and>
+     heap_typing t = heap_typing s0 \<and>
+     heap_bytes_word t pending 0 len =
+       heap_bytes_word s0 pending 0 len \<and>
+     sections_t_C.err_C sec_cur = ENC_OK \<and>
+     (\<exists>loop_st.
+       enc_sections_state_rel t data inst addr sec_cur loop_st \<and>
+       flush_pending_loop_spec src_len (heap_bytes_word s0 pending 0 len)
+         (unat add_start) (unat i) loop_st =
+       flush_pending_loop_spec src_len (heap_bytes_word s0 pending 0 len)
+         0 0 spec_st)"
+
+definition flush_pending_outer_emit_pre ::
+  "nat \<Rightarrow> lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow>
+   32 word \<Rightarrow> enc_full_state \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   sections_t_C \<Rightarrow> lifted_globals \<Rightarrow> bool" where
+  "flush_pending_outer_emit_pre src_len s0 data data_cap inst inst_cap
+      addr pending len spec_st add_start i sec_cur t \<longleftrightarrow> True"
+
+lemma flush_pending_outer_loop_inv_start:
+  assumes rel: "enc_sections_state_rel s data inst addr sec spec_st"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+  shows "flush_pending_outer_loop_inv src_len s data inst addr pending len
+    spec_st 0 0 sec s"
+  using rel sec_ok
+  by (auto simp: flush_pending_outer_loop_inv_def)
+
+lemma flush_pending_outer_loop_inv_short_step:
+  assumes inv:
+        "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+          spec_st add_start i sec_cur t"
+      and i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and run_end:
+        "pending_run_end (heap_bytes_word s0 pending 0 len) (unat i) =
+         unat j"
+      and short: "\<not> (4 :: 32 word) \<le> j - i"
+  shows "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+          spec_st add_start j sec_cur t"
+proof -
+  obtain loop_st where
+      add_start_le_i: "add_start \<le> i"
+      and typing: "heap_typing t = heap_typing s0"
+      and pending_frame:
+        "heap_bytes_word t pending 0 len =
+         heap_bytes_word s0 pending 0 len"
+      and sec_ok: "sections_t_C.err_C sec_cur = ENC_OK"
+      and rel: "enc_sections_state_rel t data inst addr sec_cur loop_st"
+      and eq:
+        "flush_pending_loop_spec src_len
+          (heap_bytes_word s0 pending 0 len) (unat add_start) (unat i)
+          loop_st =
+         flush_pending_loop_spec src_len
+          (heap_bytes_word s0 pending 0 len) 0 0 spec_st"
+    using inv by (auto simp: flush_pending_outer_loop_inv_def)
+  have add_start_le_j: "add_start \<le> j"
+    using add_start_le_i i_lt_j by simp
+  have step:
+    "flush_pending_loop_spec src_len (heap_bytes_word s0 pending 0 len)
+      (unat add_start) (unat i) loop_st =
+     flush_pending_loop_spec src_len (heap_bytes_word s0 pending 0 len)
+      (unat add_start) (unat j) loop_st"
+    by (rule flush_pending_loop_spec_short_step_heap_word[
+      OF i_lt_j j_le_len run_end short])
+  show ?thesis
+    unfolding flush_pending_outer_loop_inv_def
+    apply (intro conjI)
+        apply (rule add_start_le_j)
+       apply (rule j_le_len)
+      apply (rule typing)
+     apply (rule pending_frame)
+    apply (rule sec_ok)
+    apply (intro exI[where x = loop_st] conjI)
+     apply (rule rel)
+    using step eq by simp
+qed
+
+lemma flush_pending_outer_loop_inv_run_step:
+  assumes inv:
+        "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+          spec_st add_start i sec_cur t"
+      and i_lt_j: "i < j"
+      and j_le_len: "j \<le> len"
+      and run_end:
+        "pending_run_end (heap_bytes_word s0 pending 0 len) (unat i) =
+         unat j"
+      and run_ge: "(4 :: 32 word) \<le> j - i"
+      and b_eq: "b = heap_w8 s0 (pending +\<^sub>p uint i)"
+      and pending_frame:
+        "heap_bytes_word u pending 0 len =
+         heap_bytes_word s0 pending 0 len"
+      and typing: "heap_typing u = heap_typing s0"
+      and emitted:
+        "\<And>loop_st. \<lbrakk>
+          enc_sections_state_rel t data inst addr sec_cur loop_st;
+          flush_pending_loop_spec src_len
+            (heap_bytes_word s0 pending 0 len) (unat add_start) (unat i)
+            loop_st =
+          flush_pending_loop_spec src_len
+            (heap_bytes_word s0 pending 0 len) 0 0 spec_st
+        \<rbrakk> \<Longrightarrow>
+          enc_sections_state_rel u data inst addr sec'
+            (emit_inst_spec src_len (RRun b (unat (j - i)))
+              (if add_start < i
+               then emit_inst_spec src_len
+                 (RAdd (heap_bytes_word s0 pending add_start
+                   (i - add_start))) loop_st
+               else loop_st))"
+      and sec_ok: "sections_t_C.err_C sec' = ENC_OK"
+  shows "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+          spec_st j j sec' u"
+  sorry
+
+lemma flush_pending_outer_body_preserves_inv:
+  assumes inv:
+        "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+          spec_st add_start i sec_cur t"
+      and i_lt_len: "i < len"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s0)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and emit_pre:
+        "flush_pending_outer_emit_pre src_len s0 data data_cap inst inst_cap
+          addr pending len spec_st add_start i sec_cur t"
+  shows "flush_pending_outer_body data data_cap inst inst_cap pending len
+            (add_start, i, sec_cur) \<bullet> t
+         \<lbrace> \<lambda>r u.
+              \<exists>add_start' i' sec_cur'.
+                r = Result (add_start', i', sec_cur') \<and>
+                i < i' \<and> i' \<le> len \<and>
+                flush_pending_outer_loop_inv src_len s0 data inst addr
+                  pending len spec_st add_start' i' sec_cur' u \<rbrace>"
+  sorry
+
+lemma flush_pending_outer_loop_preserves_inv:
+  assumes inv0:
+        "flush_pending_outer_loop_inv src_len s data inst addr pending len
+          spec_st 0 0 sec s"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and emit_pre:
+        "\<And>add_start i sec_cur t. \<lbrakk>
+          flush_pending_outer_loop_inv src_len s data inst addr pending len
+            spec_st add_start i sec_cur t;
+          i < len
+        \<rbrakk> \<Longrightarrow>
+          flush_pending_outer_emit_pre src_len s data data_cap inst inst_cap
+            addr pending len spec_st add_start i sec_cur t"
+  shows "(whileLoop
+           (\<lambda>(add_start :: 32 word, i :: 32 word,
+                sec_cur :: sections_t_C) st. i < len)
+           (flush_pending_outer_body data data_cap inst inst_cap pending len)
+           (0, 0, sec) ::
+             (sections_t_C, 32 word \<times> 32 word \<times> sections_t_C,
+               lifted_globals) exn_monad) \<bullet> s
+         \<lbrace> \<lambda>r t.
+              \<exists>add_start sec'.
+                r = Result (add_start, len, sec') \<and>
+                flush_pending_outer_loop_inv src_len s data inst addr
+                  pending len spec_st add_start len sec' t \<rbrace>"
+  sorry
+
+lemma flush_pending_outer_tail_finishes_inv:
+  assumes inv:
+        "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+          spec_st add_start len sec_cur t"
+      and emit_pre:
+        "flush_pending_outer_emit_pre src_len s0 data data_cap inst inst_cap
+          addr pending len spec_st add_start len sec_cur t"
+  shows "flush_pending_outer_tail data data_cap inst inst_cap pending len
+            add_start sec_cur \<bullet> t
+         \<lbrace> \<lambda>r u.
+              \<exists>sec'.
+                r = Result sec' \<and>
+                enc_sections_state_rel u data inst addr sec'
+                  (flush_pending_loop_spec src_len
+                    (heap_bytes_word s0 pending 0 len) 0 0 spec_st) \<and>
+                heap_typing u = heap_typing s0 \<rbrace>"
+  sorry
+
+lemma flush_pending'_enc_sections_state_rel_loop_spec_topdown:
+  assumes rel: "enc_sections_state_rel s data inst addr sec spec_st"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and emit_pre:
+        "\<And>add_start i sec_cur t. \<lbrakk>
+          flush_pending_outer_loop_inv src_len s data inst addr pending len
+            spec_st add_start i sec_cur t;
+          i \<le> len
+        \<rbrakk> \<Longrightarrow>
+          flush_pending_outer_emit_pre src_len s data data_cap inst inst_cap
+            addr pending len spec_st add_start i sec_cur t"
+  shows "flush_pending' sec data data_cap inst inst_cap pending len \<bullet> s
+         \<lbrace> \<lambda>r t.
+              \<exists>sec'.
+                r = Result sec' \<and>
+                enc_sections_state_rel t data inst addr sec'
+                  (flush_pending_loop_spec src_len
+                    (heap_bytes_word s pending 0 len) 0 0 spec_st) \<and>
+                heap_typing t = heap_typing s \<rbrace>"
+  sorry
+
+lemma flush_pending'_enc_sections_state_rel_topdown:
+  assumes rel: "enc_sections_state_rel s data inst addr sec spec_st"
+      and pending_eq: "enc_pending spec_st = heap_bytes_word s pending 0 len"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and emit_pre:
+        "\<And>add_start i sec_cur t. \<lbrakk>
+          flush_pending_outer_loop_inv src_len s data inst addr pending len
+            spec_st add_start i sec_cur t;
+          i \<le> len
+        \<rbrakk> \<Longrightarrow>
+          flush_pending_outer_emit_pre src_len s data data_cap inst inst_cap
+            addr pending len spec_st add_start i sec_cur t"
+  shows "flush_pending' sec data data_cap inst inst_cap pending len \<bullet> s
+         \<lbrace> \<lambda>r t.
+              \<exists>sec'.
+                r = Result sec' \<and>
+                enc_sections_state_rel t data inst addr sec'
+                  (flush_pending_spec src_len spec_st) \<and>
+                heap_typing t = heap_typing s \<rbrace>"
+  sorry
 
 lemma flush_pending'_replicate_run_inner_loop_from_exn:
   fixes len start :: "32 word"
