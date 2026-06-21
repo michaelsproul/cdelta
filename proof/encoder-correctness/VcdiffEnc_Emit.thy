@@ -10814,6 +10814,20 @@ lemma flush_pending_outer_body_preserves_inv:
                   pending len spec_st add_start' i' sec_cur' u \<rbrace>"
   sorry
 
+lemma unat_diff_measure_decrease_word:
+  fixes i i' len :: "32 word"
+  assumes i_lt_i': "i < i'"
+      and i'_le_len: "i' \<le> len"
+  shows "unat len - unat i' < unat len - unat i"
+proof -
+  have "unat i < unat i'"
+    using i_lt_i' by (simp add: word_less_nat_alt)
+  moreover have "unat i' \<le> unat len"
+    using i'_le_len by (simp add: word_le_nat_alt)
+  ultimately show ?thesis
+    by linarith
+qed
+
 lemma flush_pending_outer_loop_preserves_inv:
   assumes inv0:
         "flush_pending_outer_loop_inv src_len s data inst addr pending len
@@ -10841,7 +10855,49 @@ lemma flush_pending_outer_loop_preserves_inv:
                 r = Result (add_start, len, sec') \<and>
                 flush_pending_outer_loop_inv src_len s data inst addr
                   pending len spec_st add_start len sec' t \<rbrace>"
-  sorry
+  apply (rule runs_to_whileLoop_exn'[
+    where R = "measure
+      (\<lambda>((add_start :: 32 word, i :: 32 word,
+            sec_cur :: sections_t_C), _). unat len - unat i)"
+      and I = "\<lambda>r t.
+        ((\<exists>add_start i sec_cur.
+            r = Result (add_start, i, sec_cur) \<and>
+            flush_pending_outer_loop_inv src_len s data inst addr pending len
+              spec_st add_start i sec_cur t) \<and>
+         (\<forall>e. r = Exn e \<longrightarrow> False))"])
+  subgoal for a t
+    apply (cases a)
+    apply clarsimp
+    subgoal for add_start i sec_cur
+      apply (rule runs_to_weaken)
+       apply (rule flush_pending_outer_body_preserves_inv)
+          apply assumption
+         apply assumption
+        apply (rule pending_valid)
+       apply (rule emit_pre)
+        apply assumption
+       apply assumption
+      apply clarsimp
+      apply (rule unat_diff_measure_decrease_word)
+       apply assumption
+      apply assumption
+    done
+  done
+  subgoal for a t
+    apply (cases a)
+    apply clarsimp
+    subgoal premises prems for add_start i sec_cur
+    proof -
+      have i_eq: "i = len"
+        using prems by (auto simp: flush_pending_outer_loop_inv_def)
+      show ?thesis
+        using prems i_eq by auto
+    qed
+    done
+  subgoal by auto
+  subgoal by simp
+  subgoal using inv0 by auto
+  done
 
 lemma flush_pending_outer_tail_finishes_inv:
   assumes inv:
