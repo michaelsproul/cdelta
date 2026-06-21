@@ -10568,6 +10568,26 @@ lemma flush_pending'_scan_from_liftE_split_pending_run_end:
     by auto
   done
 
+lemma heap_bytes_word_frame_heap_w8_zero:
+  fixes i len :: "32 word"
+  assumes bytes:
+        "heap_bytes_word t pending 0 len =
+         heap_bytes_word s pending 0 len"
+      and i_lt_len: "i < len"
+  shows "heap_w8 t (pending +\<^sub>p uint i) =
+         heap_w8 s (pending +\<^sub>p uint i)"
+proof -
+  have idx_lt: "unat i < unat len"
+    using i_lt_len by (simp add: word_less_nat_alt)
+  have nth_eq:
+    "heap_bytes_word t pending 0 len ! unat i =
+     heap_bytes_word s pending 0 len ! unat i"
+    using arg_cong[OF bytes, of "\<lambda>xs. xs ! unat i"] .
+  show ?thesis
+    using nth_eq idx_lt
+    by (simp add: heap_bytes_word_nth word_unat.Rep_inverse)
+qed
+
 definition flush_pending_outer_run_state ::
   "nat \<Rightarrow> lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
    32 word \<Rightarrow> 32 word \<Rightarrow> 8 word \<Rightarrow> enc_full_state \<Rightarrow>
