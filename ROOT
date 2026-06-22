@@ -33,7 +33,7 @@ session CdeltaEncoder in "spec/cenc" = AutoCorres2 +
     VcdiffEnc
 
 session CdeltaEncoderCorrectness in "proof/encoder-correctness" = CdeltaEncoder +
-  options [timeout = 1800, quick_and_dirty = true]
+  options [timeout = 1800, quick_and_dirty = false]
   sessions
     CdeltaSpecRoundtrip
   theories

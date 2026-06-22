@@ -188,6 +188,25 @@ proof (rule nth_equalityI)
   qed
 qed
 
+lemma heap_w32_update_read_current:
+  "heap_w32_update (\<lambda>a. a(ptr := a src_ptr)) s =
+   heap_w32_update (\<lambda>a. a(ptr := heap_w32 s src_ptr)) s"
+  by simp
+
+lemma heap_typing_heap_w32_update[simp]:
+  "heap_typing (heap_w32_update f s) = heap_typing s"
+  by simp
+
+lemma holds_post_state_run_return[simp]:
+  "holds_post_state P (run (return v) s) = P (Result v, s)"
+proof -
+  have run_eq: "run (return v) s = Success {(Result v, s)}"
+    by (rule Reaches.outcomes_succeeds_run_conv)
+       (rule Reaches.outcomes_return, rule Reaches.succeeds_return)
+  show ?thesis
+    by (simp add: run_eq)
+qed
+
 lemma hash_bucket_spec_lt[simp]:
   "hash_bucket_spec bs pos < hash_size"
   by (simp add: hash_bucket_spec_def hash_size_def hash_bits_def)
@@ -900,10 +919,12 @@ lemma build_index_fill_body_preserves_inv:
     and cond: "0 < i"
     and hashes: "build_index_hashes_ok s0 src src_len src_bytes"
     and head_valid:
-      "\<And>h st'. \<lbrakk>heap_typing st' = heap_typing s0; h < hash_size\<rbrakk> \<Longrightarrow>
+      "\<And>h (st' :: lifted_globals).
+        \<lbrakk>heap_typing st' = heap_typing s0; h < hash_size\<rbrakk> \<Longrightarrow>
         IS_VALID(32 word) st' (head +\<^sub>p int h)"
     and next_valid:
-      "\<And>p st'. \<lbrakk>heap_typing st' = heap_typing s0; p < length src_bytes\<rbrakk> \<Longrightarrow>
+      "\<And>p (st' :: lifted_globals).
+        \<lbrakk>heap_typing st' = heap_typing s0; p < length src_bytes\<rbrakk> \<Longrightarrow>
         IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
     and head_no_alias:
       "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
@@ -931,7 +952,249 @@ lemma build_index_fill_body_preserves_inv:
       } :: (32 word, lifted_globals) res_monad) \<bullet> st
     \<lbrace>\<lambda>r t. r = Result (i - 1) \<and>
       build_index_fill_inv s0 src src_len src_bytes head next_arr (i - 1) t\<rbrace>"
-  sorry
+proof -
+  let ?p_word = "i - 1"
+  let ?p = "unat ?p_word"
+  let ?hash = "hash4_spec src_bytes ?p"
+  let ?bucket = "hash_bucket_spec src_bytes ?p"
+  let ?h = "(of_nat ?bucket :: 32 word)"
+  have typing: "heap_typing st = heap_typing s0"
+    using inv by (simp add: build_index_fill_inv_def)
+  have bytes: "heap_bytes st src (unat src_len) = src_bytes"
+    using inv by (simp add: build_index_fill_inv_def)
+  have len_src: "length src_bytes = unat src_len"
+    using inv by (simp add: build_index_fill_inv_def)
+  have src_long: "min_match \<le> length src_bytes"
+    using inv by (simp add: build_index_fill_inv_def)
+  have src_len_word: "length src_bytes < unat (no_entry32 :: 32 word)"
+    using inv by (simp add: build_index_fill_inv_def)
+  have i_le: "unat i \<le> length src_bytes - min_match + 1"
+    using inv unfolding build_index_fill_inv_def by blast
+  have rel: "source_index_heap_rel_from st src_bytes (unat i) head next_arr"
+    using inv by (simp add: build_index_fill_inv_def)
+  have i_ne: "i \<noteq> 0"
+    using cond by (simp add: word_gt_0)
+  have i_pos_nat: "0 < unat i"
+    using i_ne by (simp add: unat_gt_0)
+  have p_unat: "?p = unat i - 1"
+    using i_ne by (simp add: unat_minus_one)
+  have p_match_bound: "?p + min_match \<le> length src_bytes"
+    using i_le i_pos_nat src_long
+    by (simp add: p_unat)
+  have p_lt_src: "?p < length src_bytes"
+    using p_match_bound by (simp add: min_match_def)
+  have p_le: "?p \<le> length src_bytes - min_match + 1"
+    using i_le by (simp add: p_unat)
+  have hash_res:
+    "hash4' src ?p_word st = Some (of_nat ?hash :: 32 word)"
+    using hashes typing bytes p_match_bound
+    by (auto simp: build_index_hashes_ok_def)
+  have h_eq[simp]: "(of_nat ?hash :: 32 word) && 0xFFFF = ?h"
+    by (rule hash_bucket_word_from_hash4_spec)
+  have bucket_lt: "?bucket < hash_size"
+    by (rule hash_bucket_spec_lt)
+  have bucket_unat: "unat ?h = ?bucket"
+    using bucket_lt
+    by (simp add: unat_of_nat_eq hash_size_def hash_bits_def)
+  have p_word_of_nat[simp]: "(of_nat ?p :: 32 word) = ?p_word"
+    by simp
+  have p_uint[simp]: "uint ?p_word = int ?p"
+    by (simp only: uint_nat)
+  have h_uint[simp]: "uint ?h = int ?bucket"
+    using bucket_unat by (simp only: uint_nat)
+  have next_guard_int:
+    "IS_VALID(32 word) st (next_arr +\<^sub>p int ?p)"
+    using typing p_lt_src
+    by (rule next_valid)
+  have next_ptr_eq:
+    "next_arr +\<^sub>p uint ?p_word = next_arr +\<^sub>p int ?p"
+    by (simp only: p_uint)
+  have next_guard:
+    "IS_VALID(32 word) st (next_arr +\<^sub>p uint ?p_word)"
+    by (subst next_ptr_eq, rule next_guard_int)
+  have head_guard_int:
+    "IS_VALID(32 word) st (head +\<^sub>p int ?bucket)"
+    using typing bucket_lt
+    by (rule head_valid)
+  have head_ptr_eq:
+    "head +\<^sub>p uint ?h = head +\<^sub>p int ?bucket"
+    by (simp only: h_uint)
+  have head_guard:
+    "IS_VALID(32 word) st (head +\<^sub>p uint ?h)"
+    by (subst head_ptr_eq, rule head_guard_int)
+  let ?s_next =
+    "heap_w32_update
+      (\<lambda>a. a(next_arr +\<^sub>p int ?p :=
+        heap_w32 st (head +\<^sub>p int ?bucket))) st"
+  let ?s_head =
+    "heap_w32_update
+      (\<lambda>ha. ha(head +\<^sub>p int ?bucket := of_nat ?p)) ?s_next"
+  have step_rel:
+    "source_index_heap_rel_from ?s_head src_bytes ?p head next_arr"
+  proof (rule source_index_heap_rel_from_step[
+      where i = "unat i" and s = st and p = ?p and bucket = ?bucket])
+    show "source_index_heap_rel_from st src_bytes (unat i) head next_arr"
+      by (rule rel)
+    show "min_match \<le> length src_bytes"
+      by (rule src_long)
+    show "0 < unat i"
+      by (rule i_pos_nat)
+    show "unat i \<le> length src_bytes - min_match + 1"
+      by (rule i_le)
+    show "length src_bytes < unat (no_entry32 :: 32 word)"
+      by (rule src_len_word)
+    show "\<And>h. h < hash_size \<Longrightarrow> h \<noteq> ?bucket \<Longrightarrow>
+        head +\<^sub>p int h \<noteq> head +\<^sub>p int ?bucket"
+    proof -
+      fix h
+      assume h_lt: "h < hash_size"
+      assume h_ne: "h \<noteq> ?bucket"
+      show "head +\<^sub>p int h \<noteq> head +\<^sub>p int ?bucket"
+        by (rule head_no_alias[OF h_lt bucket_lt h_ne])
+    qed
+    show "\<And>q. q < length src_bytes \<Longrightarrow> q \<noteq> ?p \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int ?p"
+    proof -
+      fix q
+      assume q_lt: "q < length src_bytes"
+      assume q_ne: "q \<noteq> ?p"
+      show "next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int ?p"
+        by (rule next_no_alias[OF q_lt p_lt_src q_ne])
+    qed
+    show "\<And>h. h < hash_size \<Longrightarrow>
+        head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int ?p"
+    proof -
+      fix h
+      assume h_lt: "h < hash_size"
+      show "head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int ?p"
+        by (rule next_head_disjoint[OF h_lt p_lt_src])
+    qed
+    show "\<And>q. q < length src_bytes \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int ?bucket"
+    proof -
+      fix q
+      assume q_lt: "q < length src_bytes"
+      show "next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int ?bucket"
+        by (rule head_next_disjoint[OF q_lt bucket_lt])
+    qed
+    show "?p = unat i - 1"
+      by (rule p_unat)
+    show "?bucket = hash_bucket_spec src_bytes ?p"
+      by simp
+  qed
+  have final_state_eq:
+    "heap_w32_update
+        (\<lambda>ha. ha(head +\<^sub>p uint ((of_nat ?hash :: 32 word) && 0xFFFF) :=
+          ?p_word))
+        (heap_w32_update
+          (\<lambda>a. a(next_arr +\<^sub>p uint ?p_word :=
+            a (head +\<^sub>p uint ((of_nat ?hash :: 32 word) && 0xFFFF)))) st) =
+     heap_w32_update
+        (\<lambda>ha. ha(head +\<^sub>p int ?bucket := of_nat ?p))
+        (heap_w32_update
+          (\<lambda>a. a(next_arr +\<^sub>p int ?p :=
+            heap_w32 st (head +\<^sub>p int ?bucket))) st)"
+    apply (subst heap_w32_update_read_current[
+      where ptr = "next_arr +\<^sub>p uint ?p_word"
+        and src_ptr =
+          "head +\<^sub>p uint ((of_nat ?hash :: 32 word) && 0xFFFF)"
+        and s = st])
+    apply (simp only: h_eq p_uint h_uint p_word_of_nat)
+    done
+  have step_rel_c:
+    "source_index_heap_rel_from
+      (heap_w32_update
+        (\<lambda>ha. ha(head +\<^sub>p uint ((of_nat ?hash :: 32 word) && 0xFFFF) :=
+          ?p_word))
+        (heap_w32_update
+          (\<lambda>a. a(next_arr +\<^sub>p uint ?p_word :=
+            a (head +\<^sub>p uint ((of_nat ?hash :: 32 word) && 0xFFFF)))) st))
+      src_bytes (unat ?p_word) head next_arr"
+    by (subst final_state_eq, rule step_rel)
+  have hash_gets:
+    "gets_the (hash4' src ?p_word) \<bullet> st
+      \<lbrace>\<lambda>r t. t = st \<and> r = Result (of_nat ?hash :: 32 word)\<rbrace>"
+    unfolding gets_the_def
+    apply runs_to_vcg
+    using hash_res by simp
+  have heap_bytes_w32_update[simp]:
+    "heap_bytes (heap_w32_update f st') buf n = heap_bytes st' buf n"
+    for f st' buf n
+    by (simp add: heap_bytes_def)
+  let ?st_c =
+    "heap_w32_update
+      (\<lambda>ha. ha(head +\<^sub>p uint ((of_nat ?hash :: 32 word) && 0xFFFF) :=
+        ?p_word))
+      (heap_w32_update
+        (\<lambda>a. a(next_arr +\<^sub>p uint ?p_word :=
+          a (head +\<^sub>p uint ((of_nat ?hash :: 32 word) && 0xFFFF)))) st)"
+  have inv_after:
+    "build_index_fill_inv s0 src src_len src_bytes head next_arr ?p_word ?st_c"
+    unfolding build_index_fill_inv_def
+    apply (intro conjI)
+          apply (simp only: heap_typing_heap_w32_update typing)
+         apply (simp only: heap_bytes_w32_update bytes)
+        apply (rule len_src)
+       apply (rule src_long)
+      apply (rule src_len_word)
+     apply (rule p_le)
+    apply (rule step_rel_c)
+    done
+  have inv_after_bucket:
+    "build_index_fill_inv s0 src src_len src_bytes head next_arr ?p_word
+      (heap_w32_update
+        (\<lambda>ha. ha(head +\<^sub>p uint ?h := ?p_word))
+        (heap_w32_update
+          (\<lambda>a. a(next_arr +\<^sub>p uint ?p_word :=
+            a (head +\<^sub>p uint ?h))) st))"
+    using inv_after by (simp only: h_eq)
+  have body_after_hash_bucket:
+    "(do {
+        h <- return ?h;
+        guard (\<lambda>s. IS_VALID(32 word) s (next_arr +\<^sub>p uint ?p_word));
+        guard (\<lambda>s. IS_VALID(32 word) s (head +\<^sub>p uint h));
+        modify
+          (heap_w32_update
+            (\<lambda>a. a(next_arr +\<^sub>p uint ?p_word := a (head +\<^sub>p uint h))));
+        modify (heap_w32_update (\<lambda>ha. ha(head +\<^sub>p uint h := ?p_word)));
+        return ?p_word
+      } :: (32 word, lifted_globals) res_monad) \<bullet> st
+      \<lbrace>\<lambda>r t. r = Result ?p_word \<and>
+        build_index_fill_inv s0 src src_len src_bytes head next_arr ?p_word t\<rbrace>"
+    using next_guard head_guard inv_after_bucket
+    by (simp only: runs_to.rep_eq run_bind run_guard run_modify
+        Spec_Monad.return_bind
+        Spec_Monad.bind_post_state_pure_post_state1
+        Spec_Monad.holds_pure_post_state
+        holds_post_state_run_return
+        if_True case_prod_beta fst_conv snd_conv
+        Spec_Monad.case_exception_or_result_Result)
+  have body_after_hash:
+    "(do {
+        h <- return ((of_nat ?hash :: 32 word) && 0xFFFF);
+        guard (\<lambda>s. IS_VALID(32 word) s (next_arr +\<^sub>p uint ?p_word));
+        guard (\<lambda>s. IS_VALID(32 word) s (head +\<^sub>p uint h));
+        modify
+          (heap_w32_update
+            (\<lambda>a. a(next_arr +\<^sub>p uint ?p_word := a (head +\<^sub>p uint h))));
+        modify (heap_w32_update (\<lambda>ha. ha(head +\<^sub>p uint h := ?p_word)));
+        return ?p_word
+      } :: (32 word, lifted_globals) res_monad) \<bullet> st
+      \<lbrace>\<lambda>r t. r = Result ?p_word \<and>
+        build_index_fill_inv s0 src src_len src_bytes head next_arr ?p_word t\<rbrace>"
+    apply (simp only: h_eq)
+    apply (rule body_after_hash_bucket)
+    done
+  show ?thesis
+    apply runs_to_vcg
+    subgoal
+      apply (rule exI[where x = "(of_nat ?hash :: 32 word)"])
+      apply (intro conjI)
+       apply (rule hash_res)
+      apply (rule body_after_hash)
+      done
+    done
+qed
 
 lemma build_index_fill_loop_preserves_inv:
   fixes src :: "8 word ptr"
@@ -941,10 +1204,12 @@ lemma build_index_fill_loop_preserves_inv:
       "build_index_fill_inv s0 src src_len src_bytes head next_arr start st"
     and hashes: "build_index_hashes_ok s0 src src_len src_bytes"
     and head_valid:
-      "\<And>h st'. \<lbrakk>heap_typing st' = heap_typing s0; h < hash_size\<rbrakk> \<Longrightarrow>
+      "\<And>h (st' :: lifted_globals).
+        \<lbrakk>heap_typing st' = heap_typing s0; h < hash_size\<rbrakk> \<Longrightarrow>
         IS_VALID(32 word) st' (head +\<^sub>p int h)"
     and next_valid:
-      "\<And>p st'. \<lbrakk>heap_typing st' = heap_typing s0; p < length src_bytes\<rbrakk> \<Longrightarrow>
+      "\<And>p (st' :: lifted_globals).
+        \<lbrakk>heap_typing st' = heap_typing s0; p < length src_bytes\<rbrakk> \<Longrightarrow>
         IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
     and head_no_alias:
       "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
@@ -1022,10 +1287,12 @@ lemma build_index_fill_loop_source_index_heap_rel:
       "build_index_fill_inv s0 src src_len src_bytes head next_arr start st"
     and hashes: "build_index_hashes_ok s0 src src_len src_bytes"
     and head_valid:
-      "\<And>h st'. \<lbrakk>heap_typing st' = heap_typing s0; h < hash_size\<rbrakk> \<Longrightarrow>
+      "\<And>h (st' :: lifted_globals).
+        \<lbrakk>heap_typing st' = heap_typing s0; h < hash_size\<rbrakk> \<Longrightarrow>
         IS_VALID(32 word) st' (head +\<^sub>p int h)"
     and next_valid:
-      "\<And>p st'. \<lbrakk>heap_typing st' = heap_typing s0; p < length src_bytes\<rbrakk> \<Longrightarrow>
+      "\<And>p (st' :: lifted_globals).
+        \<lbrakk>heap_typing st' = heap_typing s0; p < length src_bytes\<rbrakk> \<Longrightarrow>
         IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
     and head_no_alias:
       "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
