@@ -846,6 +846,31 @@ lemma unat_0x10000_32[simp]:
   "unat (0x10000 :: 32 word) = hash_size"
   by (simp add: hash_size_def hash_bits_def)
 
+lemma build_index_start_unat:
+  fixes src_len :: "32 word"
+  assumes src_long: "4 \<le> unat src_len"
+  shows "unat (0xFFFFFFFD + src_len :: 32 word) =
+         unat src_len - min_match + 1"
+proof -
+  have three_le: "(3 :: 32 word) \<le> src_len"
+    using src_long by (simp add: word_le_nat_alt)
+  have start_eq: "(0xFFFFFFFD + src_len :: 32 word) = src_len - 3"
+    by simp
+  show ?thesis
+    using three_le src_long by (simp add: start_eq unat_sub min_match_def)
+qed
+
+lemma unat_minus_one_word:
+  fixes i :: "32 word"
+  assumes i_pos: "0 < i"
+  shows "unat (i - 1) = unat i - 1"
+proof -
+  have one_le: "(1 :: 32 word) \<le> i"
+    using i_pos by (simp add: word_le_nat_alt word_less_nat_alt)
+  show ?thesis
+    using one_le by (simp add: unat_sub)
+qed
+
 lemma build_index_head_init_loop:
   fixes head :: "32 word ptr"
   assumes head_valid:
