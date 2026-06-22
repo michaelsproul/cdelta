@@ -1169,6 +1169,52 @@ proof -
     done
 qed
 
+lemma build_index_hashes_okI:
+  fixes src :: "8 word ptr"
+  assumes src_valid:
+    "\<And>(off :: 32 word) (st' :: lifted_globals).
+      \<lbrakk>heap_typing st' = heap_typing s0; unat off < unat src_len\<rbrakk> \<Longrightarrow>
+      IS_VALID(8 word) st' (src +\<^sub>p uint off)"
+  shows "build_index_hashes_ok s0 src src_len
+    (heap_bytes s0 src (unat src_len))"
+  unfolding build_index_hashes_ok_def
+proof (intro allI impI)
+  fix p :: "32 word"
+  fix st :: lifted_globals
+  assume typing: "heap_typing st = heap_typing s0"
+  assume bytes:
+    "heap_bytes st src (unat src_len) = heap_bytes s0 src (unat src_len)"
+  assume len:
+    "unat p + min_match \<le> length (heap_bytes s0 src (unat src_len))"
+  have src_bytes_len:
+    "length (heap_bytes s0 src (unat src_len)) < 2 ^ 32"
+    using unat_lt2p[of src_len] by simp
+  have valid:
+    "\<And>k. k < min_match \<Longrightarrow>
+      IS_VALID(8 word) st (src +\<^sub>p uint (p + of_nat k :: 32 word))"
+  proof -
+    fix k
+    assume k_lt: "k < min_match"
+    have no_overflow: "unat p + unat (4 :: 32 word) < 2 ^ 32"
+      using len src_bytes_len by (simp add: min_match_def)
+    have k_unat:
+      "unat (p + of_nat k :: 32 word) = unat p + k"
+      by (rule unat_add_of_nat_index[where sz = "4", OF _ no_overflow])
+         (use k_lt in \<open>simp add: min_match_def\<close>)
+    have off_lt: "unat (p + of_nat k :: 32 word) < unat src_len"
+      using len k_lt k_unat by (simp add: min_match_def)
+    show "IS_VALID(8 word) st
+      (src +\<^sub>p uint (p + of_nat k :: 32 word))"
+      by (rule src_valid[
+          where st' = st and off = "(p + of_nat k :: 32 word)",
+          OF typing off_lt])
+  qed
+  show "hash4' src p st =
+    Some (of_nat
+      (hash4_spec (heap_bytes s0 src (unat src_len)) (unat p)) :: 32 word)"
+    by (rule hash4'_heap_bytes[OF bytes len src_bytes_len valid])
+qed
+
 definition build_index_fill_inv ::
   "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow> byte list \<Rightarrow>
     32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow> 32 word \<Rightarrow> lifted_globals \<Rightarrow> bool" where
