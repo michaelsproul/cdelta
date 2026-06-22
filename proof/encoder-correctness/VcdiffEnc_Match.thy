@@ -3316,6 +3316,10 @@ proof -
     show "match_valid ?src_bytes ?tgt_bytes (unat tp) (unat cand) (unat l)"
       by (rule common_prefix'_match_valid_heap_bytes[OF cp cand_le tp_le])
   qed
+  have next_cand_ok:
+    "\<And>cand. \<lbrakk>?cand_ok cand; cand \<noteq> no_entry32\<rbrakk> \<Longrightarrow>
+      ?cand_ok (heap_w32 s (next_arr +\<^sub>p uint cand))"
+    sorry
   have loop_preserves:
     "\<And>init. (case init of (best_len, best_pos, cand, checked) \<Rightarrow>
         match_valid ?src_bytes ?tgt_bytes (unat tp)
