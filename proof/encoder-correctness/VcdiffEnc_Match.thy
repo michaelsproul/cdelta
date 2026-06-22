@@ -900,6 +900,35 @@ qed
 
 context vcdiff_enc_global_addresses begin
 
+lemma source_index_heap_rel_take_chain_member_word_le:
+  fixes cand src_len :: "32 word"
+  assumes rel:
+    "source_index_heap_rel s (heap_bytes s src (unat src_len)) head_arr next_arr"
+      and h_lt: "h < hash_size"
+      and cand_in: "unat cand \<in> set (match_word_chain
+        (heap_w32_list s next_arr (unat src_len))
+        (min n (length (index_bucket_spec
+          (build_index_spec (heap_bytes s src (unat src_len))) h)))
+        (heap_w32 s (head_arr +\<^sub>p int h)))"
+  shows "cand \<le> src_len"
+proof -
+  have cand_in':
+    "unat cand \<in> set (match_word_chain
+      (heap_w32_list s next_arr (length (heap_bytes s src (unat src_len))))
+      (min n (length (index_bucket_spec
+        (build_index_spec (heap_bytes s src (unat src_len))) h)))
+      (heap_w32 s (head_arr +\<^sub>p int h)))"
+    using cand_in by simp
+  have member:
+    "unat cand + min_match \<le> length (heap_bytes s src (unat src_len)) \<and>
+     hash_bucket_spec (heap_bytes s src (unat src_len)) (unat cand) = h"
+    by (rule source_index_heap_rel_take_chain_member_sound[OF rel h_lt cand_in'])
+  have "unat cand \<le> unat src_len"
+    using member by simp
+  thus ?thesis
+    by (simp add: word_le_nat_alt)
+qed
+
 lemma hash_size_0x10000[simp]:
   "hash_size = 0x10000"
   by (simp add: hash_size_def hash_bits_def)
