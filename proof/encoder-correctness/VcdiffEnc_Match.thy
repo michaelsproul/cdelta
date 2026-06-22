@@ -830,6 +830,49 @@ proof -
     by (auto dest: in_set_takeD)
 qed
 
+lemma source_index_heap_rel_take_bucket_chain:
+  assumes rel: "source_index_heap_rel s src head_arr next_arr"
+      and h_lt: "h < hash_size"
+  shows "match_word_chain (heap_w32_list s next_arr (length src))
+           (min n (length (index_bucket_spec (build_index_spec src) h)))
+           (heap_w32 s (head_arr +\<^sub>p int h)) =
+         take n (index_bucket_spec (build_index_spec src) h)"
+proof -
+  have arrays:
+    "source_index_arrays_rel src
+      (heap_w32_list s head_arr hash_size)
+      (heap_w32_list s next_arr (length src))"
+    using rel by (simp add: source_index_heap_rel_def)
+  have chain:
+    "match_word_chain (heap_w32_list s next_arr (length src))
+       (min n (length (index_bucket_spec (build_index_spec src) h)))
+       (heap_w32_list s head_arr hash_size ! h) =
+     take n (index_bucket_spec (build_index_spec src) h)"
+    by (rule source_index_arrays_rel_take_bucket_chain[OF arrays h_lt])
+  thus ?thesis
+    using h_lt by simp
+qed
+
+lemma source_index_heap_rel_take_chain_member_sound:
+  assumes rel: "source_index_heap_rel s src head_arr next_arr"
+      and h_lt: "h < hash_size"
+      and p_in: "p \<in> set (match_word_chain
+        (heap_w32_list s next_arr (length src))
+        (min n (length (index_bucket_spec (build_index_spec src) h)))
+        (heap_w32 s (head_arr +\<^sub>p int h)))"
+  shows "p + min_match \<le> length src \<and> hash_bucket_spec src p = h"
+proof -
+  have chain:
+    "match_word_chain (heap_w32_list s next_arr (length src))
+       (min n (length (index_bucket_spec (build_index_spec src) h)))
+       (heap_w32 s (head_arr +\<^sub>p int h)) =
+     take n (index_bucket_spec (build_index_spec src) h)"
+    by (rule source_index_heap_rel_take_bucket_chain[OF rel h_lt])
+  show ?thesis
+    using p_in chain match_build_index_spec_bucket_sound[of p src h]
+    by (auto dest: in_set_takeD)
+qed
+
 lemma source_index_arrays_rel_short:
   assumes src_short: "length src < min_match"
       and heads_len: "length heads = hash_size"
