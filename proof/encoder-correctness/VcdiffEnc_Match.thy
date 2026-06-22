@@ -2589,6 +2589,80 @@ proof -
     by simp
 qed
 
+lemma common_prefix'_match_valid_heap_bytes:
+  fixes src tgt :: "8 word ptr"
+    and cand src_len tp tgt_len l :: "32 word"
+  assumes cp: "common_prefix' src cand src_len tgt tp tgt_len s = Some l"
+      and cand_le: "cand \<le> src_len"
+      and tp_le: "tp \<le> tgt_len"
+  shows "match_valid
+    (heap_bytes s src (unat src_len))
+    (heap_bytes s tgt (unat tgt_len))
+    (unat tp) (unat cand) (unat l)"
+proof -
+  let ?limit =
+    "if src_len - cand < tgt_len - tp then src_len - cand else tgt_len - tp"
+  have sound:
+    "unat l \<le> unat ?limit \<and>
+     (\<forall>i < unat l.
+       heap_w8 s (src +\<^sub>p uint (cand + of_nat i :: 32 word)) =
+       heap_w8 s (tgt +\<^sub>p uint (tp + of_nat i :: 32 word)))"
+    using common_prefix'_result_sound_word[OF cp]
+    by simp
+  have limit_src: "unat ?limit \<le> unat src_len - unat cand"
+  proof (cases "src_len - cand < tgt_len - tp")
+    case True
+    thus ?thesis
+      using cand_le by (simp add: unat_sub word_le_nat_alt)
+  next
+    case False
+    hence "tgt_len - tp \<le> src_len - cand"
+      by simp
+    hence "unat (tgt_len - tp) \<le> unat (src_len - cand)"
+      by (simp add: word_le_nat_alt)
+    also have "... = unat src_len - unat cand"
+      using cand_le by (simp add: unat_sub word_le_nat_alt)
+    finally show ?thesis
+      using False by simp
+  qed
+  have limit_tgt: "unat ?limit \<le> unat tgt_len - unat tp"
+  proof (cases "src_len - cand < tgt_len - tp")
+    case True
+    hence "src_len - cand \<le> tgt_len - tp"
+      by simp
+    hence "unat (src_len - cand) \<le> unat (tgt_len - tp)"
+      by (simp add: word_le_nat_alt)
+    also have "... = unat tgt_len - unat tp"
+      using tp_le by (simp add: unat_sub word_le_nat_alt)
+    finally show ?thesis
+      using True by simp
+  next
+    case False
+    thus ?thesis
+      using tp_le by (simp add: unat_sub word_le_nat_alt)
+  qed
+  have cand_nat_le: "unat cand \<le> unat src_len"
+    using cand_le by (simp add: word_le_nat_alt)
+  have tp_nat_le: "unat tp \<le> unat tgt_len"
+    using tp_le by (simp add: word_le_nat_alt)
+  have l_src_diff: "unat l \<le> unat src_len - unat cand"
+    using sound limit_src by linarith
+  have l_tgt_diff: "unat l \<le> unat tgt_len - unat tp"
+    using sound limit_tgt by linarith
+  have src_bound: "unat cand + unat l \<le> unat src_len"
+    using cand_nat_le l_src_diff by linarith
+  have tgt_bound: "unat tp + unat l \<le> unat tgt_len"
+    using tp_nat_le l_tgt_diff by linarith
+  have src_no_overflow: "unat cand + unat l < 2 ^ 32"
+    using le_less_trans[OF src_bound unat_lt2p[of src_len]] by simp
+  have tgt_no_overflow: "unat tp + unat l < 2 ^ 32"
+    using le_less_trans[OF tgt_bound unat_lt2p[of tgt_len]] by simp
+  show ?thesis
+    by (rule match_valid_heap_bytes_wordI[OF src_bound tgt_bound
+          src_no_overflow tgt_no_overflow])
+       (use sound in auto)
+qed
+
 lemma find_best_match'_early_zero:
   assumes "src_len < 4 \<or> tgt_len - tp < 4"
   shows "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
