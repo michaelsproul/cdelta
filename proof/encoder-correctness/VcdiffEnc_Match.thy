@@ -532,7 +532,7 @@ lemma source_index_bucket_from_member_bounds:
 lemma source_index_arrays_rel_from_head_wf:
   assumes rel: "source_index_arrays_rel_from src start heads nexts"
       and h_lt: "h < hash_size"
-      and src_len_word: "length src < unat (no_entry32 :: 32 word)"
+      and src_len_word: "length src \<le> unat (no_entry32 :: 32 word)"
   shows "heads ! h = no_entry32 \<or>
          unat (heads ! h) + min_match \<le> length src"
 proof -
@@ -559,8 +559,10 @@ proof -
       using source_index_bucket_from_member_bounds[OF hd_in] by simp
     have hd_lt_src: "hd ?bucket < length src"
       using hd_bound by (simp add: min_match_def)
+    have hd_lt_no_entry: "hd ?bucket < unat (no_entry32 :: 32 word)"
+      using hd_bound src_len_word by (simp add: min_match_def)
     have unat_head: "unat (of_nat (hd ?bucket) :: 32 word) = hd ?bucket"
-      using hd_lt_src src_len_word by (simp add: unat_of_nat_eq)
+      using hd_lt_no_entry by (simp add: unat_of_nat_eq)
     show ?thesis
       using head_eq hd_bound unat_head by simp
   qed
@@ -569,7 +571,7 @@ qed
 lemma source_index_heap_rel_from_head_wf:
   assumes rel: "source_index_heap_rel_from s src start head_arr next_arr"
       and h_lt: "h < hash_size"
-      and src_len_word: "length src < unat (no_entry32 :: 32 word)"
+      and src_len_word: "length src \<le> unat (no_entry32 :: 32 word)"
   shows "heap_w32 s (head_arr +\<^sub>p int h) = no_entry32 \<or>
          unat (heap_w32 s (head_arr +\<^sub>p int h)) + min_match \<le> length src"
 proof -
@@ -1697,8 +1699,8 @@ proof -
   have head_value_wf:
     "heap_w32 st (head +\<^sub>p int ?bucket) = no_entry32 \<or>
      unat (heap_w32 st (head +\<^sub>p int ?bucket)) + min_match \<le> length src_bytes"
-    by (rule source_index_heap_rel_from_head_wf[
-        OF rel bucket_lt src_len_word])
+    apply (rule source_index_heap_rel_from_head_wf[OF rel bucket_lt])
+    using src_len_word by simp
   have step_nexts_wf:
     "source_index_heap_nexts_wf_from ?s_head src_bytes ?p next_arr"
   proof (rule source_index_heap_nexts_wf_from_step[
@@ -3264,7 +3266,102 @@ lemma find_best_match'_match_valid_heap_bytes_source_index_nonearly:
     (heap_bytes s src (unat src_len))
     (heap_bytes s tgt (unat tgt_len))
     (unat tp) (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
-  sorry
+proof -
+  let ?src_bytes = "heap_bytes s src (unat src_len)"
+  let ?tgt_bytes = "heap_bytes s tgt (unat tgt_len)"
+  let ?cand_ok = "\<lambda>cand :: 32 word.
+    cand = no_entry32 \<or> unat cand + min_match \<le> length ?src_bytes"
+  let ?C = "\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+                 cand :: 32 word, checked :: 32 word) s.
+      cand \<noteq> no_entry32 \<and> checked < 0x10"
+  let ?B = "\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+                 cand :: 32 word, checked :: 32 word).
+      do {
+        (best_len, best_pos) <-
+          ocondition (\<lambda>s. cand + 4 \<le> src_len)
+            (do {
+              l <- common_prefix' src cand src_len tgt tp tgt_len;
+              oreturn
+                (if 4 \<le> l \<and> best_len < l then (l, cand)
+                 else (best_len, best_pos))
+            })
+            (oreturn (best_len, best_pos));
+        oguard (\<lambda>s. IS_VALID(32 word) s (next_arr +\<^sub>p uint cand));
+        ogets
+          (\<lambda>s. (best_len, best_pos,
+                heap_w32 s (next_arr +\<^sub>p uint cand), checked + 1))
+      }"
+  have src_len_word_le:
+    "length ?src_bytes \<le> unat (no_entry32 :: 32 word)"
+    using unat_lt2p[of src_len] by simp
+  have rel_from:
+    "source_index_heap_rel_from s ?src_bytes 0 head_arr next_arr"
+    using rel by (simp add: source_index_heap_rel_from_0)
+  have initial_cand_ok:
+    "\<And>hv. ?cand_ok (heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF)))"
+    sorry
+  have common_prefix_valid:
+    "\<And>cand l. \<lbrakk>?cand_ok cand; cand \<noteq> no_entry32;
+        common_prefix' src cand src_len tgt tp tgt_len s = Some l\<rbrakk>
+      \<Longrightarrow> match_valid ?src_bytes ?tgt_bytes (unat tp) (unat cand) (unat l)"
+    sorry
+  have loop_preserves:
+    "\<And>init. (case init of (best_len, best_pos, cand, checked) \<Rightarrow>
+        match_valid ?src_bytes ?tgt_bytes (unat tp)
+          (unat best_pos) (unat best_len) \<and> ?cand_ok cand) \<Longrightarrow>
+      case owhile ?C ?B init s of
+        None \<Rightarrow> True
+      | Some (best_len, best_pos, cand, checked) \<Rightarrow>
+          match_valid ?src_bytes ?tgt_bytes (unat tp)
+            (unat best_pos) (unat best_len)"
+    sorry
+  have loop_valid_some:
+    "\<And>(init :: 32 word \<times> 32 word \<times> 32 word \<times> 32 word)
+        (best_len :: 32 word) (best_pos :: 32 word)
+        (cand :: 32 word) (checked :: 32 word).
+      owhile ?C ?B init s =
+        Some (best_len, best_pos, cand, checked) \<Longrightarrow>
+      (case init of (init_len, init_pos, init_cand, init_checked) \<Rightarrow>
+        match_valid ?src_bytes ?tgt_bytes (unat tp)
+          (unat init_pos) (unat init_len) \<and> ?cand_ok init_cand) \<Longrightarrow>
+      match_valid ?src_bytes ?tgt_bytes (unat tp)
+        (unat best_pos) (unat best_len)"
+  proof -
+    fix init :: "32 word \<times> 32 word \<times> 32 word \<times> 32 word"
+    fix best_len best_pos cand checked :: "32 word"
+    assume ow:
+      "owhile ?C ?B init s = Some (best_len, best_pos, cand, checked)"
+    assume init_inv:
+      "case init of (init_len, init_pos, init_cand, init_checked) \<Rightarrow>
+        match_valid ?src_bytes ?tgt_bytes (unat tp)
+          (unat init_pos) (unat init_len) \<and> ?cand_ok init_cand"
+    have "case owhile ?C ?B init s of
+        None \<Rightarrow> True
+      | Some (best_len, best_pos, cand, checked) \<Rightarrow>
+          match_valid ?src_bytes ?tgt_bytes (unat tp)
+            (unat best_pos) (unat best_len)"
+      using loop_preserves[OF init_inv] .
+    thus "match_valid ?src_bytes ?tgt_bytes (unat tp)
+        (unat best_pos) (unat best_len)"
+      using ow by simp
+  qed
+  have loop_valid_zero_some:
+    "\<And>(cand0 :: 32 word) (best_len :: 32 word) (best_pos :: 32 word)
+        (cand :: 32 word) (checked :: 32 word).
+      ?cand_ok cand0 \<Longrightarrow>
+      owhile ?C ?B
+        ((0 :: 32 word), ((0 :: 32 word), (cand0, (0 :: 32 word)))) s =
+        Some (best_len, best_pos, cand, checked) \<Longrightarrow>
+      match_valid ?src_bytes ?tgt_bytes (unat tp)
+        (unat best_pos) (unat best_len)"
+    apply (rule loop_valid_some)
+     apply assumption
+    apply simp
+    done
+  show ?thesis
+    using result initial_cand_ok loop_valid_zero_some
+    sorry
+qed
 
 lemma find_best_match'_match_valid_heap_bytes_source_index:
   fixes src tgt :: "8 word ptr"
