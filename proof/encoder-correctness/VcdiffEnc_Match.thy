@@ -1954,9 +1954,10 @@ lemma build_index'_source_index_heap_rel:
     and head next_arr :: "32 word ptr"
   assumes src_len_word:
         "unat src_len < unat (no_entry32 :: 32 word)"
-      and hashes:
-        "build_index_hashes_ok s src src_len
-          (heap_bytes s src (unat src_len))"
+      and src_valid:
+        "\<And>(off :: 32 word) (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; unat off < unat src_len\<rbrakk> \<Longrightarrow>
+          IS_VALID(8 word) st' (src +\<^sub>p uint off)"
       and head_valid:
         "\<And>h (st' :: lifted_globals).
           \<lbrakk>heap_typing st' = heap_typing s; h < hash_size\<rbrakk> \<Longrightarrow>
@@ -1981,7 +1982,13 @@ lemma build_index'_source_index_heap_rel:
     \<lbrace> \<lambda>r t. r = Result () \<and>
         source_index_heap_rel t (heap_bytes s src (unat src_len)) head next_arr
         \<and> heap_typing t = heap_typing s \<rbrace>"
-proof (cases "src_len < (4 :: 32 word)")
+proof -
+  have hashes:
+    "build_index_hashes_ok s src src_len
+      (heap_bytes s src (unat src_len))"
+    by (rule build_index_hashes_okI[OF src_valid])
+  show ?thesis
+  proof (cases "src_len < (4 :: 32 word)")
   case True
   have head_valid_word:
     "\<And>idx. idx < (0x10000 :: 32 word) \<Longrightarrow>
@@ -2006,6 +2013,7 @@ next
     by (rule build_index'_long_source_index_heap_rel[
         OF False src_len_word hashes head_valid next_valid head_no_alias
           next_no_alias next_head_disjoint head_next_disjoint])
+  qed
 qed
 
 lemma match_valid_heap_bytesI:
