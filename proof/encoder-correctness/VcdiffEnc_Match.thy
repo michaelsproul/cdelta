@@ -2800,7 +2800,31 @@ proof -
                   oguard_def K_def, simplified o_def])
       apply assumption
       done
-    done
+	    done
+qed
+
+lemma find_best_match'_match_valid_heap_bytes_if_common_prefix_cand_le:
+  fixes src tgt :: "8 word ptr"
+    and src_len tgt_len tp :: "32 word"
+  assumes common_prefix_cand_le:
+    "\<And>cand l. common_prefix' src cand src_len tgt tp tgt_len s = Some l \<Longrightarrow>
+       cand \<le> src_len"
+      and tp_le: "tp \<le> tgt_len"
+      and result:
+    "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s = Some m"
+  shows "match_valid
+    (heap_bytes s src (unat src_len))
+    (heap_bytes s tgt (unat tgt_len))
+    (unat tp) (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
+proof (rule find_best_match'_match_valid_if_common_prefix[OF _ result])
+  fix cand l
+  assume cp: "common_prefix' src cand src_len tgt tp tgt_len s = Some l"
+  show "match_valid
+    (heap_bytes s src (unat src_len))
+    (heap_bytes s tgt (unat tgt_len))
+    (unat tp) (unat cand) (unat l)"
+    by (rule common_prefix'_match_valid_heap_bytes[
+          OF cp common_prefix_cand_le[OF cp] tp_le])
 qed
 
 end
