@@ -898,6 +898,277 @@ definition build_index_hashes_ok ::
        hash4' src p st =
          Some (of_nat (hash4_spec src_bytes (unat p)) :: 32 word))"
 
+lemma word32_or_disjoint_unat:
+  fixes x y :: "32 word"
+  assumes disjoint: "x AND y = 0"
+      and no_overflow: "unat x + unat y < 2 ^ 32"
+  shows "unat (x OR y) = unat x + unat y"
+proof -
+  have sum_eq: "x + y = x OR y"
+    using disjoint by (metis add.left_neutral word_plus_and_or)
+  have "unat (x + y) = unat x + unat y"
+    using no_overflow by (simp add: unat_plus_if_size word_size)
+  thus ?thesis
+    using sum_eq by simp
+qed
+
+lemma hash4_pack_word:
+  fixes b0 b1 b2 b3 :: "8 word"
+  shows "(((ucast b0 :: 32 word) ||
+            (ucast b1 << 8)) ||
+           (ucast b2 << 16) ||
+           (ucast b3 << 24)) =
+         (of_nat (unat b0 + 256 * unat b1 +
+           65536 * unat b2 + 16777216 * unat b3) :: 32 word)"
+proof -
+  let ?w0 = "(ucast b0 :: 32 word)"
+  let ?w1 = "(ucast b1 :: 32 word) << 8"
+  let ?w2 = "(ucast b2 :: 32 word) << 16"
+  let ?w3 = "(ucast b3 :: 32 word) << 24"
+  let ?sum = "unat b0 + 256 * unat b1 +
+    65536 * unat b2 + 16777216 * unat b3"
+
+  have b0_le: "unat b0 \<le> 255"
+    using unat_lt2p[of b0] by simp
+  have b1_le: "unat b1 \<le> 255"
+    using unat_lt2p[of b1] by simp
+  have b2_le: "unat b2 \<le> 255"
+    using unat_lt2p[of b2] by simp
+  have b3_le: "unat b3 \<le> 255"
+    using unat_lt2p[of b3] by simp
+  have sum_bound: "?sum < 2 ^ 32"
+  proof -
+    have "?sum \<le> 4294967295"
+      using b0_le b1_le b2_le b3_le by linarith
+    thus ?thesis
+      by simp
+  qed
+
+  have u0: "unat ?w0 = unat b0"
+    by (simp add: unat_ucast_upcast is_up)
+  have u1: "unat ?w1 = 256 * unat b1"
+  proof -
+    have step: "unat ?w1 = unat b1 * 256 mod 4294967296"
+      by (simp add: shiftl_t2n unat_word_ariths(2)
+          unat_ucast_upcast is_up mult.commute)
+    have "unat b1 * 256 < 4294967296"
+      using b1_le by linarith
+    thus ?thesis
+      using step by (simp add: mult.commute)
+  qed
+  have u2: "unat ?w2 = 65536 * unat b2"
+  proof -
+    have step: "unat ?w2 = unat b2 * 65536 mod 4294967296"
+      by (simp add: shiftl_t2n unat_word_ariths(2)
+          unat_ucast_upcast is_up mult.commute)
+    have "unat b2 * 65536 < 4294967296"
+      using b2_le by linarith
+    thus ?thesis
+      using step by (simp add: mult.commute)
+  qed
+  have u3: "unat ?w3 = 16777216 * unat b3"
+  proof -
+    have step: "unat ?w3 = unat b3 * 16777216 mod 4294967296"
+      by (simp add: shiftl_t2n unat_word_ariths(2)
+          unat_ucast_upcast is_up mult.commute)
+    have "unat b3 * 16777216 < 4294967296"
+      using b3_le by linarith
+    thus ?thesis
+      using step by (simp add: mult.commute)
+  qed
+
+  have dis01: "?w0 AND ?w1 = 0"
+    by (intro word_eqI) (auto simp: bit_simps word_size dest: bit_imp_le_length)
+  have no01: "unat ?w0 + unat ?w1 < 2 ^ 32"
+  proof -
+    have "unat ?w0 + unat ?w1 \<le> 65535"
+      using u0 u1 b0_le b1_le by linarith
+    thus ?thesis
+      by simp
+  qed
+  have u01: "unat (?w0 OR ?w1) = unat b0 + 256 * unat b1"
+    using word32_or_disjoint_unat[OF dis01 no01] u0 u1 by simp
+
+  have dis012: "(?w0 OR ?w1) AND ?w2 = 0"
+    by (intro word_eqI) (auto simp: bit_simps word_size dest: bit_imp_le_length)
+  have no012: "unat (?w0 OR ?w1) + unat ?w2 < 2 ^ 32"
+  proof -
+    have "unat (?w0 OR ?w1) + unat ?w2 \<le> 16777215"
+      using u01 u2 b0_le b1_le b2_le by linarith
+    thus ?thesis
+      by simp
+  qed
+  have u012:
+    "unat ((?w0 OR ?w1) OR ?w2) =
+      unat b0 + 256 * unat b1 + 65536 * unat b2"
+    using word32_or_disjoint_unat[OF dis012 no012] u01 u2 by simp
+
+  have dis0123: "((?w0 OR ?w1) OR ?w2) AND ?w3 = 0"
+    by (intro word_eqI) (auto simp: bit_simps word_size dest: bit_imp_le_length)
+  have no0123: "unat ((?w0 OR ?w1) OR ?w2) + unat ?w3 < 2 ^ 32"
+    using u012 u3 sum_bound by simp
+  have u0123: "unat (((?w0 OR ?w1) OR ?w2) OR ?w3) = ?sum"
+    using word32_or_disjoint_unat[OF dis0123 no0123] u012 u3 by simp
+
+  have "(((?w0 OR ?w1) OR ?w2) OR ?w3) =
+      (of_nat (unat (((?w0 OR ?w1) OR ?w2) OR ?w3)) :: 32 word)"
+    by simp
+  also have "\<dots> = (of_nat ?sum :: 32 word)"
+    using u0123 by simp
+  finally have left_assoc:
+    "(((?w0 OR ?w1) OR ?w2) OR ?w3) = (of_nat ?sum :: 32 word)" .
+  thus ?thesis
+    by (simp add: word_bw_assocs)
+qed
+
+lemma hash4_pack_mul_word:
+  fixes n0 n1 n2 n3 :: nat
+  shows "((of_nat (n0 + 256 * n1 + 65536 * n2 + 16777216 * n3) :: 32 word) *
+          0x9E3779B1) =
+         (of_nat (((n0 + 256 * n1 + 65536 * n2 + 16777216 * n3) *
+           2654435761) mod 4294967296) :: 32 word)"
+proof -
+  let ?a = "n0 + 256 * n1 + 65536 * n2 + 16777216 * n3"
+  have mod_word:
+    "(of_nat ((?a * 2654435761) mod 4294967296) :: 32 word) =
+     of_nat (?a * 2654435761)"
+  proof (rule word_of_nat_eq_iff[THEN iffD2])
+    show "take_bit LENGTH(32) ((?a * 2654435761) mod 4294967296) =
+      take_bit LENGTH(32) (?a * 2654435761)"
+      by (simp add: take_bit_eq_mod)
+  qed
+  have "((of_nat ?a :: 32 word) * 0x9E3779B1) =
+      (of_nat (?a * 2654435761) :: 32 word)"
+    by simp
+  also have "\<dots> = (of_nat ((?a * 2654435761) mod 4294967296) :: 32 word)"
+    using mod_word by simp
+  finally show ?thesis .
+qed
+
+lemma hash4'_heap_bytes:
+  fixes src :: "8 word ptr"
+    and p :: "32 word"
+  assumes bytes: "heap_bytes st src n = src_bytes"
+      and len: "unat p + min_match \<le> length src_bytes"
+      and src_bytes_len: "length src_bytes < 2 ^ 32"
+      and valid:
+        "\<And>k. k < min_match \<Longrightarrow>
+          IS_VALID(8 word) st (src +\<^sub>p uint (p + of_nat k :: 32 word))"
+  shows "hash4' src p st =
+    Some (of_nat (hash4_spec src_bytes (unat p)) :: 32 word)"
+proof -
+  have k_unat:
+    "\<And>k. k < min_match \<Longrightarrow>
+      unat (p + of_nat k :: 32 word) = unat p + k"
+  proof -
+    fix k
+    assume k_lt: "k < min_match"
+    have no_overflow: "unat p + unat (4 :: 32 word) < 2 ^ 32"
+      using len src_bytes_len by (simp add: min_match_def)
+    show "unat (p + of_nat k :: 32 word) = unat p + k"
+      by (rule unat_add_of_nat_index[where sz = "4", OF _ no_overflow])
+         (use k_lt in \<open>simp add: min_match_def\<close>)
+  qed
+  have idx_lt:
+    "\<And>k. k < min_match \<Longrightarrow> unat p + k < length src_bytes"
+    using len by (simp add: min_match_def)
+  have byte_eq:
+    "\<And>k. k < min_match \<Longrightarrow>
+      heap_w8 st (src +\<^sub>p uint (p + of_nat k :: 32 word)) =
+      src_bytes ! (unat p + k)"
+  proof -
+    fix k
+    assume k_lt: "k < min_match"
+    have n_eq: "n = length src_bytes"
+    proof -
+      have "length (heap_bytes st src n) = length src_bytes"
+        using bytes by simp
+      thus ?thesis
+        by simp
+    qed
+    have idx: "unat (p + of_nat k :: 32 word) = unat p + k"
+      by (rule k_unat[OF k_lt])
+    have "src_bytes ! (unat p + k) =
+      heap_w8 st (src +\<^sub>p int (unat p + k))"
+      using heap_bytes_nth[of "unat p + k" n st src] idx_lt[OF k_lt] bytes n_eq
+      by simp
+    thus "heap_w8 st (src +\<^sub>p uint (p + of_nat k :: 32 word)) =
+      src_bytes ! (unat p + k)"
+      by (simp only: idx[symmetric] uint_nat)
+  qed
+  have valid0: "IS_VALID(8 word) st (src +\<^sub>p uint p)"
+    using valid[of 0] by (simp add: min_match_def)
+  have valid1: "IS_VALID(8 word) st (src +\<^sub>p uint (p + 1))"
+    using valid[of 1] by (simp add: min_match_def)
+  have valid2: "IS_VALID(8 word) st (src +\<^sub>p uint (p + 2))"
+    using valid[of 2] by (simp add: min_match_def)
+  have valid3: "IS_VALID(8 word) st (src +\<^sub>p uint (p + 3))"
+    using valid[of 3] by (simp add: min_match_def)
+  have byte0:
+    "heap_w8 st (src +\<^sub>p uint p) = src_bytes ! unat p"
+    using byte_eq[of 0] by (simp add: min_match_def)
+  have byte1:
+    "heap_w8 st (src +\<^sub>p uint (p + 1)) = src_bytes ! Suc (unat p)"
+    using byte_eq[of 1] by (simp add: min_match_def)
+  have byte2:
+    "heap_w8 st (src +\<^sub>p uint (p + 2)) = src_bytes ! Suc (Suc (unat p))"
+    using byte_eq[of 2] by (simp add: min_match_def)
+  have byte3:
+    "heap_w8 st (src +\<^sub>p uint (p + 3)) = src_bytes ! (unat p + 3)"
+    using byte_eq[of 3] by (simp add: min_match_def)
+  let ?b0 = "src_bytes ! unat p"
+  let ?b1 = "src_bytes ! Suc (unat p)"
+  let ?b2 = "src_bytes ! Suc (Suc (unat p))"
+  let ?b3 = "src_bytes ! (unat p + 3)"
+  let ?packed = "unat ?b0 + 256 * unat ?b1 +
+    65536 * unat ?b2 + 16777216 * unat ?b3"
+  have spec_eq:
+    "hash4_spec src_bytes (unat p) =
+      (?packed * 2654435761) mod 4294967296"
+    unfolding hash4_spec_def by simp
+  have pack_eq:
+    "((((ucast ?b0 :: 32 word) ||
+        (ucast ?b1 << 8)) ||
+       (ucast ?b2 << 16)) ||
+      (ucast ?b3 << 24)) =
+     (of_nat ?packed :: 32 word)"
+    using hash4_pack_word[of ?b0 ?b1 ?b2 ?b3]
+    by (simp only: word_bw_assocs)
+  have mul_eq:
+    "((of_nat ?packed :: 32 word) * 0x9E3779B1) =
+     (of_nat ((?packed * 2654435761) mod 4294967296) :: 32 word)"
+    by (rule hash4_pack_mul_word)
+  have hash_eq:
+    "((((ucast (src_bytes ! unat p) :: 32 word) ||
+        (ucast (src_bytes ! Suc (unat p)) << 8)) ||
+       (ucast (src_bytes ! Suc (Suc (unat p))) << 16)) ||
+      (ucast (src_bytes ! (unat p + 3)) << 24)) *
+     0x9E3779B1 =
+     (of_nat (hash4_spec src_bytes (unat p)) :: 32 word)"
+  proof -
+    have "((((ucast ?b0 :: 32 word) ||
+        (ucast ?b1 << 8)) ||
+       (ucast ?b2 << 16)) ||
+      (ucast ?b3 << 24)) *
+      0x9E3779B1 =
+      (of_nat ?packed :: 32 word) * 0x9E3779B1"
+      using pack_eq by simp
+    also have "\<dots> =
+      (of_nat ((?packed * 2654435761) mod 4294967296) :: 32 word)"
+      by (rule mul_eq)
+    also have "\<dots> =
+      (of_nat (hash4_spec src_bytes (unat p)) :: 32 word)"
+      using spec_eq by simp
+    finally show ?thesis .
+  qed
+  show ?thesis
+    unfolding hash4'_def
+    apply (simp add: obind_def oguard_def ogets_def
+        valid0 valid1 valid2 valid3 byte0 byte1 byte2 byte3 min_match_def
+        hash_eq)
+    done
+qed
+
 definition build_index_fill_inv ::
   "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow> byte list \<Rightarrow>
     32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow> 32 word \<Rightarrow> lifted_globals \<Rightarrow> bool" where
