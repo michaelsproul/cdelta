@@ -332,6 +332,90 @@ qed
 
 context vcdiff_enc_global_addresses begin
 
+lemma hash_size_0x10000[simp]:
+  "hash_size = 0x10000"
+  by (simp add: hash_size_def hash_bits_def)
+
+lemma unat_0x10000_32[simp]:
+  "unat (0x10000 :: 32 word) = hash_size"
+  by (simp add: hash_size_def hash_bits_def)
+
+lemma build_index_head_init_loop:
+  fixes head :: "32 word ptr"
+  assumes head_valid:
+    "\<And>i. i < (0x10000 :: 32 word) \<Longrightarrow>
+      IS_VALID(32 word) s (head +\<^sub>p uint i)"
+  shows "(whileLoop (\<lambda>(idx :: 32 word) st. idx < 0x10000)
+      (\<lambda>idx. do {
+          guard (\<lambda>st. IS_VALID(32 word) st (head +\<^sub>p uint idx));
+          modify (heap_w32_update
+            (\<lambda>h. h(head +\<^sub>p uint idx := no_entry32)));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+    \<lbrace> \<lambda>r t. r = Result (0x10000 :: 32 word)
+          \<and> heap_typing t = heap_typing s
+          \<and> (\<forall>h < hash_size. heap_w32 t (head +\<^sub>p int h) = no_entry32) \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((idx :: 32 word), _). hash_size - unat idx)"
+      and I = "\<lambda>idx st. unat idx \<le> hash_size
+          \<and> heap_typing st = heap_typing s
+          \<and> (\<forall>h < unat idx. heap_w32 st (head +\<^sub>p int h) = no_entry32)"])
+     subgoal by simp
+    subgoal by simp
+   subgoal for idx st
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (subst word_unat_eq_iff)
+    apply simp
+    done
+  subgoal premises prems for idx st
+  proof -
+    have idx_lt_word: "idx < (0x10000 :: 32 word)"
+      using prems(1) by (simp add: word_less_nat_alt)
+    have idx_lt: "unat idx < hash_size"
+      using idx_lt_word by (simp add: word_less_nat_alt)
+    have idx_suc: "unat (idx + 1) = Suc (unat idx)"
+      using idx_lt by (simp add: unat_word_ariths(1))
+    have typing_eq: "heap_typing st = heap_typing s"
+      using prems(2) by simp
+    have valid_s:
+      "IS_VALID(32 word) s (head +\<^sub>p uint idx)"
+      by (rule head_valid[OF idx_lt_word])
+    have valid_idx:
+      "IS_VALID(32 word) st (head +\<^sub>p uint idx)"
+      using valid_s typing_eq by simp
+    show ?thesis
+      apply runs_to_vcg
+      subgoal
+        using valid_idx .
+      subgoal
+        using idx_suc idx_lt by simp
+      subgoal
+        using typing_eq .
+      subgoal premises sg for h
+      proof -
+        have h_lt_suc: "h < Suc (unat idx)"
+          using sg(2) idx_suc by simp
+        have h_ne: "h \<noteq> unat idx"
+        proof
+          assume h_eq: "h = unat idx"
+          have offset_eq: "int h = uint idx"
+            using h_eq by (simp only: uint_nat)
+          hence "head +\<^sub>p int h = head +\<^sub>p uint idx"
+            by simp
+          with sg(1) show False
+            by simp
+        qed
+        have h_lt: "h < unat idx"
+          using h_lt_suc h_ne by simp
+        show "heap_w32 st (head +\<^sub>p int h) = no_entry32"
+          using prems(2) h_lt by simp
+      qed
+      subgoal
+        using idx_suc idx_lt by simp
+      done
+  qed
+  done
+
 lemma match_valid_heap_bytesI:
   assumes src_bound: "pos + len \<le> src_len"
       and tgt_bound: "tp + len \<le> tgt_len"
