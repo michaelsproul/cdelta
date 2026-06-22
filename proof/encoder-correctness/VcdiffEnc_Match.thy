@@ -269,6 +269,42 @@ proof -
     by simp
 qed
 
+lemma source_index_arrays_rel_chain_member_sound:
+  assumes rel: "source_index_arrays_rel src heads nexts"
+      and h_lt: "h < hash_size"
+      and p_in: "p \<in> set (match_word_chain nexts
+        (length (index_bucket_spec (build_index_spec src) h)) (heads ! h))"
+  shows "p + min_match \<le> length src \<and> hash_bucket_spec src p = h"
+proof -
+  have chain:
+    "match_word_chain nexts
+       (length (index_bucket_spec (build_index_spec src) h)) (heads ! h) =
+     index_bucket_spec (build_index_spec src) h"
+    by (rule source_index_arrays_rel_bucket_chain_all[OF rel h_lt])
+  show ?thesis
+    using p_in chain match_build_index_spec_bucket_sound[of p src h]
+    by simp
+qed
+
+lemma source_index_arrays_rel_take_chain_member_sound:
+  assumes rel: "source_index_arrays_rel src heads nexts"
+      and h_lt: "h < hash_size"
+      and p_in: "p \<in> set (match_word_chain nexts
+        (min n (length (index_bucket_spec (build_index_spec src) h)))
+        (heads ! h))"
+  shows "p + min_match \<le> length src \<and> hash_bucket_spec src p = h"
+proof -
+  have chain:
+    "match_word_chain nexts
+       (min n (length (index_bucket_spec (build_index_spec src) h)))
+       (heads ! h) =
+     take n (index_bucket_spec (build_index_spec src) h)"
+    by (rule source_index_arrays_rel_take_bucket_chain[OF rel h_lt])
+  show ?thesis
+    using p_in chain match_build_index_spec_bucket_sound[of p src h]
+    by (auto dest: in_set_takeD)
+qed
+
 context vcdiff_enc_global_addresses begin
 
 lemma match_valid_heap_bytesI:
