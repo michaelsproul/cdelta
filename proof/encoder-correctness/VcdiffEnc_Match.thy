@@ -111,6 +111,16 @@ definition source_index_heap_rel ::
        (heap_w32_list s head_arr hash_size)
        (heap_w32_list s next_arr (length src))"
 
+definition source_index_nexts_wf :: "byte list \<Rightarrow> 32 word list \<Rightarrow> bool" where
+  "source_index_nexts_wf src nexts \<longleftrightarrow>
+     length nexts = length src \<and>
+     (\<forall>p < length src. nexts ! p = no_entry32 \<or> unat (nexts ! p) < length src)"
+
+definition source_index_heap_nexts_wf ::
+    "lifted_globals \<Rightarrow> byte list \<Rightarrow> 32 word ptr \<Rightarrow> bool" where
+  "source_index_heap_nexts_wf s src next_arr \<longleftrightarrow>
+     source_index_nexts_wf src (heap_w32_list s next_arr (length src))"
+
 definition source_positions_from ::
     "byte list \<Rightarrow> nat \<Rightarrow> nat list" where
   "source_positions_from src start =
@@ -150,6 +160,19 @@ lemma heap_w32_list_nth[simp]:
   assumes "i < n"
   shows "heap_w32_list s arr n ! i = heap_w32 s (arr +\<^sub>p int i)"
   using assms by (simp add: heap_w32_list_def)
+
+lemma source_index_heap_nexts_wfD:
+  assumes wf: "source_index_heap_nexts_wf s src next_arr"
+      and p_lt: "p < length src"
+  shows "heap_w32 s (next_arr +\<^sub>p int p) = no_entry32 \<or>
+         unat (heap_w32 s (next_arr +\<^sub>p int p)) < length src"
+  using assms
+  by (simp add: source_index_heap_nexts_wf_def source_index_nexts_wf_def)
+
+lemma source_index_heap_nexts_wf_len:
+  assumes "source_index_heap_nexts_wf s src next_arr"
+  shows "length (heap_w32_list s next_arr (length src)) = length src"
+  using assms by simp
 
 lemma heap_w32_list_update_outside:
   assumes outside: "\<forall>i < n. arr +\<^sub>p int i \<noteq> ptr"
@@ -2890,6 +2913,8 @@ lemma find_best_match'_match_valid_heap_bytes_source_index_nonearly:
     and src_len tgt_len tp :: "32 word"
   assumes rel:
     "source_index_heap_rel s (heap_bytes s src (unat src_len)) head_arr next_arr"
+      and nexts_wf:
+    "source_index_heap_nexts_wf s (heap_bytes s src (unat src_len)) next_arr"
       and tp_le: "tp \<le> tgt_len"
       and not_early: "\<not> (src_len < 4 \<or> tgt_len - tp < 4)"
       and result:
@@ -2905,6 +2930,8 @@ lemma find_best_match'_match_valid_heap_bytes_source_index:
     and src_len tgt_len tp :: "32 word"
   assumes rel:
     "source_index_heap_rel s (heap_bytes s src (unat src_len)) head_arr next_arr"
+      and nexts_wf:
+    "source_index_heap_nexts_wf s (heap_bytes s src (unat src_len)) next_arr"
       and tp_le: "tp \<le> tgt_len"
       and result:
     "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s = Some m"
@@ -2924,7 +2951,7 @@ next
   case False
   show ?thesis
     by (rule find_best_match'_match_valid_heap_bytes_source_index_nonearly[
-          OF rel tp_le False result])
+          OF rel nexts_wf tp_le False result])
 qed
 
 end
