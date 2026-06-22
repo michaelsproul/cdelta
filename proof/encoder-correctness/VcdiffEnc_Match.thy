@@ -357,6 +357,70 @@ next
   qed
 qed
 
+lemma match_word_chain_update_irrelevant:
+  assumes p_notin: "p \<notin> set (match_word_chain nexts fuel cand)"
+  shows "match_word_chain (nexts[p := v]) fuel cand =
+         match_word_chain nexts fuel cand"
+  using p_notin
+proof (induction fuel arbitrary: cand)
+  case 0
+  then show ?case
+    by simp
+next
+  case (Suc fuel)
+  show ?case
+  proof (cases "cand = no_entry32 \<or> \<not> unat cand < length nexts")
+    case True
+    then show ?thesis
+      by auto
+  next
+    case False
+    then have cand_ok: "cand \<noteq> no_entry32" "unat cand < length nexts"
+      by auto
+    have p_ne: "p \<noteq> unat cand"
+      using Suc.prems cand_ok by auto
+    have p_notin_tail:
+      "p \<notin> set (match_word_chain nexts fuel (nexts ! unat cand))"
+      using Suc.prems cand_ok by auto
+    have tail:
+      "match_word_chain (nexts[p := v]) fuel (nexts ! unat cand) =
+       match_word_chain nexts fuel (nexts ! unat cand)"
+      by (rule Suc.IH[OF p_notin_tail])
+    show ?thesis
+      using cand_ok p_ne tail by simp
+  qed
+qed
+
+lemma word32_of_nat_no_entry32:
+  assumes "p < unat (no_entry32 :: 32 word)"
+  shows "(of_nat p :: 32 word) \<noteq> no_entry32"
+proof
+  assume "(of_nat p :: 32 word) = no_entry32"
+  hence "unat (of_nat p :: 32 word) = unat (no_entry32 :: 32 word)"
+    by simp
+  with assms show False
+    by (simp add: unat_of_nat_eq)
+qed
+
+lemma match_word_chain_cons_update:
+  assumes p_lt: "p < length nexts"
+      and p_unat: "unat (of_nat p :: 32 word) = p"
+      and p_not_sentinel: "(of_nat p :: 32 word) \<noteq> no_entry32"
+      and old_chain: "match_word_chain nexts fuel old_head = bucket"
+      and p_notin: "p \<notin> set bucket"
+  shows "match_word_chain (nexts[p := old_head]) (Suc fuel) (of_nat p) =
+         p # bucket"
+proof -
+  have updated_tail:
+    "match_word_chain (nexts[p := old_head]) fuel old_head =
+     match_word_chain nexts fuel old_head"
+    using old_chain p_notin
+    by (intro match_word_chain_update_irrelevant) simp
+  show ?thesis
+    using p_lt p_unat p_not_sentinel old_chain updated_tail
+    by simp
+qed
+
 lemma source_index_arrays_rel_bucket_chain_all:
   assumes rel: "source_index_arrays_rel src heads nexts"
       and h_lt: "h < hash_size"
