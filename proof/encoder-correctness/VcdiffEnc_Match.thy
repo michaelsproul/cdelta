@@ -1565,7 +1565,8 @@ definition build_index_fill_inv ::
      min_match \<le> length src_bytes \<and>
      length src_bytes < unat (no_entry32 :: 32 word) \<and>
      unat i \<le> length src_bytes - min_match + 1 \<and>
-     source_index_heap_rel_from st src_bytes (unat i) head_arr next_arr"
+     source_index_heap_rel_from st src_bytes (unat i) head_arr next_arr \<and>
+     source_index_heap_nexts_wf_from st src_bytes (unat i) next_arr"
 
 lemma build_index_fill_body_preserves_inv:
   fixes src :: "8 word ptr"
@@ -1629,6 +1630,9 @@ proof -
     using inv unfolding build_index_fill_inv_def by blast
   have rel: "source_index_heap_rel_from st src_bytes (unat i) head next_arr"
     using inv by (simp add: build_index_fill_inv_def)
+  have nexts_wf:
+    "source_index_heap_nexts_wf_from st src_bytes (unat i) next_arr"
+    using inv by (simp add: build_index_fill_inv_def)
   have i_ne: "i \<noteq> 0"
     using cond by (simp add: word_gt_0)
   have i_pos_nat: "0 < unat i"
@@ -1686,6 +1690,46 @@ proof -
   let ?s_head =
     "heap_w32_update
       (\<lambda>ha. ha(head +\<^sub>p int ?bucket := of_nat ?p)) ?s_next"
+  have head_value_wf:
+    "heap_w32 st (head +\<^sub>p int ?bucket) = no_entry32 \<or>
+     unat (heap_w32 st (head +\<^sub>p int ?bucket)) < length src_bytes"
+    by (rule source_index_heap_rel_from_head_wf[
+        OF rel bucket_lt src_len_word])
+  have step_nexts_wf:
+    "source_index_heap_nexts_wf_from ?s_head src_bytes ?p next_arr"
+  proof (rule source_index_heap_nexts_wf_from_step[
+      where i = "unat i" and s = st and p = ?p and bucket = ?bucket
+        and v = "heap_w32 st (head +\<^sub>p int ?bucket)"
+        and new_head = "of_nat ?p" and head_arr = head])
+    show "source_index_heap_nexts_wf_from st src_bytes (unat i) next_arr"
+      by (rule nexts_wf)
+    show "0 < unat i"
+      by (rule i_pos_nat)
+    show "?p = unat i - 1"
+      by (rule p_unat)
+    show "?p + min_match \<le> length src_bytes"
+      by (rule p_match_bound)
+    show "heap_w32 st (head +\<^sub>p int ?bucket) = no_entry32 \<or>
+        unat (heap_w32 st (head +\<^sub>p int ?bucket)) < length src_bytes"
+      by (rule head_value_wf)
+    show "\<And>q. q < length src_bytes \<Longrightarrow> q \<noteq> ?p \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int ?p"
+    proof -
+      fix q
+      assume q_lt: "q < length src_bytes"
+      assume q_ne: "q \<noteq> ?p"
+      show "next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int ?p"
+        by (rule next_no_alias[OF q_lt p_lt_src q_ne])
+    qed
+    show "\<And>q. q < length src_bytes \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int ?bucket"
+    proof -
+      fix q
+      assume q_lt: "q < length src_bytes"
+      show "next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int ?bucket"
+        by (rule head_next_disjoint[OF q_lt bucket_lt])
+    qed
+  qed
   have step_rel:
     "source_index_heap_rel_from ?s_head src_bytes ?p head next_arr"
   proof (rule source_index_heap_rel_from_step[
@@ -1785,6 +1829,9 @@ proof -
       (heap_w32_update
         (\<lambda>a. a(next_arr +\<^sub>p uint ?p_word :=
           a (head +\<^sub>p uint ((of_nat ?hash :: 32 word) && 0xFFFF)))) st)"
+  have step_nexts_wf_c:
+    "source_index_heap_nexts_wf_from ?st_c src_bytes (unat ?p_word) next_arr"
+    by (subst final_state_eq, rule step_nexts_wf)
   have inv_after:
     "build_index_fill_inv s0 src src_len src_bytes head next_arr ?p_word ?st_c"
     unfolding build_index_fill_inv_def
@@ -1795,7 +1842,8 @@ proof -
        apply (rule src_long)
       apply (rule src_len_word)
      apply (rule p_le)
-    apply (rule step_rel_c)
+     apply (rule step_rel_c)
+    apply (rule step_nexts_wf_c)
     done
   have inv_after_bucket:
     "build_index_fill_inv s0 src src_len src_bytes head next_arr ?p_word
@@ -2222,17 +2270,21 @@ proof -
           show "length ?src_bytes - min_match + 1 \<le> unat ?start"
             by (rule start_ge)
         qed
+        have init_nexts_wf:
+          "source_index_heap_nexts_wf_from t ?src_bytes (unat ?start) next_arr"
+          by (rule source_index_heap_nexts_wf_from_empty[OF start_ge])
         have init_inv:
           "build_index_fill_inv s src src_len ?src_bytes head next_arr ?start t"
           unfolding build_index_fill_inv_def
           apply (intro conjI)
-                apply (rule typing_t)
-               apply (rule bytes_t)
-              apply (rule len_src_bytes)
-             apply (rule src_long_nat)
-            apply (rule src_len_word_bytes)
-           apply (rule start_le)
-          apply (rule rel_start)
+                 apply (rule typing_t)
+                apply (rule bytes_t)
+               apply (rule len_src_bytes)
+              apply (rule src_long_nat)
+             apply (rule src_len_word_bytes)
+            apply (rule start_le)
+           apply (rule rel_start)
+          apply (rule init_nexts_wf)
           done
         have fill:
           "(whileLoop (\<lambda>(i :: 32 word) st. 0 < i)
