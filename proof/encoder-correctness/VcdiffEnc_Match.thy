@@ -3319,7 +3319,29 @@ proof -
   have next_cand_ok:
     "\<And>cand. \<lbrakk>?cand_ok cand; cand \<noteq> no_entry32\<rbrakk> \<Longrightarrow>
       ?cand_ok (heap_w32 s (next_arr +\<^sub>p uint cand))"
-    sorry
+  proof -
+    fix cand :: "32 word"
+    assume cand_ok: "?cand_ok cand"
+    assume cand_not_noentry: "cand \<noteq> no_entry32"
+    have cand_match: "unat cand + min_match \<le> length ?src_bytes"
+      using cand_ok cand_not_noentry by simp
+    have next_ok_int:
+      "heap_w32 s (next_arr +\<^sub>p int (unat cand)) = no_entry32 \<or>
+       unat (heap_w32 s (next_arr +\<^sub>p int (unat cand))) + min_match
+          \<le> length ?src_bytes"
+      by (rule source_index_heap_nexts_wfD[OF nexts_wf cand_match])
+    have heap_eq:
+      "heap_w32 s (next_arr +\<^sub>p uint cand) =
+       heap_w32 s (next_arr +\<^sub>p int (unat cand))"
+      by (simp only: uint_nat)
+    have next_ok_uint:
+      "heap_w32 s (next_arr +\<^sub>p uint cand) = no_entry32 \<or>
+       unat (heap_w32 s (next_arr +\<^sub>p uint cand)) + min_match
+          \<le> length ?src_bytes"
+      using next_ok_int by (simp only: heap_eq)
+    show "?cand_ok (heap_w32 s (next_arr +\<^sub>p uint cand))"
+      using next_ok_uint by simp
+  qed
   have loop_preserves:
     "\<And>init. (case init of (best_len, best_pos, cand, checked) \<Rightarrow>
         match_valid ?src_bytes ?tgt_bytes (unat tp)
