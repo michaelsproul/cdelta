@@ -3304,7 +3304,18 @@ proof -
     "\<And>cand l. \<lbrakk>?cand_ok cand; cand \<noteq> no_entry32;
         common_prefix' src cand src_len tgt tp tgt_len s = Some l\<rbrakk>
       \<Longrightarrow> match_valid ?src_bytes ?tgt_bytes (unat tp) (unat cand) (unat l)"
-    sorry
+  proof -
+    fix cand l :: "32 word"
+    assume cand_ok: "?cand_ok cand"
+    assume cand_not_noentry: "cand \<noteq> no_entry32"
+    assume cp: "common_prefix' src cand src_len tgt tp tgt_len s = Some l"
+    have cand_nat_le: "unat cand \<le> unat src_len"
+      using cand_ok cand_not_noentry by simp
+    have cand_le: "cand \<le> src_len"
+      using cand_nat_le by (simp add: word_le_nat_alt)
+    show "match_valid ?src_bytes ?tgt_bytes (unat tp) (unat cand) (unat l)"
+      by (rule common_prefix'_match_valid_heap_bytes[OF cp cand_le tp_le])
+  qed
   have loop_preserves:
     "\<And>init. (case init of (best_len, best_pos, cand, checked) \<Rightarrow>
         match_valid ?src_bytes ?tgt_bytes (unat tp)
