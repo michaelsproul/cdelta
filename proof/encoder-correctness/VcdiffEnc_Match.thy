@@ -2185,6 +2185,19 @@ lemma hash4'_heap_w32_update[simp]:
   unfolding hash4'_def
   by (simp add: obind_def ogets_def oguard_def)
 
+lemma unat_suc_word_less:
+  fixes n limit :: "32 word"
+  assumes "n < limit"
+  shows "unat (n + 1) = Suc (unat n)"
+proof -
+  have n_lt: "unat n < unat limit"
+    using assms by (simp add: word_less_nat_alt)
+  hence "unat n + unat (1 :: 32 word) < 2 ^ 32"
+    using unat_lt2p[of limit] by simp
+  thus ?thesis
+    by (simp add: unat_word_ariths(1))
+qed
+
 lemma checked_measure_decreases:
   fixes checked :: "32 word"
   assumes "checked < 0x10"
