@@ -34,6 +34,51 @@ lemma match_validD:
         "take len (drop pos src) = take len (drop tp tgt)"
   using assms by (simp_all add: match_valid_def)
 
+lemma match_source_positions_spec_set:
+  "set (source_positions_spec src) =
+    (if length src < min_match then {} else {0..<length src - min_match + 1})"
+  by (auto simp: source_positions_spec_def)
+
+lemma match_source_positions_spec_sound:
+  assumes "p \<in> set (source_positions_spec src)"
+  shows "p + min_match \<le> length src"
+proof (cases "length src < min_match")
+  case True
+  with assms show ?thesis
+    by (simp add: source_positions_spec_def)
+next
+  case False
+  with assms have "p < length src - min_match + 1"
+    by (auto simp: source_positions_spec_def)
+  then have "p \<le> length src - min_match"
+    by linarith
+  with False show ?thesis
+    by linarith
+qed
+
+lemma match_build_index_spec_length[simp]:
+  "length (build_index_spec src) = hash_size"
+  by (simp add: build_index_spec_def)
+
+lemma match_index_bucket_build_index_spec:
+  assumes "h < hash_size"
+  shows "index_bucket_spec (build_index_spec src) h =
+    filter (\<lambda>p. hash_bucket_spec src p = h) (source_positions_spec src)"
+  using assms
+  by (simp add: index_bucket_spec_def build_index_spec_def)
+
+lemma match_index_bucket_build_index_spec_out_of_range[simp]:
+  assumes "\<not> h < hash_size"
+  shows "index_bucket_spec (build_index_spec src) h = []"
+  using assms
+  by (simp add: index_bucket_spec_def)
+
+lemma match_build_index_spec_bucket_sound:
+  assumes "p \<in> set (index_bucket_spec (build_index_spec src) h)"
+  shows "p + min_match \<le> length src \<and> hash_bucket_spec src p = h"
+  using assms match_source_positions_spec_sound[of p src]
+  by (auto simp: index_bucket_spec_def build_index_spec_def)
+
 context vcdiff_enc_global_addresses begin
 
 lemma match_valid_heap_bytesI:
