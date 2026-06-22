@@ -120,6 +120,12 @@ lemma heap_w32_list_nth[simp]:
   shows "heap_w32_list s arr n ! i = heap_w32 s (arr +\<^sub>p int i)"
   using assms by (simp add: heap_w32_list_def)
 
+lemma heap_w32_list_update_outside:
+  assumes outside: "\<forall>i < n. arr +\<^sub>p int i \<noteq> ptr"
+  shows "heap_w32_list (heap_w32_update (\<lambda>h. h(ptr := v)) s) arr n =
+         heap_w32_list s arr n"
+  using outside by (simp add: heap_w32_list_def fun_upd_apply)
+
 lemma source_index_arrays_rel_head_length:
   assumes "source_index_arrays_rel src heads nexts"
   shows "length heads = hash_size"
