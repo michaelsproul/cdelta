@@ -79,6 +79,114 @@ lemma match_build_index_spec_bucket_sound:
   using assms match_source_positions_spec_sound[of p src]
   by (auto simp: index_bucket_spec_def build_index_spec_def)
 
+abbreviation no_entry32 :: "32 word" where
+  "no_entry32 \<equiv> 0xFFFFFFFF"
+
+fun match_word_chain :: "32 word list \<Rightarrow> nat \<Rightarrow> 32 word \<Rightarrow> nat list" where
+  "match_word_chain next 0 cand = []"
+| "match_word_chain next (Suc fuel) cand =
+    (if cand = no_entry32 then []
+     else if unat cand < length next then
+       unat cand # match_word_chain next fuel (next ! unat cand)
+     else [])"
+
+definition heap_w32_list :: "lifted_globals \<Rightarrow> 32 word ptr \<Rightarrow> nat \<Rightarrow> 32 word list" where
+  "heap_w32_list s arr n = map (\<lambda>i. heap_w32 s (arr +\<^sub>p int i)) [0..<n]"
+
+definition source_index_arrays_rel ::
+    "byte list \<Rightarrow> 32 word list \<Rightarrow> 32 word list \<Rightarrow> bool" where
+  "source_index_arrays_rel src heads nexts \<longleftrightarrow>
+     length heads = hash_size \<and>
+     length nexts = length src \<and>
+     (\<forall>h < hash_size.
+       (let bucket = index_bucket_spec (build_index_spec src) h in
+        if bucket = [] then heads ! h = no_entry32
+        else heads ! h = of_nat (hd bucket) \<and>
+             match_word_chain nexts (length bucket) (heads ! h) = bucket))"
+
+definition source_index_heap_rel ::
+    "lifted_globals \<Rightarrow> byte list \<Rightarrow> 32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow> bool" where
+  "source_index_heap_rel s src head_arr next_arr \<longleftrightarrow>
+     source_index_arrays_rel src
+       (heap_w32_list s head_arr hash_size)
+       (heap_w32_list s next_arr (length src))"
+
+lemma heap_w32_list_length[simp]:
+  "length (heap_w32_list s arr n) = n"
+  by (simp add: heap_w32_list_def)
+
+lemma heap_w32_list_nth[simp]:
+  assumes "i < n"
+  shows "heap_w32_list s arr n ! i = heap_w32 s (arr +\<^sub>p int i)"
+  using assms by (simp add: heap_w32_list_def)
+
+lemma source_index_arrays_rel_head_length:
+  assumes "source_index_arrays_rel src heads nexts"
+  shows "length heads = hash_size"
+  using assms by (simp add: source_index_arrays_rel_def)
+
+lemma source_index_arrays_rel_next_length:
+  assumes "source_index_arrays_rel src heads nexts"
+  shows "length nexts = length src"
+  using assms by (simp add: source_index_arrays_rel_def)
+
+lemma source_index_arrays_rel_empty_head:
+  assumes rel: "source_index_arrays_rel src heads nexts"
+      and h_lt: "h < hash_size"
+      and empty: "index_bucket_spec (build_index_spec src) h = []"
+  shows "heads ! h = no_entry32"
+  using rel h_lt empty
+  by (simp add: source_index_arrays_rel_def Let_def)
+
+lemma source_index_arrays_rel_nonempty_head:
+  assumes rel: "source_index_arrays_rel src heads nexts"
+      and h_lt: "h < hash_size"
+      and nonempty: "index_bucket_spec (build_index_spec src) h \<noteq> []"
+  shows "heads ! h = of_nat (hd (index_bucket_spec (build_index_spec src) h))"
+  using rel h_lt nonempty
+  by (simp add: source_index_arrays_rel_def Let_def)
+
+lemma source_index_arrays_rel_bucket_chain:
+  assumes rel: "source_index_arrays_rel src heads nexts"
+      and h_lt: "h < hash_size"
+      and nonempty: "index_bucket_spec (build_index_spec src) h \<noteq> []"
+  shows "match_word_chain nexts
+           (length (index_bucket_spec (build_index_spec src) h))
+           (heads ! h) =
+         index_bucket_spec (build_index_spec src) h"
+proof -
+  let ?bucket = "index_bucket_spec (build_index_spec src) h"
+  have rel_h:
+    "(let bucket = ?bucket in
+      if bucket = [] then heads ! h = no_entry32
+      else heads ! h = of_nat (hd bucket) \<and>
+           match_word_chain nexts (length bucket) (heads ! h) = bucket)"
+    using rel h_lt
+    unfolding source_index_arrays_rel_def by blast
+  show ?thesis
+  proof (cases "?bucket = []")
+    case True
+    with nonempty show ?thesis
+      by simp
+  next
+    case False
+    have rel_h_unlet:
+      "if ?bucket = [] then heads ! h = no_entry32
+       else heads ! h = of_nat (hd ?bucket) \<and>
+            match_word_chain nexts (length ?bucket) (heads ! h) = ?bucket"
+      using rel_h unfolding Let_def .
+    from rel_h_unlet False have conj:
+      "heads ! h = of_nat (hd ?bucket) \<and>
+       match_word_chain nexts (length ?bucket) (heads ! h) = ?bucket"
+      apply (subst (asm) if_not_P)
+       apply assumption
+      apply assumption
+      done
+    show ?thesis
+      by (rule conjunct2[OF conj])
+  qed
+qed
+
 context vcdiff_enc_global_addresses begin
 
 lemma match_valid_heap_bytesI:
