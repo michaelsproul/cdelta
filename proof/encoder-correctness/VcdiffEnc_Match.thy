@@ -2827,18 +2827,6 @@ proof (rule find_best_match'_match_valid_if_common_prefix[OF _ result])
           OF cp common_prefix_cand_le[OF cp] tp_le])
 qed
 
-lemma find_best_match'_common_prefix_cand_le_from_source_index:
-  fixes src tgt :: "8 word ptr"
-    and src_len tgt_len tp :: "32 word"
-  assumes rel:
-    "source_index_heap_rel s (heap_bytes s src (unat src_len)) head_arr next_arr"
-      and result:
-    "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s = Some m"
-      and cp:
-    "common_prefix' src cand src_len tgt tp tgt_len s = Some l"
-  shows "cand \<le> src_len"
-  sorry
-
 lemma find_best_match'_match_valid_heap_bytes_source_index:
   fixes src tgt :: "8 word ptr"
     and src_len tgt_len tp :: "32 word"
@@ -2851,14 +2839,7 @@ lemma find_best_match'_match_valid_heap_bytes_source_index:
     (heap_bytes s src (unat src_len))
     (heap_bytes s tgt (unat tgt_len))
     (unat tp) (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
-proof (rule find_best_match'_match_valid_heap_bytes_if_common_prefix_cand_le[
-    OF _ tp_le result])
-  fix cand l
-  assume cp: "common_prefix' src cand src_len tgt tp tgt_len s = Some l"
-  show "cand \<le> src_len"
-    by (rule find_best_match'_common_prefix_cand_le_from_source_index[
-          OF rel result cp])
-qed
+  sorry
 
 end
 
