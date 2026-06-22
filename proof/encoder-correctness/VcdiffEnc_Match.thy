@@ -640,6 +640,103 @@ proof -
   qed
 qed
 
+lemma source_index_heap_rel_from_step:
+  fixes head_arr next_arr :: "32 word ptr"
+  assumes rel:
+      "source_index_heap_rel_from s src i head_arr next_arr"
+    and src_long: "min_match \<le> length src"
+    and i_pos: "0 < i"
+    and i_le: "i \<le> length src - min_match + 1"
+    and src_len_word: "length src < unat (no_entry32 :: 32 word)"
+    and head_no_alias:
+      "\<And>h. h < hash_size \<Longrightarrow> h \<noteq> bucket \<Longrightarrow>
+        head_arr +\<^sub>p int h \<noteq> head_arr +\<^sub>p int bucket"
+    and next_no_alias:
+      "\<And>q. q < length src \<Longrightarrow> q \<noteq> p \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+    and next_head_disjoint:
+      "\<And>h. h < hash_size \<Longrightarrow>
+        head_arr +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+    and head_next_disjoint:
+      "\<And>q. q < length src \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> head_arr +\<^sub>p int bucket"
+    and p_def: "p = i - 1"
+    and bucket_def: "bucket = hash_bucket_spec src p"
+  defines "s_next \<equiv>
+    heap_w32_update
+      (\<lambda>a. a(next_arr +\<^sub>p int p :=
+        heap_w32 s (head_arr +\<^sub>p int bucket))) s"
+  defines "s_head \<equiv>
+    heap_w32_update
+      (\<lambda>ha. ha(head_arr +\<^sub>p int bucket := of_nat p)) s_next"
+  shows "source_index_heap_rel_from s_head src p head_arr next_arr"
+proof -
+  let ?heads = "heap_w32_list s head_arr hash_size"
+  let ?nexts = "heap_w32_list s next_arr (length src)"
+  have arrays_rel:
+    "source_index_arrays_rel_from src i ?heads ?nexts"
+    using rel by (simp add: source_index_heap_rel_from_def)
+  have p_lt_src: "p < length src"
+    using src_long i_pos i_le
+    by (simp add: p_def min_match_def)
+  have bucket_lt: "bucket < hash_size"
+    by (simp add: bucket_def)
+  have head_value:
+    "heap_w32 s (head_arr +\<^sub>p int bucket) = ?heads ! bucket"
+    using bucket_lt by simp
+  have heads_after_next:
+    "heap_w32_list s_next head_arr hash_size = ?heads"
+    unfolding s_next_def
+    apply (rule heap_w32_list_update_outside)
+    using next_head_disjoint
+    by auto
+  have nexts_after_next:
+    "heap_w32_list s_next next_arr (length src) =
+     ?nexts[p := ?heads ! bucket]"
+    unfolding s_next_def
+    apply (subst head_value)
+    apply (rule heap_w32_list_update_index)
+      apply (rule p_lt_src)
+     apply simp
+    using next_no_alias
+    apply auto
+    done
+  have heads_after_head:
+    "heap_w32_list s_head head_arr hash_size =
+     ?heads[bucket := of_nat p]"
+    unfolding s_head_def
+    apply (subst heads_after_next[symmetric])
+    apply (rule heap_w32_list_update_index)
+      apply (rule bucket_lt)
+     apply simp
+    using head_no_alias
+    apply auto
+    done
+  have nexts_after_head:
+    "heap_w32_list s_head next_arr (length src) =
+     ?nexts[p := ?heads ! bucket]"
+    unfolding s_head_def
+    apply (subst nexts_after_next[symmetric])
+    apply (rule heap_w32_list_update_outside)
+    using head_next_disjoint
+    by auto
+  have arrays_after:
+    "source_index_arrays_rel_from src p
+      (?heads[bucket := of_nat p]) (?nexts[p := ?heads ! bucket])"
+  proof -
+    have "source_index_arrays_rel_from src (i - 1)
+      (?heads[hash_bucket_spec src (i - 1) := of_nat (i - 1)])
+      (?nexts[i - 1 := ?heads ! hash_bucket_spec src (i - 1)])"
+      by (rule source_index_arrays_rel_from_step[
+          OF arrays_rel src_long i_pos i_le src_len_word])
+    then show ?thesis
+      by (simp add: p_def bucket_def)
+  qed
+  show ?thesis
+    using arrays_after heads_after_head nexts_after_head
+    by (simp add: source_index_heap_rel_from_def)
+qed
+
 lemma source_index_arrays_rel_bucket_chain_all:
   assumes rel: "source_index_arrays_rel src heads nexts"
       and h_lt: "h < hash_size"
