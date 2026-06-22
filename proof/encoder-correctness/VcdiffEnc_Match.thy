@@ -846,6 +846,30 @@ lemma unat_0x10000_32[simp]:
   "unat (0x10000 :: 32 word) = hash_size"
   by (simp add: hash_size_def hash_bits_def)
 
+lemma hash_mask_0xFFFF_32:
+  "(0xFFFF :: 32 word) = mask hash_bits"
+  by (simp add: hash_bits_def mask_eq_exp_minus_1)
+
+lemma word32_hash_mask_of_nat:
+  "((of_nat n :: 32 word) && 0xFFFF) =
+   (of_nat (n mod hash_size) :: 32 word)"
+proof -
+  have "((of_nat n :: 32 word) mod (2 ^ hash_bits)) =
+        ((of_nat n :: 32 word) && mask hash_bits)"
+    by (rule word_mod_2p_is_mask) (simp_all add: hash_bits_def)
+  moreover have "((of_nat n :: 32 word) mod (2 ^ hash_bits)) =
+        (of_nat (n mod hash_size) :: 32 word)"
+    by (simp add: word_arith_nat_mod unat_of_nat hash_size_def
+        hash_bits_def mod_mod_cancel)
+  ultimately show ?thesis
+    by (simp add: hash_mask_0xFFFF_32)
+qed
+
+lemma hash_bucket_word_from_hash4_spec:
+  "((of_nat (hash4_spec bs p) :: 32 word) && 0xFFFF) =
+   (of_nat (hash_bucket_spec bs p) :: 32 word)"
+  by (simp add: word32_hash_mask_of_nat hash_bucket_spec_def)
+
 lemma build_index_start_unat:
   fixes src_len :: "32 word"
   assumes src_long: "4 \<le> unat src_len"
