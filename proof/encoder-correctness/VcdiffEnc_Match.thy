@@ -134,6 +134,14 @@ definition source_index_arrays_rel_from ::
         else heads ! h = of_nat (hd bucket) \<and>
              match_word_chain nexts (length bucket) (heads ! h) = bucket))"
 
+definition source_index_heap_rel_from ::
+    "lifted_globals \<Rightarrow> byte list \<Rightarrow> nat \<Rightarrow>
+      32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow> bool" where
+  "source_index_heap_rel_from s src start head_arr next_arr \<longleftrightarrow>
+     source_index_arrays_rel_from src start
+       (heap_w32_list s head_arr hash_size)
+       (heap_w32_list s next_arr (length src))"
+
 lemma heap_w32_list_length[simp]:
   "length (heap_w32_list s arr n) = n"
   by (simp add: heap_w32_list_def)
@@ -181,6 +189,12 @@ lemma source_index_arrays_rel_from_0:
   by (simp add: source_index_arrays_rel_from_def
       source_index_arrays_rel_def)
 
+lemma source_index_heap_rel_from_0:
+  "source_index_heap_rel_from s src 0 head_arr next_arr \<longleftrightarrow>
+   source_index_heap_rel s src head_arr next_arr"
+  by (simp add: source_index_heap_rel_from_def source_index_heap_rel_def
+      source_index_arrays_rel_from_0)
+
 lemma source_index_arrays_rel_from_head_length:
   assumes "source_index_arrays_rel_from src start heads nexts"
   shows "length heads = hash_size"
@@ -221,6 +235,21 @@ proof (intro conjI allI impI)
              match_word_chain nexts (length bucket) (heads ! h) = bucket"
     using heads_empty[OF h_lt] by simp
 qed
+
+lemma source_index_heap_rel_from_empty:
+  assumes heads_empty:
+        "\<And>h. h < hash_size \<Longrightarrow>
+          heap_w32 s (head_arr +\<^sub>p int h) = no_entry32"
+      and start_ge: "length src - min_match + 1 \<le> start"
+  shows "source_index_heap_rel_from s src start head_arr next_arr"
+  unfolding source_index_heap_rel_from_def
+  apply (rule source_index_arrays_rel_from_empty)
+     apply simp
+    apply simp
+   apply (simp add: heap_w32_list_nth heads_empty)
+  using start_ge
+  apply simp
+  done
 
 lemma source_positions_from_step:
   assumes src_long: "min_match \<le> length src"
