@@ -2885,6 +2885,21 @@ proof (rule find_best_match'_match_valid_if_common_prefix[OF _ result])
           OF cp common_prefix_cand_le[OF cp] tp_le])
 qed
 
+lemma find_best_match'_match_valid_heap_bytes_source_index_nonearly:
+  fixes src tgt :: "8 word ptr"
+    and src_len tgt_len tp :: "32 word"
+  assumes rel:
+    "source_index_heap_rel s (heap_bytes s src (unat src_len)) head_arr next_arr"
+      and tp_le: "tp \<le> tgt_len"
+      and not_early: "\<not> (src_len < 4 \<or> tgt_len - tp < 4)"
+      and result:
+    "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s = Some m"
+  shows "match_valid
+    (heap_bytes s src (unat src_len))
+    (heap_bytes s tgt (unat tgt_len))
+    (unat tp) (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
+  sorry
+
 lemma find_best_match'_match_valid_heap_bytes_source_index:
   fixes src tgt :: "8 word ptr"
     and src_len tgt_len tp :: "32 word"
@@ -2897,7 +2912,20 @@ lemma find_best_match'_match_valid_heap_bytes_source_index:
     (heap_bytes s src (unat src_len))
     (heap_bytes s tgt (unat tgt_len))
     (unat tp) (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
-  sorry
+proof (cases "src_len < 4 \<or> tgt_len - tp < 4")
+  case True
+  hence m_eq: "m = match_t_C 0 0"
+    using result find_best_match'_early_zero[of src_len tgt_len tp src tgt
+        head_arr next_arr s]
+    by simp
+  show ?thesis
+    by (simp add: m_eq)
+next
+  case False
+  show ?thesis
+    by (rule find_best_match'_match_valid_heap_bytes_source_index_nonearly[
+          OF rel tp_le False result])
+qed
 
 end
 
