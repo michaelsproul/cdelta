@@ -219,3 +219,35 @@ invariant only needs to know that the pending input frame is unchanged.
 - Prefer proving pure bridge lemmas first. If a C subgoal needs a semantic fact
   about grouping, it probably belongs in the intermediate-spec bridge, not in
   the AutoCorres script.
+
+## 2026-06-22 Status
+
+The general C loop proof is now in place.  The outer loop invariant was proved
+top-down against the intermediate spec, then bridged to the public
+`flush_pending_spec`.
+
+New primary lemmas:
+
+- `flush_pending_outer_loop_preserves_inv`
+- `flush_pending_outer_body_preserves_inv`
+- `flush_pending'_enc_sections_state_rel_loop_spec_topdown`
+- `flush_pending'_enc_sections_state_rel_topdown`
+
+The theorem still intentionally exposes an `emit_pre` premise:
+
+```isabelle
+\<And>add_start i sec_cur t. \<lbrakk>
+  flush_pending_outer_loop_inv ... add_start i sec_cur t;
+  i \<le> len
+\<rbrakk> \<Longrightarrow>
+  flush_pending_outer_emit_pre ... add_start i sec_cur t
+```
+
+That premise is the next packaging task, not a missing loop proof.  The caller
+side should derive it from the eventual window-loop invariant: section cursor
+capacity, output-buffer validity, pending-buffer validity, address-cache
+relation, and `ENC_OK` status on the success path.
+
+The old mixed-buffer gap is therefore closed at the local `flush_pending'`
+level.  Remaining encoder-refinement work is to expose a caller-friendly flush
+wrapper and then use it inside the future `encode_window'` simulation proof.

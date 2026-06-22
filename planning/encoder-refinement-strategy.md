@@ -269,9 +269,9 @@ that success writes exactly `encode_spec src tgt`.
 |-------|------|--------|
 | A.7 | Add the non-degenerate pure encoder spec | Done: executable spec follows the C algorithm |
 | A.8 | Prove non-degenerate spec roundtrip | Done: `decode_spec (encode_spec src tgt) src = Inl tgt` |
-| B.3a | Retarget writer/emit proofs to pure builders | In progress: leaf emit helpers and reusable infrastructure exist |
+| B.3a | Retarget writer/emit proofs to pure builders | In progress: leaf emit helpers, fused wrappers, serialization, and general flush-pending refinement exist |
 | B.3b | Prove `build_index'` and `find_best_match'` refinement | C matcher follows pure matcher |
-| B.3c | Prove `flush_pending'` refinement | C loop refines `flush_pending_loop_spec`, then bridges to `flush_pending_spec` |
+| B.3c | Prove `flush_pending'` refinement | General loop theorem done; package caller-side preconditions for window use |
 | B.4 | Prove `encode_window'` refinement | Window loop writes spec sections |
 | B.5 | Prove `vcdiff_encode'` refinement | C encoder writes `encode_spec` bytes |
 | C | Compose with decoder refinement | C encode followed by C decode recovers target |

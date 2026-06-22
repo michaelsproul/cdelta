@@ -96,6 +96,12 @@ through low-level C helpers such as `flush_pending'`.
   opcode families:
   `try_emit_add_copy'_mode_le5_success_enc_sections_state_rel` and
   `try_emit_add_copy'_mode_gt5_success_enc_sections_state_rel`.
+- General `flush_pending'` pure-state refinement is now proved via the
+  C-shaped intermediate loop spec.  The main entry points are
+  `flush_pending'_enc_sections_state_rel_loop_spec_topdown`, which targets
+  `flush_pending_loop_spec`, and
+  `flush_pending'_enc_sections_state_rel_topdown`, which bridges to
+  `flush_pending_spec`.
 - The obsolete `VcdiffEnc_Window.thy` scaffold has been deleted.  Its
   `section_decodes` loop invariant and final-flush theorem chain belonged to
   the abandoned direct proof strategy and was not needed by serialization or
@@ -104,10 +110,10 @@ through low-level C helpers such as `flush_pending'`.
 
 Remaining encoder-refinement proof debt:
 
-- Prove the general mixed-buffer `flush_pending'` refinement over the pure
-  encoder-state relation shape.  Use the C-shaped intermediate loop spec in
-  `planning/flush-pending-loop-spec.md`; do not continue adding one-off
-  pending-length scripts except as debugging aids.
+- Package a caller-friendly `flush_pending'` wrapper that derives the current
+  `flush_pending_outer_emit_pre` premise from the window-loop buffer,
+  capacity, cursor, and relation invariants.  The general loop theorem itself
+  is in place.
 - Prove `build_index'` and `find_best_match'` refinement against the pure
   matcher/index spec.
 - Rebuild the window-loop theorem as a simulation against the pure
@@ -158,11 +164,11 @@ relation to pure encoder state, not a direct `section_decodes` invariant.
    and cache facts, but they should not be responsible for global decode
    correctness.
 
-4. Prove `flush_pending'` refines `flush_pending_spec` via the intermediate
+4. Done: `flush_pending'` refines `flush_pending_spec` via the intermediate
    `flush_pending_loop_spec` described in
-   `planning/flush-pending-loop-spec.md`.  This replaces the old final-flush
-   `section_decodes` target with a local simulation theorem and keeps the C
-   invariant aligned with `add_start`, `i`, and `j`.
+   `planning/flush-pending-loop-spec.md`.  The remaining work here is a
+   caller-facing wrapper that discharges the theorem's `emit_pre` premise from
+   the eventual window-loop invariant.
 
 5. Prove `build_index'`, `find_best_match'`, and the main `encode_window'`
    loop refine their pure spec counterparts.
