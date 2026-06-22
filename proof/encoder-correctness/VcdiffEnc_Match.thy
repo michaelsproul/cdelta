@@ -115,14 +115,16 @@ definition source_index_nexts_wf :: "byte list \<Rightarrow> 32 word list \<Righ
   "source_index_nexts_wf src nexts \<longleftrightarrow>
      length nexts = length src \<and>
      (\<forall>p. p + min_match \<le> length src \<longrightarrow>
-       nexts ! p = no_entry32 \<or> unat (nexts ! p) < length src)"
+       nexts ! p = no_entry32 \<or>
+       unat (nexts ! p) + min_match \<le> length src)"
 
 definition source_index_nexts_wf_from ::
     "byte list \<Rightarrow> nat \<Rightarrow> 32 word list \<Rightarrow> bool" where
   "source_index_nexts_wf_from src start nexts \<longleftrightarrow>
      length nexts = length src \<and>
      (\<forall>p. start \<le> p \<longrightarrow> p + min_match \<le> length src \<longrightarrow>
-       nexts ! p = no_entry32 \<or> unat (nexts ! p) < length src)"
+       nexts ! p = no_entry32 \<or>
+       unat (nexts ! p) + min_match \<le> length src)"
 
 definition source_index_heap_nexts_wf ::
     "lifted_globals \<Rightarrow> byte list \<Rightarrow> 32 word ptr \<Rightarrow> bool" where
@@ -179,7 +181,7 @@ lemma source_index_heap_nexts_wfD:
   assumes wf: "source_index_heap_nexts_wf s src next_arr"
       and p_match: "p + min_match \<le> length src"
   shows "heap_w32 s (next_arr +\<^sub>p int p) = no_entry32 \<or>
-         unat (heap_w32 s (next_arr +\<^sub>p int p)) < length src"
+         unat (heap_w32 s (next_arr +\<^sub>p int p)) + min_match \<le> length src"
 proof -
   have p_lt: "p < length src"
     using p_match by (simp add: min_match_def)
@@ -189,7 +191,7 @@ proof -
     using p_lt by simp
   have list_ok:
     "heap_w32_list s next_arr (length src) ! p = no_entry32 \<or>
-     unat (heap_w32_list s next_arr (length src) ! p) < length src"
+     unat (heap_w32_list s next_arr (length src) ! p) + min_match \<le> length src"
     using wf p_match
     unfolding source_index_heap_nexts_wf_def source_index_nexts_wf_def
     by blast
@@ -232,7 +234,7 @@ lemma source_index_heap_nexts_wf_from_empty:
 lemma source_index_nexts_wf_update:
   assumes wf: "source_index_nexts_wf src nexts"
       and p_match: "p + min_match \<le> length src"
-      and v_ok: "v = no_entry32 \<or> unat v < length src"
+      and v_ok: "v = no_entry32 \<or> unat v + min_match \<le> length src"
   shows "source_index_nexts_wf src (nexts[p := v])"
   using assms
   unfolding source_index_nexts_wf_def
@@ -243,7 +245,7 @@ lemma source_index_nexts_wf_from_update:
       and i_pos: "0 < i"
       and p_def: "p = i - 1"
       and p_match: "p + min_match \<le> length src"
-      and v_ok: "v = no_entry32 \<or> unat v < length src"
+      and v_ok: "v = no_entry32 \<or> unat v + min_match \<le> length src"
   shows "source_index_nexts_wf_from src p (nexts[p := v])"
 proof -
   have nexts_len: "length nexts = length src"
@@ -264,7 +266,7 @@ proof -
     have q_lt: "q < length src"
       using q_match by (simp add: min_match_def)
     show "(nexts[p := v]) ! q = no_entry32 \<or>
-          unat ((nexts[p := v]) ! q) < length src"
+          unat ((nexts[p := v]) ! q) + min_match \<le> length src"
     proof (cases "q = p")
       case True
       then show ?thesis
@@ -274,7 +276,8 @@ proof -
       have i_le_q: "i \<le> q"
         using p_def i_pos p_le_q False by arith
       have old_ok:
-        "nexts ! q = no_entry32 \<or> unat (nexts ! q) < length src"
+        "nexts ! q = no_entry32 \<or>
+         unat (nexts ! q) + min_match \<le> length src"
         using wf i_le_q q_match
         unfolding source_index_nexts_wf_from_def by blast
       show ?thesis
@@ -327,7 +330,7 @@ lemma source_index_heap_nexts_wf_from_step:
       and i_pos: "0 < i"
       and p_def: "p = i - 1"
       and p_match: "p + min_match \<le> length src"
-      and v_ok: "v = no_entry32 \<or> unat v < length src"
+      and v_ok: "v = no_entry32 \<or> unat v + min_match \<le> length src"
       and next_no_alias:
         "\<And>q. q < length src \<Longrightarrow> q \<noteq> p \<Longrightarrow>
           next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
@@ -530,7 +533,8 @@ lemma source_index_arrays_rel_from_head_wf:
   assumes rel: "source_index_arrays_rel_from src start heads nexts"
       and h_lt: "h < hash_size"
       and src_len_word: "length src < unat (no_entry32 :: 32 word)"
-  shows "heads ! h = no_entry32 \<or> unat (heads ! h) < length src"
+  shows "heads ! h = no_entry32 \<or>
+         unat (heads ! h) + min_match \<le> length src"
 proof -
   let ?bucket = "source_index_bucket_from src start h"
   have rel_h:
@@ -558,7 +562,7 @@ proof -
     have unat_head: "unat (of_nat (hd ?bucket) :: 32 word) = hd ?bucket"
       using hd_lt_src src_len_word by (simp add: unat_of_nat_eq)
     show ?thesis
-      using head_eq hd_lt_src unat_head by simp
+      using head_eq hd_bound unat_head by simp
   qed
 qed
 
@@ -567,7 +571,7 @@ lemma source_index_heap_rel_from_head_wf:
       and h_lt: "h < hash_size"
       and src_len_word: "length src < unat (no_entry32 :: 32 word)"
   shows "heap_w32 s (head_arr +\<^sub>p int h) = no_entry32 \<or>
-         unat (heap_w32 s (head_arr +\<^sub>p int h)) < length src"
+         unat (heap_w32 s (head_arr +\<^sub>p int h)) + min_match \<le> length src"
 proof -
   have arrays:
     "source_index_arrays_rel_from src start
@@ -576,7 +580,7 @@ proof -
     using rel by (simp add: source_index_heap_rel_from_def)
   have head_ok:
     "heap_w32_list s head_arr hash_size ! h = no_entry32 \<or>
-     unat (heap_w32_list s head_arr hash_size ! h) < length src"
+     unat (heap_w32_list s head_arr hash_size ! h) + min_match \<le> length src"
     by (rule source_index_arrays_rel_from_head_wf[
         OF arrays h_lt src_len_word])
   show ?thesis
@@ -1692,7 +1696,7 @@ proof -
       (\<lambda>ha. ha(head +\<^sub>p int ?bucket := of_nat ?p)) ?s_next"
   have head_value_wf:
     "heap_w32 st (head +\<^sub>p int ?bucket) = no_entry32 \<or>
-     unat (heap_w32 st (head +\<^sub>p int ?bucket)) < length src_bytes"
+     unat (heap_w32 st (head +\<^sub>p int ?bucket)) + min_match \<le> length src_bytes"
     by (rule source_index_heap_rel_from_head_wf[
         OF rel bucket_lt src_len_word])
   have step_nexts_wf:
@@ -1710,7 +1714,7 @@ proof -
     show "?p + min_match \<le> length src_bytes"
       by (rule p_match_bound)
     show "heap_w32 st (head +\<^sub>p int ?bucket) = no_entry32 \<or>
-        unat (heap_w32 st (head +\<^sub>p int ?bucket)) < length src_bytes"
+        unat (heap_w32 st (head +\<^sub>p int ?bucket)) + min_match \<le> length src_bytes"
       by (rule head_value_wf)
     show "\<And>q. q < length src_bytes \<Longrightarrow> q \<noteq> ?p \<Longrightarrow>
         next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int ?p"
