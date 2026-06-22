@@ -417,6 +417,23 @@ lemma match_word_chain_member_bound:
   using assms
   by (induction fuel arbitrary: cand) (auto split: if_splits)
 
+lemma match_word_chain_head_member:
+  assumes "0 < fuel"
+      and "cand \<noteq> no_entry32"
+      and "unat cand < length nexts"
+  shows "unat cand \<in> set (match_word_chain nexts fuel cand)"
+  using assms
+  by (cases fuel) auto
+
+lemma match_word_chain_tail_member:
+  assumes "0 < fuel"
+      and "cand \<noteq> no_entry32"
+      and "unat cand < length nexts"
+      and "p \<in> set (match_word_chain nexts (fuel - 1) (nexts ! unat cand))"
+  shows "p \<in> set (match_word_chain nexts fuel cand)"
+  using assms
+  by (cases fuel) auto
+
 lemma match_word_chain_take:
   "take n (match_word_chain nexts fuel cand) =
    match_word_chain nexts (min n fuel) cand"
@@ -960,6 +977,18 @@ lemma hash_bucket_word_from_hash4_spec:
   "((of_nat (hash4_spec bs p) :: 32 word) && 0xFFFF) =
    (of_nat (hash_bucket_spec bs p) :: 32 word)"
   by (simp add: word32_hash_mask_of_nat hash_bucket_spec_def)
+
+lemma hash_mask_word_unat_lt_hash_size:
+  fixes w :: "32 word"
+  shows "unat (w && 0xFFFF) < hash_size"
+proof -
+  have mask_eq:
+    "w && 0xFFFF = (of_nat (unat w mod hash_size) :: 32 word)"
+    using word32_hash_mask_of_nat[of "unat w"] by simp
+  show ?thesis
+    using mod_less_divisor[of hash_size "unat w"]
+    by (simp add: mask_eq hash_size_def hash_bits_def unat_of_nat)
+qed
 
 definition build_index_hashes_ok ::
   "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow> byte list \<Rightarrow> bool" where
