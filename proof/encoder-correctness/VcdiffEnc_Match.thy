@@ -2198,6 +2198,19 @@ proof -
     by (simp add: unat_word_ariths(1))
 qed
 
+lemma unat_suc_measure_decreases:
+  fixes n limit :: "32 word"
+  assumes "unat n < unat limit"
+  shows "unat limit - unat (n + 1) < unat limit - unat n"
+proof -
+  have n_lt: "n < limit"
+    using assms by (simp add: word_less_nat_alt)
+  have n_suc_unat: "unat (n + 1) = Suc (unat n)"
+    by (rule unat_suc_word_less[OF n_lt])
+  show ?thesis
+    using assms n_suc_unat by simp
+qed
+
 lemma checked_measure_decreases:
   fixes checked :: "32 word"
   assumes "checked < 0x10"
@@ -2211,6 +2224,369 @@ proof -
     using no_overflow by (simp add: unat_word_ariths(1))
   show ?thesis
     using checked_lt by (simp add: unat_suc)
+qed
+
+lemma common_prefix'_result_sound_word:
+  fixes src tgt :: "8 word ptr"
+    and cand src_len tp tgt_len l :: "32 word"
+  assumes result:
+    "common_prefix' src cand src_len tgt tp tgt_len s = Some l"
+  defines "limit \<equiv>
+    (if src_len - cand < tgt_len - tp then src_len - cand else tgt_len - tp)"
+  shows "unat l \<le> unat limit \<and>
+    (\<forall>i < unat l.
+      heap_w8 s (src +\<^sub>p uint (cand + of_nat i :: 32 word)) =
+      heap_w8 s (tgt +\<^sub>p uint (tp + of_nat i :: 32 word)))"
+proof -
+  let ?eq = "\<lambda>i.
+    heap_w8 s (src +\<^sub>p uint (cand + of_nat i :: 32 word)) =
+    heap_w8 s (tgt +\<^sub>p uint (tp + of_nat i :: 32 word))"
+  let ?C = "\<lambda>(n :: 32 word, ret :: 32 word) s. ret \<noteq> 0"
+  let ?B = "\<lambda>(n :: 32 word, ret :: 32 word).
+    do {
+      ret <-
+        ocondition
+          (\<lambda>s. n + 1 < limit)
+          (do {
+             oguard
+              (\<lambda>st.
+                  IS_VALID(8 word) st
+                    (tgt +\<^sub>p uint (tp + (n + 1))) \<and>
+                  IS_VALID(8 word) st
+                    (src +\<^sub>p uint (cand + (n + 1))));
+             ogets
+              (\<lambda>s. if heap_w8 s (src +\<^sub>p uint (cand + (n + 1))) =
+                      heap_w8 s (tgt +\<^sub>p uint (tp + (n + 1)))
+                   then 1 else 0)
+           })
+          (oreturn 0);
+      oreturn (n + 1, ret)
+    }"
+  let ?I = "\<lambda>(n :: 32 word, ret :: 32 word) s.
+    unat n \<le> unat limit \<and>
+    (\<forall>i < unat n. ?eq i) \<and>
+    (ret \<noteq> 0 \<longrightarrow> unat n < unat limit \<and> ?eq (unat n))"
+  have body_preserves:
+    "\<And>n ret n' ret'. \<lbrakk>?I (n, ret) s; ret \<noteq> 0;
+      ?B (n, ret) s = Some (n', ret')\<rbrakk> \<Longrightarrow> ?I (n', ret') s"
+  proof -
+    fix n ret n' ret' :: "32 word"
+    assume inv: "?I (n, ret) s"
+    assume ret_ne: "ret \<noteq> 0"
+    assume body: "?B (n, ret) s = Some (n', ret')"
+    have n_lt: "unat n < unat limit"
+      using inv ret_ne by simp
+    have n_word_lt: "n < limit"
+      using n_lt by (simp add: word_less_nat_alt)
+    have n_suc_unat: "unat (n + 1) = Suc (unat n)"
+      by (rule unat_suc_word_less[OF n_word_lt])
+    have n_suc_le: "unat (n + 1) \<le> unat limit"
+      using n_lt n_suc_unat by simp
+    have old_eq: "\<And>i. i < unat n \<Longrightarrow> ?eq i"
+      using inv by simp
+    have n_eq: "?eq (unat n)"
+      using inv ret_ne by simp
+    have n'_eq: "n' = n + 1"
+      using body
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: if_splits)
+    have prefix_eq: "\<And>i. i < unat (n + 1) \<Longrightarrow> ?eq i"
+    proof -
+      fix i
+      assume "i < unat (n + 1)"
+      hence "i < unat n \<or> i = unat n"
+        using n_suc_unat by (simp add: less_Suc_eq)
+      thus "?eq i"
+        using old_eq n_eq by auto
+    qed
+    have ret_pos:
+      "ret' \<noteq> 0 \<Longrightarrow>
+        n + 1 < limit \<and>
+        heap_w8 s (src +\<^sub>p uint (cand + (n + 1))) =
+        heap_w8 s (tgt +\<^sub>p uint (tp + (n + 1)))"
+      using body
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: if_splits)
+    have ret_inv:
+      "ret' \<noteq> 0 \<Longrightarrow> unat (n + 1) < unat limit \<and> ?eq (unat (n + 1))"
+    proof -
+      assume ret'_ne: "ret' \<noteq> 0"
+      have word_lt: "n + 1 < limit"
+        and word_eq:
+          "heap_w8 s (src +\<^sub>p uint (cand + (n + 1))) =
+           heap_w8 s (tgt +\<^sub>p uint (tp + (n + 1)))"
+        using ret_pos[OF ret'_ne] by auto
+      show ?thesis
+        using word_lt word_eq by (simp add: word_less_nat_alt)
+    qed
+    show "?I (n', ret') s"
+      using n'_eq n_suc_le prefix_eq ret_inv by auto
+  qed
+  have body_decreases:
+    "\<And>n ret n' ret'. \<lbrakk>?I (n, ret) s; ret \<noteq> 0;
+      ?B (n, ret) s = Some (n', ret')\<rbrakk> \<Longrightarrow>
+      unat limit - unat n' < unat limit - unat n"
+  proof (goal_cases)
+    case (1 n ret n' ret')
+    have n_lt: "unat n < unat limit"
+      using 1 by simp
+    have n_word_lt: "n < limit"
+      using n_lt by (simp add: word_less_nat_alt)
+    have n_suc_unat: "unat (n + 1) = Suc (unat n)"
+      by (rule unat_suc_word_less[OF n_word_lt])
+    have n'_eq: "n' = n + 1"
+      using 1
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: if_splits)
+    have dec:
+      "unat limit - unat (n + 1) < unat limit - unat n"
+      using n_lt n_suc_unat by simp
+    show ?case
+      using dec n'_eq by simp
+  qed
+  have body_preserves_step:
+    "\<And>n ret ret'. \<lbrakk>?I (n, ret) s; ret \<noteq> 0;
+      ocondition
+        (\<lambda>s. n + 1 < limit)
+        (do {
+           oguard
+            (\<lambda>st.
+                IS_VALID(8 word) st (tgt +\<^sub>p uint (tp + (n + 1))) \<and>
+                IS_VALID(8 word) st (src +\<^sub>p uint (cand + (n + 1))));
+           ogets
+            (\<lambda>s. if heap_w8 s (src +\<^sub>p uint (cand + (n + 1))) =
+                    heap_w8 s (tgt +\<^sub>p uint (tp + (n + 1)))
+                 then 1 else 0)
+         })
+        (oreturn 0) s = Some ret'\<rbrakk> \<Longrightarrow>
+      ?I (n + 1, ret') s"
+  proof -
+    fix n ret ret' :: "32 word"
+    assume inv: "?I (n, ret) s"
+    assume ret_ne: "ret \<noteq> 0"
+    assume step:
+      "ocondition
+        (\<lambda>s. n + 1 < limit)
+        (do {
+           oguard
+            (\<lambda>st.
+                IS_VALID(8 word) st (tgt +\<^sub>p uint (tp + (n + 1))) \<and>
+                IS_VALID(8 word) st (src +\<^sub>p uint (cand + (n + 1))));
+           ogets
+            (\<lambda>s. if heap_w8 s (src +\<^sub>p uint (cand + (n + 1))) =
+                    heap_w8 s (tgt +\<^sub>p uint (tp + (n + 1)))
+                 then 1 else 0)
+         })
+        (oreturn 0) s = Some ret'"
+    have body: "?B (n, ret) s = Some (n + 1, ret')"
+      using step by (simp add: obind_def oreturn_def K_def)
+    show "?I (n + 1, ret') s"
+      by (rule body_preserves[OF inv ret_ne body])
+  qed
+  have body_preserves_step_pos:
+    "\<And>n ret'. \<lbrakk>
+      \<forall>i < unat n. ?eq i;
+      unat n < unat limit;
+      ?eq (unat n);
+      ocondition
+        (\<lambda>s. n + 1 < limit)
+        (do {
+           oguard
+            (\<lambda>st.
+                IS_VALID(8 word) st (tgt +\<^sub>p uint (tp + (n + 1))) \<and>
+                IS_VALID(8 word) st (src +\<^sub>p uint (cand + (n + 1))));
+           ogets
+            (\<lambda>s. if heap_w8 s (src +\<^sub>p uint (cand + (n + 1))) =
+                    heap_w8 s (tgt +\<^sub>p uint (tp + (n + 1)))
+                 then 1 else 0)
+         })
+        (oreturn 0) s = Some ret'\<rbrakk> \<Longrightarrow>
+      ?I (n + 1, ret') s"
+  proof -
+    fix n ret' :: "32 word"
+    assume prefix: "\<forall>i < unat n. ?eq i"
+    assume n_lt: "unat n < unat limit"
+    assume n_eq: "?eq (unat n)"
+    assume step:
+      "ocondition
+        (\<lambda>s. n + 1 < limit)
+        (do {
+           oguard
+            (\<lambda>st.
+                IS_VALID(8 word) st (tgt +\<^sub>p uint (tp + (n + 1))) \<and>
+                IS_VALID(8 word) st (src +\<^sub>p uint (cand + (n + 1))));
+           ogets
+            (\<lambda>s. if heap_w8 s (src +\<^sub>p uint (cand + (n + 1))) =
+                    heap_w8 s (tgt +\<^sub>p uint (tp + (n + 1)))
+                 then 1 else 0)
+         })
+        (oreturn 0) s = Some ret'"
+    have inv: "?I (n, 1) s"
+      using prefix n_lt n_eq by simp
+    show "?I (n + 1, ret') s"
+      by (rule body_preserves_step[OF inv _ step]) simp
+  qed
+  have body_preserves_expanded:
+    "\<And>(n :: 32 word) (n' :: 32 word) (ret' :: 32 word). \<lbrakk>
+      \<forall>i < unat n. ?eq i;
+      unat n < unat limit;
+      ?eq (unat n);
+      (do {
+         ret <-
+           ocondition
+            (\<lambda>s. n + 1 < limit)
+            (do {
+               oguard
+                (\<lambda>st.
+                    IS_VALID(8 word) st (tgt +\<^sub>p uint (tp + (n + 1))) \<and>
+                    IS_VALID(8 word) st (src +\<^sub>p uint (cand + (n + 1))));
+               ogets
+                (\<lambda>s. if heap_w8 s (src +\<^sub>p uint (cand + (n + 1))) =
+                        heap_w8 s (tgt +\<^sub>p uint (tp + (n + 1)))
+                     then 1 else 0)
+             })
+            (oreturn 0);
+         oreturn (n + 1, ret)
+       }) s = Some (n', ret')\<rbrakk> \<Longrightarrow>
+      unat n' \<le> unat limit \<and>
+      (\<forall>i < unat n'. ?eq i) \<and>
+      (ret' \<noteq> 0 \<longrightarrow> unat n' < unat limit \<and> ?eq (unat n'))"
+  proof (goal_cases)
+    case (1 n n' ret')
+    have n'_eq: "n' = n + 1"
+      using 1(4)
+      by (auto simp: obind_def oreturn_def K_def split: option.splits)
+    have step:
+      "ocondition
+        (\<lambda>s. n + 1 < limit)
+        (do {
+           oguard
+            (\<lambda>st.
+                IS_VALID(8 word) st (tgt +\<^sub>p uint (tp + (n + 1))) \<and>
+                IS_VALID(8 word) st (src +\<^sub>p uint (cand + (n + 1))));
+           ogets
+            (\<lambda>s. if heap_w8 s (src +\<^sub>p uint (cand + (n + 1))) =
+                    heap_w8 s (tgt +\<^sub>p uint (tp + (n + 1)))
+                 then 1 else 0)
+         })
+        (oreturn 0) s = Some ret'"
+      using 1(4)
+      by (auto simp: obind_def oreturn_def K_def split: option.splits)
+    have "?I (n + 1, ret') s"
+      by (rule body_preserves_step_pos[OF 1(1) 1(2) 1(3) step])
+    thus ?case
+      using n'_eq by simp
+  qed
+  have loop_rule:
+    "\<And>init. ?I init s \<Longrightarrow>
+      case owhile ?C ?B init s of
+        None \<Rightarrow> True
+      | Some r \<Rightarrow> ?I r s"
+    apply (rule Reader_Monad.owhile_rule[
+      where I = ?I
+        and M = "measure (\<lambda>(n :: 32 word, ret :: 32 word).
+          unat limit - unat n)"])
+        apply (simp split: prod.splits)
+       apply simp
+    subgoal for r r' r''
+      by (cases r; cases r'; cases r'')
+         (clarsimp intro!: body_decreases unat_suc_measure_decreases)
+    subgoal premises prems for r r' r''
+    proof (cases r')
+      case (Pair n ret)
+      note r'_eq = Pair
+      show ?thesis
+      proof (cases r'')
+        case (Pair n' ret')
+        note r''_eq = Pair
+        have prefix: "\<forall>i < unat n. ?eq i"
+          using prems r'_eq by simp
+        have n_lt: "unat n < unat limit"
+          using prems r'_eq by simp
+        have n_eq: "?eq (unat n)"
+          using prems r'_eq by simp
+        have body:
+          "(do {
+             ret <-
+               ocondition
+                (\<lambda>s. n + 1 < limit)
+                (do {
+                   oguard
+                    (\<lambda>st.
+                        IS_VALID(8 word) st (tgt +\<^sub>p uint (tp + (n + 1))) \<and>
+                        IS_VALID(8 word) st (src +\<^sub>p uint (cand + (n + 1))));
+                   ogets
+                    (\<lambda>s. if heap_w8 s (src +\<^sub>p uint (cand + (n + 1))) =
+                            heap_w8 s (tgt +\<^sub>p uint (tp + (n + 1)))
+                         then 1 else 0)
+                 })
+                (oreturn 0);
+             oreturn (n + 1, ret)
+           }) s = Some (n', ret')"
+          using prems r'_eq r''_eq by simp
+        have expanded:
+          "unat n' \<le> unat limit \<and>
+           (\<forall>i < unat n'. ?eq i) \<and>
+           (ret' \<noteq> 0 \<longrightarrow> unat n' < unat limit \<and> ?eq (unat n'))"
+          by (rule body_preserves_expanded[OF prefix n_lt n_eq body])
+        show ?thesis
+          using r''_eq expanded by simp
+      qed
+    qed
+    subgoal for r
+      by (cases r) simp
+    subgoal for r
+      by (cases r) simp
+    done
+  let ?Init =
+    "ocondition
+      (\<lambda>s. 0 < limit)
+      (do {
+         oguard
+          (\<lambda>st.
+              IS_VALID(8 word) st (tgt +\<^sub>p uint tp) \<and>
+              IS_VALID(8 word) st (src +\<^sub>p uint cand));
+         ogets
+          (\<lambda>s. if heap_w8 s (src +\<^sub>p uint cand) =
+                  heap_w8 s (tgt +\<^sub>p uint tp)
+               then 1 else 0)
+       })
+      (oreturn 0)"
+  have result_unfolded:
+    "(do {
+       ret <- ?Init;
+       (n, ret) <- owhile ?C ?B (0, ret);
+       oreturn n
+     }) s = Some l"
+  proof -
+    have "common_prefix' src cand src_len tgt tp tgt_len s =
+      (do {
+         ret <- ?Init;
+         (n, ret) <- owhile ?C ?B (0, ret);
+         oreturn n
+       }) s"
+      unfolding common_prefix'_def limit_def[symmetric]
+      sorry
+    thus ?thesis
+      using result by simp
+  qed
+  obtain ret :: "32 word" where ret_step: "?Init s = Some ret"
+    sorry
+  obtain ret_final :: "32 word" where loop_res: "owhile ?C ?B (0, ret) s = Some (l, ret_final)"
+    sorry
+  have init_inv: "?I (0, ret) s"
+    using ret_step
+    unfolding limit_def
+    by (auto simp: ocondition_def obind_def oreturn_def ogets_def oguard_def K_def
+                   word_less_nat_alt
+             split: if_splits)
+  have final_inv: "?I (l, ret_final) s"
+    using loop_rule[OF init_inv] loop_res by simp
+  thus ?thesis
+    by simp
 qed
 
 lemma find_best_match'_early_zero:
