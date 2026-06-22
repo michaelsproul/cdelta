@@ -157,6 +157,37 @@ lemma heap_w32_list_update_outside:
          heap_w32_list s arr n"
   using outside by (simp add: heap_w32_list_def fun_upd_apply)
 
+lemma heap_w32_list_update_index:
+  assumes idx_lt: "idx < n"
+      and ptr_eq: "ptr = arr +\<^sub>p int idx"
+      and no_alias:
+        "\<And>i. i < n \<Longrightarrow> i \<noteq> idx \<Longrightarrow> arr +\<^sub>p int i \<noteq> ptr"
+  shows "heap_w32_list (heap_w32_update (\<lambda>h. h(ptr := v)) s) arr n =
+         (heap_w32_list s arr n)[idx := v]"
+proof (rule nth_equalityI)
+  show "length (heap_w32_list (heap_w32_update (\<lambda>h. h(ptr := v)) s) arr n) =
+        length ((heap_w32_list s arr n)[idx := v])"
+    by simp
+  fix i
+  assume i_lt:
+    "i < length (heap_w32_list (heap_w32_update (\<lambda>h. h(ptr := v)) s) arr n)"
+  hence i_lt_n: "i < n"
+    by simp
+  show "heap_w32_list (heap_w32_update (\<lambda>h. h(ptr := v)) s) arr n ! i =
+        (heap_w32_list s arr n)[idx := v] ! i"
+  proof (cases "i = idx")
+    case True
+    then show ?thesis
+      using idx_lt ptr_eq by simp
+  next
+    case False
+    have ptr_ne: "arr +\<^sub>p int i \<noteq> ptr"
+      by (rule no_alias[OF i_lt_n False])
+    show ?thesis
+      using i_lt_n False ptr_ne by simp
+  qed
+qed
+
 lemma hash_bucket_spec_lt[simp]:
   "hash_bucket_spec bs pos < hash_size"
   by (simp add: hash_bucket_spec_def hash_size_def hash_bits_def)
