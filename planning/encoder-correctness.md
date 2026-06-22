@@ -102,6 +102,11 @@ through low-level C helpers such as `flush_pending'`.
   `flush_pending_loop_spec`, and
   `flush_pending'_enc_sections_state_rel_topdown`, which bridges to
   `flush_pending_spec`.
+- Matcher/index proof scaffolding has started in
+  `proof/encoder-correctness/VcdiffEnc_Match.thy`: pure bucket facts for
+  `build_index_spec`, the abstract `source_index_arrays_rel`, the heap wrapper
+  `source_index_heap_rel`, and chain/take/candidate-soundness lemmas for the
+  `find_best_match'` `MAX_CHAIN` loop are checked in.
 - The obsolete `VcdiffEnc_Window.thy` scaffold has been deleted.  Its
   `section_decodes` loop invariant and final-flush theorem chain belonged to
   the abandoned direct proof strategy and was not needed by serialization or
@@ -115,7 +120,8 @@ Remaining encoder-refinement proof debt:
   capacity, cursor, and relation invariants.  The general loop theorem itself
   is in place.
 - Prove `build_index'` and `find_best_match'` refinement against the pure
-  matcher/index spec.
+  matcher/index spec, using `source_index_heap_rel` as the bridge between
+  `head`/`next_arr` heap arrays and `build_index_spec`.
 - Rebuild the window-loop theorem as a simulation against the pure
   `enc_full_state`/`encode_window_spec` shape, rather than reviving the removed
   `section_decodes` loop invariant.

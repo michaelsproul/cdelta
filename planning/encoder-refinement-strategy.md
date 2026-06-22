@@ -270,7 +270,7 @@ that success writes exactly `encode_spec src tgt`.
 | A.7 | Add the non-degenerate pure encoder spec | Done: executable spec follows the C algorithm |
 | A.8 | Prove non-degenerate spec roundtrip | Done: `decode_spec (encode_spec src tgt) src = Inl tgt` |
 | B.3a | Retarget writer/emit proofs to pure builders | In progress: leaf emit helpers, fused wrappers, serialization, and general flush-pending refinement exist |
-| B.3b | Prove `build_index'` and `find_best_match'` refinement | C matcher follows pure matcher |
+| B.3b | Prove `build_index'` and `find_best_match'` refinement | Started: pure bucket facts, `source_index_heap_rel`, and chain/candidate lemmas are in place |
 | B.3c | Prove `flush_pending'` refinement | General loop theorem done; package caller-side preconditions for window use |
 | B.4 | Prove `encode_window'` refinement | Window loop writes spec sections |
 | B.5 | Prove `vcdiff_encode'` refinement | C encoder writes `encode_spec` bytes |
@@ -301,4 +301,8 @@ pure spec proof.
    capacity; later refinement can characterize overflow paths.
 4. Should the spec model C's hash table layout exactly or expose an abstract
    index relation? Prefer exact enough for `find_best_match'` refinement, with
-   abstraction lemmas for semantic match validity.
+   abstraction lemmas for semantic match validity.  Current direction:
+   `source_index_heap_rel` abstracts the concrete `head`/`next_arr` heap
+   arrays into `build_index_spec`; the next proof should show `build_index'`
+   establishes that relation, then use the chain/take lemmas to align
+   `find_best_match'` with `take max_chain (index_bucket_spec ...)`.
