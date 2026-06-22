@@ -252,6 +252,19 @@ lemma source_index_bucket_from_step:
   using source_positions_from_step[OF src_long i_pos i_le]
   by (simp add: source_index_bucket_from_def)
 
+lemma source_positions_from_member_bounds:
+  assumes p_in: "p \<in> set (source_positions_from src start)"
+  shows "start \<le> p \<and> p + min_match \<le> length src"
+  using p_in
+  by (cases "length src < min_match")
+     (auto simp: source_positions_from_def)
+
+lemma source_index_bucket_from_member_bounds:
+  assumes p_in: "p \<in> set (source_index_bucket_from src start h)"
+  shows "start \<le> p \<and> p + min_match \<le> length src"
+  using p_in source_positions_from_member_bounds[of p src start]
+  by (auto simp: source_index_bucket_from_def)
+
 lemma source_index_arrays_rel_head_length:
   assumes "source_index_arrays_rel src heads nexts"
   shows "length heads = hash_size"
@@ -419,6 +432,152 @@ proof -
   show ?thesis
     using p_lt p_unat p_not_sentinel old_chain updated_tail
     by simp
+qed
+
+lemma source_index_arrays_rel_from_step:
+  assumes rel: "source_index_arrays_rel_from src i heads nexts"
+      and src_long: "min_match \<le> length src"
+      and i_pos: "0 < i"
+      and i_le: "i \<le> length src - min_match + 1"
+      and src_len_word: "length src < unat (no_entry32 :: 32 word)"
+  defines "p \<equiv> i - 1"
+  defines "bucket \<equiv> hash_bucket_spec src p"
+  shows "source_index_arrays_rel_from src p
+    (heads[bucket := of_nat p]) (nexts[p := heads ! bucket])"
+proof -
+  have heads_len: "length heads = hash_size"
+    using rel by (simp add: source_index_arrays_rel_from_def)
+  have nexts_len: "length nexts = length src"
+    using rel by (simp add: source_index_arrays_rel_from_def)
+  have p_lt_src: "p < length src"
+    using src_long i_pos i_le
+    by (simp add: p_def min_match_def)
+  have p_lt_nexts: "p < length nexts"
+    using p_lt_src nexts_len by simp
+  have p_unat: "unat (of_nat p :: 32 word) = p"
+    using p_lt_src src_len_word
+    by (simp add: unat_of_nat_eq)
+  have p_not_sentinel: "(of_nat p :: 32 word) \<noteq> no_entry32"
+    using p_lt_src src_len_word
+    by (intro word32_of_nat_no_entry32) simp
+  have bucket_lt: "bucket < hash_size"
+    by (simp add: bucket_def)
+  show ?thesis
+    unfolding source_index_arrays_rel_from_def
+  proof (intro conjI allI impI)
+    show "length (heads[bucket := of_nat p]) = hash_size"
+      using heads_len by simp
+    show "length (nexts[p := heads ! bucket]) = length src"
+      using nexts_len by simp
+    fix h
+    assume h_lt: "h < hash_size"
+    let ?old = "source_index_bucket_from src i h"
+    let ?new = "source_index_bucket_from src p h"
+    let ?heads' = "heads[bucket := of_nat p]"
+    let ?nexts' = "nexts[p := heads ! bucket]"
+    have bucket_step:
+      "?new = (if bucket = h then p # ?old else ?old)"
+      using source_index_bucket_from_step[OF src_long i_pos i_le, of h]
+      by (simp add: p_def bucket_def)
+    have rel_h:
+      "let bucket = ?old in
+        if bucket = [] then heads ! h = no_entry32
+        else heads ! h = word_of_nat (hd bucket) \<and>
+             match_word_chain nexts (length bucket) (heads ! h) = bucket"
+      using rel h_lt
+      unfolding source_index_arrays_rel_from_def by blast
+    have p_notin_old: "p \<notin> set ?old"
+    proof
+      assume p_in: "p \<in> set ?old"
+      have "i \<le> p"
+        using source_index_bucket_from_member_bounds[OF p_in] by simp
+      with i_pos show False
+        by (simp add: p_def)
+    qed
+    show "let bucket = ?new in
+        if bucket = [] then ?heads' ! h = no_entry32
+        else ?heads' ! h = word_of_nat (hd bucket) \<and>
+             match_word_chain ?nexts' (length bucket) (?heads' ! h) = bucket"
+    proof (cases "bucket = h")
+      case True
+      have head_new: "?heads' ! h = of_nat p"
+        using True bucket_lt heads_len by simp
+      have old_chain:
+        "match_word_chain nexts (length ?old) (heads ! h) = ?old"
+      proof (cases "?old = []")
+        case True
+        then show ?thesis by simp
+      next
+        case False
+        have rel_unlet:
+          "if ?old = [] then heads ! h = no_entry32
+           else heads ! h = of_nat (hd ?old) \<and>
+                match_word_chain nexts (length ?old) (heads ! h) = ?old"
+          using rel_h unfolding Let_def .
+        from rel_unlet False have conj:
+          "heads ! h = of_nat (hd ?old) \<and>
+           match_word_chain nexts (length ?old) (heads ! h) = ?old"
+          apply (subst (asm) if_not_P)
+           apply assumption
+          apply assumption
+          done
+        show ?thesis
+          by (rule conjunct2[OF conj])
+      qed
+      have chain_new:
+        "match_word_chain ?nexts' (length ?new) (?heads' ! h) = ?new"
+        using match_word_chain_cons_update[
+            OF p_lt_nexts p_unat p_not_sentinel old_chain p_notin_old]
+          bucket_step True head_new
+        by simp
+      show ?thesis
+        using bucket_step True head_new chain_new by simp
+    next
+      case False
+      have head_same: "?heads' ! h = heads ! h"
+        using False by simp
+      have bucket_same: "?new = ?old"
+        using bucket_step False by simp
+      show ?thesis
+      proof (cases "?old = []")
+        case True
+        with rel_h head_same bucket_same show ?thesis
+          by (simp add: Let_def)
+      next
+        case old_nonempty: False
+        have rel_unlet:
+          "if ?old = [] then heads ! h = no_entry32
+           else heads ! h = of_nat (hd ?old) \<and>
+                match_word_chain nexts (length ?old) (heads ! h) = ?old"
+          using rel_h unfolding Let_def .
+        from rel_unlet old_nonempty have old_conj:
+          "heads ! h = of_nat (hd ?old) \<and>
+           match_word_chain nexts (length ?old) (heads ! h) = ?old"
+          apply (subst (asm) if_not_P)
+           apply assumption
+          apply assumption
+          done
+        have old_head:
+          "heads ! h = of_nat (hd ?old)"
+          by (rule conjunct1[OF old_conj])
+        have old_chain:
+          "match_word_chain nexts (length ?old) (heads ! h) = ?old"
+          by (rule conjunct2[OF old_conj])
+        have chain_same:
+          "match_word_chain ?nexts' (length ?old) (heads ! h) = ?old"
+        proof -
+          have "p \<notin> set (match_word_chain nexts (length ?old) (heads ! h))"
+            using old_chain p_notin_old by simp
+          hence "match_word_chain ?nexts' (length ?old) (heads ! h) =
+                 match_word_chain nexts (length ?old) (heads ! h)"
+            by (rule match_word_chain_update_irrelevant)
+          with old_chain show ?thesis by simp
+        qed
+        show ?thesis
+          using bucket_same head_same old_head chain_same old_nonempty by simp
+      qed
+    qed
+  qed
 qed
 
 lemma source_index_arrays_rel_bucket_chain_all:
