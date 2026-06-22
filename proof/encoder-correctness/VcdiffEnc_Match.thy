@@ -1631,6 +1631,66 @@ proof -
     done
 qed
 
+lemma build_index'_source_index_heap_rel:
+  fixes src :: "8 word ptr"
+    and src_len :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes src_len_word:
+        "unat src_len < unat (no_entry32 :: 32 word)"
+      and hashes:
+        "build_index_hashes_ok s src src_len
+          (heap_bytes s src (unat src_len))"
+      and head_valid:
+        "\<And>h (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; h < hash_size\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (head +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; p < unat src_len\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+      and head_no_alias:
+        "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> head +\<^sub>p int bucket"
+      and next_no_alias:
+        "\<And>q p. \<lbrakk>q < unat src_len; p < unat src_len; q \<noteq> p\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+      and next_head_disjoint:
+        "\<And>h p. \<lbrakk>h < hash_size; p < unat src_len\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+      and head_next_disjoint:
+        "\<And>q bucket. \<lbrakk>q < unat src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int bucket"
+  shows "build_index' src src_len head next_arr \<bullet> s
+    \<lbrace> \<lambda>r t. r = Result () \<and>
+        source_index_heap_rel t (heap_bytes s src (unat src_len)) head next_arr
+        \<and> heap_typing t = heap_typing s \<rbrace>"
+proof (cases "src_len < (4 :: 32 word)")
+  case True
+  have head_valid_word:
+    "\<And>idx. idx < (0x10000 :: 32 word) \<Longrightarrow>
+      IS_VALID(32 word) s (head +\<^sub>p uint idx)"
+  proof -
+    fix idx :: "32 word"
+    assume idx_lt: "idx < (0x10000 :: 32 word)"
+    have idx_nat_lt: "unat idx < hash_size"
+      using idx_lt by (simp add: word_less_nat_alt)
+    have ptr_eq: "head +\<^sub>p uint idx = head +\<^sub>p int (unat idx)"
+      by (simp only: uint_nat)
+    show "IS_VALID(32 word) s (head +\<^sub>p uint idx)"
+      apply (subst ptr_eq)
+      by (rule head_valid[where st' = s and h = "unat idx", OF _ idx_nat_lt])
+         simp
+  qed
+  show ?thesis
+    by (rule build_index'_short_source_index_heap_rel[OF True head_valid_word])
+next
+  case False
+  show ?thesis
+    by (rule build_index'_long_source_index_heap_rel[
+        OF False src_len_word hashes head_valid next_valid head_no_alias
+          next_no_alias next_head_disjoint head_next_disjoint])
+qed
+
 lemma match_valid_heap_bytesI:
   assumes src_bound: "pos + len \<le> src_len"
       and tgt_bound: "tp + len \<le> tgt_len"
