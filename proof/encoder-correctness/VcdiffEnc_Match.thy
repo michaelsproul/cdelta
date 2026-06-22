@@ -870,6 +870,200 @@ lemma hash_bucket_word_from_hash4_spec:
    (of_nat (hash_bucket_spec bs p) :: 32 word)"
   by (simp add: word32_hash_mask_of_nat hash_bucket_spec_def)
 
+definition build_index_hashes_ok ::
+  "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow> byte list \<Rightarrow> bool" where
+  "build_index_hashes_ok s0 src src_len src_bytes \<longleftrightarrow>
+     (\<forall>p st. heap_typing st = heap_typing s0 \<longrightarrow>
+       heap_bytes st src (unat src_len) = src_bytes \<longrightarrow>
+       unat p + min_match \<le> length src_bytes \<longrightarrow>
+       hash4' src p st =
+         Some (of_nat (hash4_spec src_bytes (unat p)) :: 32 word))"
+
+definition build_index_fill_inv ::
+  "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow> byte list \<Rightarrow>
+    32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow> 32 word \<Rightarrow> lifted_globals \<Rightarrow> bool" where
+  "build_index_fill_inv s0 src src_len src_bytes head_arr next_arr i st \<longleftrightarrow>
+     heap_typing st = heap_typing s0 \<and>
+     heap_bytes st src (unat src_len) = src_bytes \<and>
+     length src_bytes = unat src_len \<and>
+     min_match \<le> length src_bytes \<and>
+     length src_bytes < unat (no_entry32 :: 32 word) \<and>
+     unat i \<le> length src_bytes - min_match + 1 \<and>
+     source_index_heap_rel_from st src_bytes (unat i) head_arr next_arr"
+
+lemma build_index_fill_body_preserves_inv:
+  fixes src :: "8 word ptr"
+    and src_len i :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes inv:
+      "build_index_fill_inv s0 src src_len src_bytes head next_arr i st"
+    and cond: "0 < i"
+    and hashes: "build_index_hashes_ok s0 src src_len src_bytes"
+    and head_valid:
+      "\<And>h st'. \<lbrakk>heap_typing st' = heap_typing s0; h < hash_size\<rbrakk> \<Longrightarrow>
+        IS_VALID(32 word) st' (head +\<^sub>p int h)"
+    and next_valid:
+      "\<And>p st'. \<lbrakk>heap_typing st' = heap_typing s0; p < length src_bytes\<rbrakk> \<Longrightarrow>
+        IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+    and head_no_alias:
+      "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+        head +\<^sub>p int h \<noteq> head +\<^sub>p int bucket"
+    and next_no_alias:
+      "\<And>q p. \<lbrakk>q < length src_bytes; p < length src_bytes; q \<noteq> p\<rbrakk> \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+    and next_head_disjoint:
+      "\<And>h p. \<lbrakk>h < hash_size; p < length src_bytes\<rbrakk> \<Longrightarrow>
+        head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+    and head_next_disjoint:
+      "\<And>q bucket. \<lbrakk>q < length src_bytes; bucket < hash_size\<rbrakk> \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int bucket"
+  shows "(do {
+        p <- return (i - 1);
+        hv <- gets_the (hash4' src p);
+        h <- return (hv && 0xFFFF);
+        guard (\<lambda>s. IS_VALID(32 word) s (next_arr +\<^sub>p uint p));
+        guard (\<lambda>s. IS_VALID(32 word) s (head +\<^sub>p uint h));
+        modify
+          (heap_w32_update
+            (\<lambda>a. a(next_arr +\<^sub>p uint p := a (head +\<^sub>p uint h))));
+        modify (heap_w32_update (\<lambda>ha. ha(head +\<^sub>p uint h := p)));
+        return (i - 1)
+      } :: (32 word, lifted_globals) res_monad) \<bullet> st
+    \<lbrace>\<lambda>r t. r = Result (i - 1) \<and>
+      build_index_fill_inv s0 src src_len src_bytes head next_arr (i - 1) t\<rbrace>"
+  sorry
+
+lemma build_index_fill_loop_preserves_inv:
+  fixes src :: "8 word ptr"
+    and src_len start :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes inv0:
+      "build_index_fill_inv s0 src src_len src_bytes head next_arr start st"
+    and hashes: "build_index_hashes_ok s0 src src_len src_bytes"
+    and head_valid:
+      "\<And>h st'. \<lbrakk>heap_typing st' = heap_typing s0; h < hash_size\<rbrakk> \<Longrightarrow>
+        IS_VALID(32 word) st' (head +\<^sub>p int h)"
+    and next_valid:
+      "\<And>p st'. \<lbrakk>heap_typing st' = heap_typing s0; p < length src_bytes\<rbrakk> \<Longrightarrow>
+        IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+    and head_no_alias:
+      "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+        head +\<^sub>p int h \<noteq> head +\<^sub>p int bucket"
+    and next_no_alias:
+      "\<And>q p. \<lbrakk>q < length src_bytes; p < length src_bytes; q \<noteq> p\<rbrakk> \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+    and next_head_disjoint:
+      "\<And>h p. \<lbrakk>h < hash_size; p < length src_bytes\<rbrakk> \<Longrightarrow>
+        head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+    and head_next_disjoint:
+      "\<And>q bucket. \<lbrakk>q < length src_bytes; bucket < hash_size\<rbrakk> \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int bucket"
+  shows "(whileLoop (\<lambda>(i :: 32 word) st. 0 < i)
+      (\<lambda>i. do {
+        p <- return (i - 1);
+        hv <- gets_the (hash4' src p);
+        h <- return (hv && 0xFFFF);
+        guard (\<lambda>s. IS_VALID(32 word) s (next_arr +\<^sub>p uint p));
+        guard (\<lambda>s. IS_VALID(32 word) s (head +\<^sub>p uint h));
+        modify
+          (heap_w32_update
+            (\<lambda>a. a(next_arr +\<^sub>p uint p := a (head +\<^sub>p uint h))));
+        modify (heap_w32_update (\<lambda>ha. ha(head +\<^sub>p uint h := p)));
+        return (i - 1)
+      }) start :: (32 word, lifted_globals) res_monad) \<bullet> st
+    \<lbrace>\<lambda>r t. r = Result 0 \<and>
+      build_index_fill_inv s0 src src_len src_bytes head next_arr 0 t\<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+    where R = "measure (\<lambda>((i :: 32 word), _). unat i)"
+      and I = "\<lambda>i st'. build_index_fill_inv s0 src src_len src_bytes
+        head next_arr i st'"])
+     apply simp
+    apply (rule inv0)
+   subgoal for i st'
+    by (simp add: word_gt_0)
+  subgoal premises prems for i st'
+  proof -
+    have body:
+      "(do {
+        p <- return (i - 1);
+        hv <- gets_the (hash4' src p);
+        h <- return (hv && 0xFFFF);
+        guard (\<lambda>s. IS_VALID(32 word) s (next_arr +\<^sub>p uint p));
+        guard (\<lambda>s. IS_VALID(32 word) s (head +\<^sub>p uint h));
+        modify
+          (heap_w32_update
+            (\<lambda>a. a(next_arr +\<^sub>p uint p := a (head +\<^sub>p uint h))));
+        modify (heap_w32_update (\<lambda>ha. ha(head +\<^sub>p uint h := p)));
+        return (i - 1)
+      } :: (32 word, lifted_globals) res_monad) \<bullet> st'
+        \<lbrace>\<lambda>r t. r = Result (i - 1) \<and>
+          build_index_fill_inv s0 src src_len src_bytes head next_arr
+            (i - 1) t\<rbrace>"
+      by (rule build_index_fill_body_preserves_inv[
+          OF prems(2) prems(1) hashes])
+         (auto intro: head_valid next_valid
+           dest: head_no_alias next_no_alias next_head_disjoint
+             head_next_disjoint,
+          metis head_no_alias hash_size_0x10000)
+    show ?thesis
+      apply (rule runs_to_weaken[OF body])
+       apply simp
+      using prems(1)
+      apply (auto simp: measure_unat)
+      done
+  qed
+  done
+
+lemma build_index_fill_loop_source_index_heap_rel:
+  fixes src :: "8 word ptr"
+    and src_len start :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes inv0:
+      "build_index_fill_inv s0 src src_len src_bytes head next_arr start st"
+    and hashes: "build_index_hashes_ok s0 src src_len src_bytes"
+    and head_valid:
+      "\<And>h st'. \<lbrakk>heap_typing st' = heap_typing s0; h < hash_size\<rbrakk> \<Longrightarrow>
+        IS_VALID(32 word) st' (head +\<^sub>p int h)"
+    and next_valid:
+      "\<And>p st'. \<lbrakk>heap_typing st' = heap_typing s0; p < length src_bytes\<rbrakk> \<Longrightarrow>
+        IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+    and head_no_alias:
+      "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+        head +\<^sub>p int h \<noteq> head +\<^sub>p int bucket"
+    and next_no_alias:
+      "\<And>q p. \<lbrakk>q < length src_bytes; p < length src_bytes; q \<noteq> p\<rbrakk> \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+    and next_head_disjoint:
+      "\<And>h p. \<lbrakk>h < hash_size; p < length src_bytes\<rbrakk> \<Longrightarrow>
+        head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+    and head_next_disjoint:
+      "\<And>q bucket. \<lbrakk>q < length src_bytes; bucket < hash_size\<rbrakk> \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int bucket"
+  shows "(whileLoop (\<lambda>(i :: 32 word) st. 0 < i)
+      (\<lambda>i. do {
+        p <- return (i - 1);
+        hv <- gets_the (hash4' src p);
+        h <- return (hv && 0xFFFF);
+        guard (\<lambda>s. IS_VALID(32 word) s (next_arr +\<^sub>p uint p));
+        guard (\<lambda>s. IS_VALID(32 word) s (head +\<^sub>p uint h));
+        modify
+          (heap_w32_update
+            (\<lambda>a. a(next_arr +\<^sub>p uint p := a (head +\<^sub>p uint h))));
+        modify (heap_w32_update (\<lambda>ha. ha(head +\<^sub>p uint h := p)));
+        return (i - 1)
+      }) start :: (32 word, lifted_globals) res_monad) \<bullet> st
+    \<lbrace>\<lambda>r t. r = Result 0 \<and>
+      source_index_heap_rel t src_bytes head next_arr \<and>
+      heap_typing t = heap_typing s0\<rbrace>"
+  apply (rule runs_to_weaken[OF build_index_fill_loop_preserves_inv[
+        OF inv0 hashes]])
+        apply (auto intro: head_valid next_valid
+          dest: head_no_alias next_no_alias next_head_disjoint
+            head_next_disjoint
+          simp: build_index_fill_inv_def source_index_heap_rel_from_0)
+   apply (metis head_no_alias hash_size_0x10000)
+  done
+
 lemma build_index_start_unat:
   fixes src_len :: "32 word"
   assumes src_long: "4 \<le> unat src_len"
