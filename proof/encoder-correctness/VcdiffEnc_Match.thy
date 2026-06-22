@@ -111,6 +111,29 @@ definition source_index_heap_rel ::
        (heap_w32_list s head_arr hash_size)
        (heap_w32_list s next_arr (length src))"
 
+definition source_positions_from ::
+    "byte list \<Rightarrow> nat \<Rightarrow> nat list" where
+  "source_positions_from src start =
+     (if length src < min_match then []
+      else [start..<length src - min_match + 1])"
+
+definition source_index_bucket_from ::
+    "byte list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat list" where
+  "source_index_bucket_from src start h =
+     filter (\<lambda>p. hash_bucket_spec src p = h)
+       (source_positions_from src start)"
+
+definition source_index_arrays_rel_from ::
+    "byte list \<Rightarrow> nat \<Rightarrow> 32 word list \<Rightarrow> 32 word list \<Rightarrow> bool" where
+  "source_index_arrays_rel_from src start heads nexts \<longleftrightarrow>
+     length heads = hash_size \<and>
+     length nexts = length src \<and>
+     (\<forall>h < hash_size.
+       (let bucket = source_index_bucket_from src start h in
+        if bucket = [] then heads ! h = no_entry32
+        else heads ! h = of_nat (hd bucket) \<and>
+             match_word_chain nexts (length bucket) (heads ! h) = bucket))"
+
 lemma heap_w32_list_length[simp]:
   "length (heap_w32_list s arr n) = n"
   by (simp add: heap_w32_list_def)
@@ -125,6 +148,109 @@ lemma heap_w32_list_update_outside:
   shows "heap_w32_list (heap_w32_update (\<lambda>h. h(ptr := v)) s) arr n =
          heap_w32_list s arr n"
   using outside by (simp add: heap_w32_list_def fun_upd_apply)
+
+lemma hash_bucket_spec_lt[simp]:
+  "hash_bucket_spec bs pos < hash_size"
+  by (simp add: hash_bucket_spec_def hash_size_def hash_bits_def)
+
+lemma source_positions_from_0[simp]:
+  "source_positions_from src 0 = source_positions_spec src"
+  by (simp add: source_positions_from_def source_positions_spec_def)
+
+lemma source_index_bucket_from_0[simp]:
+  "source_index_bucket_from src 0 h =
+   index_bucket_spec (build_index_spec src) h"
+proof (cases "h < hash_size")
+  case True
+  then show ?thesis
+    by (simp add: source_index_bucket_from_def
+        match_index_bucket_build_index_spec)
+next
+  case False
+  have bucket_ne: "\<And>p. hash_bucket_spec src p \<noteq> h"
+    using False hash_bucket_spec_lt[of src] by force
+  show ?thesis
+    using False bucket_ne
+    by (simp add: source_index_bucket_from_def
+        match_index_bucket_build_index_spec_out_of_range)
+qed
+
+lemma source_index_arrays_rel_from_0:
+  "source_index_arrays_rel_from src 0 heads nexts \<longleftrightarrow>
+   source_index_arrays_rel src heads nexts"
+  by (simp add: source_index_arrays_rel_from_def
+      source_index_arrays_rel_def)
+
+lemma source_index_arrays_rel_from_head_length:
+  assumes "source_index_arrays_rel_from src start heads nexts"
+  shows "length heads = hash_size"
+  using assms by (simp add: source_index_arrays_rel_from_def)
+
+lemma source_index_arrays_rel_from_next_length:
+  assumes "source_index_arrays_rel_from src start heads nexts"
+  shows "length nexts = length src"
+  using assms by (simp add: source_index_arrays_rel_from_def)
+
+lemma source_positions_from_empty:
+  assumes "length src - min_match + 1 \<le> start"
+  shows "source_positions_from src start = []"
+  using assms
+  by (cases "length src < min_match")
+     (simp_all add: source_positions_from_def)
+
+lemma source_index_arrays_rel_from_empty:
+  assumes heads_len: "length heads = hash_size"
+      and nexts_len: "length nexts = length src"
+      and heads_empty: "\<And>h. h < hash_size \<Longrightarrow> heads ! h = no_entry32"
+      and start_ge: "length src - min_match + 1 \<le> start"
+  shows "source_index_arrays_rel_from src start heads nexts"
+  unfolding source_index_arrays_rel_from_def
+proof (intro conjI allI impI)
+  show "length heads = hash_size"
+    using heads_len .
+  show "length nexts = length src"
+    using nexts_len .
+  fix h
+  assume h_lt: "h < hash_size"
+  have "source_index_bucket_from src start h = []"
+    using start_ge
+    by (simp add: source_index_bucket_from_def source_positions_from_empty)
+  then show "let bucket = source_index_bucket_from src start h in
+        if bucket = [] then heads ! h = no_entry32
+        else heads ! h = word_of_nat (hd bucket) \<and>
+             match_word_chain nexts (length bucket) (heads ! h) = bucket"
+    using heads_empty[OF h_lt] by simp
+qed
+
+lemma source_positions_from_step:
+  assumes src_long: "min_match \<le> length src"
+      and i_pos: "0 < i"
+      and i_le: "i \<le> length src - min_match + 1"
+  shows "source_positions_from src (i - 1) =
+         (i - 1) # source_positions_from src i"
+proof -
+  have i_minus_lt: "i - 1 < length src - min_match + 1"
+    using i_pos i_le by simp
+  have range_eq:
+    "[i - 1..<length src - min_match + 1] =
+     (i - 1) # [i..<length src - min_match + 1]"
+    using i_pos i_minus_lt
+    by (simp add: upt_conv_Cons del: upt_Suc)
+  show ?thesis
+    using src_long range_eq
+    by (simp add: source_positions_from_def)
+qed
+
+lemma source_index_bucket_from_step:
+  assumes src_long: "min_match \<le> length src"
+      and i_pos: "0 < i"
+      and i_le: "i \<le> length src - min_match + 1"
+  shows "source_index_bucket_from src (i - 1) h =
+    (if hash_bucket_spec src (i - 1) = h
+     then (i - 1) # source_index_bucket_from src i h
+     else source_index_bucket_from src i h)"
+  using source_positions_from_step[OF src_long i_pos i_le]
+  by (simp add: source_index_bucket_from_def)
 
 lemma source_index_arrays_rel_head_length:
   assumes "source_index_arrays_rel src heads nexts"
