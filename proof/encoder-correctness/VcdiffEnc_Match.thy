@@ -187,6 +187,82 @@ proof -
   qed
 qed
 
+lemma match_word_chain_member_bound:
+  assumes "p \<in> set (match_word_chain nexts fuel cand)"
+  shows "p < length nexts"
+  using assms
+  by (induction fuel arbitrary: cand) (auto split: if_splits)
+
+lemma match_word_chain_take:
+  "take n (match_word_chain nexts fuel cand) =
+   match_word_chain nexts (min n fuel) cand"
+proof (induction fuel arbitrary: n cand)
+  case 0
+  then show ?case
+    by simp
+next
+  case (Suc fuel)
+  show ?case
+  proof (cases n)
+    case 0
+    then show ?thesis
+      by simp
+  next
+    case (Suc n')
+    show ?thesis
+    proof (cases "cand = no_entry32 \<or> \<not> unat cand < length nexts")
+      case True
+      then show ?thesis
+        using Suc by (auto simp: Suc split: if_splits)
+    next
+      case False
+      then have cand_ok: "cand \<noteq> no_entry32" "unat cand < length nexts"
+        by auto
+      show ?thesis
+        using Suc.IH[of n' "nexts ! unat cand"] cand_ok Suc
+        by simp
+    qed
+  qed
+qed
+
+lemma source_index_arrays_rel_bucket_chain_all:
+  assumes rel: "source_index_arrays_rel src heads nexts"
+      and h_lt: "h < hash_size"
+  shows "match_word_chain nexts
+           (length (index_bucket_spec (build_index_spec src) h))
+           (heads ! h) =
+         index_bucket_spec (build_index_spec src) h"
+proof (cases "index_bucket_spec (build_index_spec src) h = []")
+  case True
+  then show ?thesis
+    by simp
+next
+  case False
+  show ?thesis
+    by (rule source_index_arrays_rel_bucket_chain[OF rel h_lt False])
+qed
+
+lemma source_index_arrays_rel_take_bucket_chain:
+  assumes rel: "source_index_arrays_rel src heads nexts"
+      and h_lt: "h < hash_size"
+  shows "match_word_chain nexts
+           (min n (length (index_bucket_spec (build_index_spec src) h)))
+           (heads ! h) =
+         take n (index_bucket_spec (build_index_spec src) h)"
+proof -
+  have chain:
+    "match_word_chain nexts
+       (length (index_bucket_spec (build_index_spec src) h))
+       (heads ! h) =
+     index_bucket_spec (build_index_spec src) h"
+    by (rule source_index_arrays_rel_bucket_chain_all[OF rel h_lt])
+  show ?thesis
+    using match_word_chain_take[
+        of n nexts "length (index_bucket_spec (build_index_spec src) h)"
+          "heads ! h"] chain
+    by simp
+qed
+
 context vcdiff_enc_global_addresses begin
 
 lemma match_valid_heap_bytesI:
