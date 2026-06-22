@@ -10794,6 +10794,54 @@ definition flush_pending_outer_emit_pre ::
                  add_start loop_st) \<and>
              heap_typing u = heap_typing s0 \<rbrace>))"
 
+lemma flush_pending_outer_emit_preI:
+  assumes run:
+        "\<And>j b loop_st. \<lbrakk>
+          i < j;
+          j \<le> len;
+          pending_run_end (heap_bytes_word s0 pending 0 len) (unat i) =
+            unat j;
+          (4 :: 32 word) \<le> j - i;
+          b = heap_w8 s0 (pending +\<^sub>p uint i);
+          enc_sections_state_rel t data inst addr sec_cur loop_st;
+          flush_pending_loop_spec src_len (heap_bytes_word s0 pending 0 len)
+            (unat add_start) (unat i) loop_st =
+          flush_pending_loop_spec src_len (heap_bytes_word s0 pending 0 len)
+            0 0 spec_st
+        \<rbrakk> \<Longrightarrow>
+          flush_pending_outer_run_branch data data_cap inst inst_cap pending
+            add_start i j b sec_cur \<bullet> t
+          \<lbrace> \<lambda>r u.
+               \<exists>sec'.
+                 r = Result (j, j, sec') \<and>
+                 sections_t_C.err_C sec' = ENC_OK \<and>
+                 heap_bytes_word u pending 0 len =
+                   heap_bytes_word s0 pending 0 len \<and>
+                 heap_typing u = heap_typing s0 \<and>
+                 enc_sections_state_rel u data inst addr sec'
+                   (flush_pending_outer_run_state src_len s0 pending
+                     add_start i j b loop_st) \<rbrace>"
+      and tail:
+        "\<And>loop_st. \<lbrakk>
+          i = len;
+          enc_sections_state_rel t data inst addr sec_cur loop_st;
+          flush_pending_loop_spec src_len (heap_bytes_word s0 pending 0 len)
+            (unat add_start) (unat len) loop_st =
+          flush_pending_loop_spec src_len (heap_bytes_word s0 pending 0 len)
+            0 0 spec_st
+        \<rbrakk> \<Longrightarrow>
+          flush_pending_outer_tail data data_cap inst inst_cap pending len
+            add_start sec_cur \<bullet> t
+          \<lbrace> \<lambda>Res sec' u.
+               enc_sections_state_rel u data inst addr sec'
+                 (flush_pending_outer_tail_state src_len s0 pending len
+                   add_start loop_st) \<and>
+               heap_typing u = heap_typing s0 \<rbrace>"
+  shows "flush_pending_outer_emit_pre src_len s0 data data_cap inst inst_cap
+          addr pending len spec_st add_start i sec_cur t"
+  using run tail
+  by (auto simp: flush_pending_outer_emit_pre_def)
+
 lemma flush_pending_outer_loop_inv_start:
   assumes rel: "enc_sections_state_rel s data inst addr sec spec_st"
       and sec_ok: "sections_t_C.err_C sec = ENC_OK"
@@ -11557,6 +11605,79 @@ lemma flush_pending'_enc_sections_state_rel_topdown:
       OF rel sec_ok pending_valid emit_pre]])
   using flush_pending_loop_spec_eq_flush_pending_spec[OF pending_eq]
   by auto
+
+lemma flush_pending'_enc_sections_state_rel_branch_pre:
+  assumes rel: "enc_sections_state_rel s data inst addr sec spec_st"
+      and pending_eq: "enc_pending spec_st = heap_bytes_word s pending 0 len"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and run_pre:
+        "\<And>add_start i sec_cur t j b loop_st. \<lbrakk>
+          flush_pending_outer_loop_inv src_len s data inst addr pending len
+            spec_st add_start i sec_cur t;
+          i \<le> len;
+          i < j;
+          j \<le> len;
+          pending_run_end (heap_bytes_word s pending 0 len) (unat i) =
+            unat j;
+          (4 :: 32 word) \<le> j - i;
+          b = heap_w8 s (pending +\<^sub>p uint i);
+          enc_sections_state_rel t data inst addr sec_cur loop_st;
+          flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+            (unat add_start) (unat i) loop_st =
+          flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+            0 0 spec_st
+        \<rbrakk> \<Longrightarrow>
+          flush_pending_outer_run_branch data data_cap inst inst_cap pending
+            add_start i j b sec_cur \<bullet> t
+          \<lbrace> \<lambda>r u.
+               \<exists>sec'.
+                 r = Result (j, j, sec') \<and>
+                 sections_t_C.err_C sec' = ENC_OK \<and>
+                 heap_bytes_word u pending 0 len =
+                   heap_bytes_word s pending 0 len \<and>
+                 heap_typing u = heap_typing s \<and>
+                 enc_sections_state_rel u data inst addr sec'
+                   (flush_pending_outer_run_state src_len s pending
+                     add_start i j b loop_st) \<rbrace>"
+      and tail_pre:
+        "\<And>add_start i sec_cur t loop_st. \<lbrakk>
+          flush_pending_outer_loop_inv src_len s data inst addr pending len
+            spec_st add_start i sec_cur t;
+          i \<le> len;
+          i = len;
+          enc_sections_state_rel t data inst addr sec_cur loop_st;
+          flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+            (unat add_start) (unat len) loop_st =
+          flush_pending_loop_spec src_len (heap_bytes_word s pending 0 len)
+            0 0 spec_st
+        \<rbrakk> \<Longrightarrow>
+          flush_pending_outer_tail data data_cap inst inst_cap pending len
+            add_start sec_cur \<bullet> t
+          \<lbrace> \<lambda>Res sec' u.
+               enc_sections_state_rel u data inst addr sec'
+                 (flush_pending_outer_tail_state src_len s pending len
+                   add_start loop_st) \<and>
+               heap_typing u = heap_typing s \<rbrace>"
+  shows "flush_pending' sec data data_cap inst inst_cap pending len \<bullet> s
+         \<lbrace> \<lambda>r t.
+              \<exists>sec'.
+                r = Result sec' \<and>
+                enc_sections_state_rel t data inst addr sec'
+                  (flush_pending_spec src_len spec_st) \<and>
+                heap_typing t = heap_typing s \<rbrace>"
+  apply (rule flush_pending'_enc_sections_state_rel_topdown[
+    OF rel pending_eq sec_ok pending_valid])
+  subgoal for add_start i sec_cur t
+    apply (rule flush_pending_outer_emit_preI)
+     subgoal for j b loop_st
+       by (rule run_pre) auto
+    subgoal for loop_st
+      by (rule tail_pre) auto
+    done
+  done
 
 lemma flush_pending'_replicate_run_inner_loop_from_exn:
   fixes len start :: "32 word"
