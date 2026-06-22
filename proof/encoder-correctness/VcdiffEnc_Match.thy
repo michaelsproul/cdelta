@@ -117,10 +117,23 @@ definition source_index_nexts_wf :: "byte list \<Rightarrow> 32 word list \<Righ
      (\<forall>p. p + min_match \<le> length src \<longrightarrow>
        nexts ! p = no_entry32 \<or> unat (nexts ! p) < length src)"
 
+definition source_index_nexts_wf_from ::
+    "byte list \<Rightarrow> nat \<Rightarrow> 32 word list \<Rightarrow> bool" where
+  "source_index_nexts_wf_from src start nexts \<longleftrightarrow>
+     length nexts = length src \<and>
+     (\<forall>p. start \<le> p \<longrightarrow> p + min_match \<le> length src \<longrightarrow>
+       nexts ! p = no_entry32 \<or> unat (nexts ! p) < length src)"
+
 definition source_index_heap_nexts_wf ::
     "lifted_globals \<Rightarrow> byte list \<Rightarrow> 32 word ptr \<Rightarrow> bool" where
   "source_index_heap_nexts_wf s src next_arr \<longleftrightarrow>
      source_index_nexts_wf src (heap_w32_list s next_arr (length src))"
+
+definition source_index_heap_nexts_wf_from ::
+    "lifted_globals \<Rightarrow> byte list \<Rightarrow> nat \<Rightarrow> 32 word ptr \<Rightarrow> bool" where
+  "source_index_heap_nexts_wf_from s src start next_arr \<longleftrightarrow>
+     source_index_nexts_wf_from src start
+       (heap_w32_list s next_arr (length src))"
 
 definition source_positions_from ::
     "byte list \<Rightarrow> nat \<Rightarrow> nat list" where
@@ -189,6 +202,33 @@ lemma source_index_heap_nexts_wf_len:
   shows "length (heap_w32_list s next_arr (length src)) = length src"
   using assms by simp
 
+lemma source_index_nexts_wf_from_0:
+  "source_index_nexts_wf_from src 0 nexts \<longleftrightarrow>
+   source_index_nexts_wf src nexts"
+  by (simp add: source_index_nexts_wf_from_def source_index_nexts_wf_def)
+
+lemma source_index_heap_nexts_wf_from_0:
+  "source_index_heap_nexts_wf_from s src 0 next_arr \<longleftrightarrow>
+   source_index_heap_nexts_wf s src next_arr"
+  by (simp add: source_index_heap_nexts_wf_from_def
+      source_index_heap_nexts_wf_def source_index_nexts_wf_from_0)
+
+lemma source_index_nexts_wf_from_empty:
+  assumes nexts_len: "length nexts = length src"
+      and start_ge: "length src - min_match + 1 \<le> start"
+  shows "source_index_nexts_wf_from src start nexts"
+  using assms
+  by (auto simp: source_index_nexts_wf_from_def min_match_def)
+
+lemma source_index_heap_nexts_wf_from_empty:
+  assumes start_ge: "length src - min_match + 1 \<le> start"
+  shows "source_index_heap_nexts_wf_from s src start next_arr"
+  unfolding source_index_heap_nexts_wf_from_def
+  apply (rule source_index_nexts_wf_from_empty)
+   apply simp
+  apply (rule start_ge)
+  done
+
 lemma source_index_nexts_wf_update:
   assumes wf: "source_index_nexts_wf src nexts"
       and p_match: "p + min_match \<le> length src"
@@ -197,6 +237,51 @@ lemma source_index_nexts_wf_update:
   using assms
   unfolding source_index_nexts_wf_def
   by (auto simp: min_match_def nth_list_update)
+
+lemma source_index_nexts_wf_from_update:
+  assumes wf: "source_index_nexts_wf_from src i nexts"
+      and i_pos: "0 < i"
+      and p_def: "p = i - 1"
+      and p_match: "p + min_match \<le> length src"
+      and v_ok: "v = no_entry32 \<or> unat v < length src"
+  shows "source_index_nexts_wf_from src p (nexts[p := v])"
+proof -
+  have nexts_len: "length nexts = length src"
+    using wf by (simp add: source_index_nexts_wf_from_def)
+  have p_lt: "p < length src"
+    using p_match by (simp add: min_match_def)
+  have p_lt_nexts: "p < length nexts"
+    using p_lt nexts_len by simp
+  show ?thesis
+    unfolding source_index_nexts_wf_from_def
+  proof (intro conjI allI impI)
+    show "length (nexts[p := v]) = length src"
+      using nexts_len by simp
+  next
+    fix q
+    assume p_le_q: "p \<le> q"
+    assume q_match: "q + min_match \<le> length src"
+    have q_lt: "q < length src"
+      using q_match by (simp add: min_match_def)
+    show "(nexts[p := v]) ! q = no_entry32 \<or>
+          unat ((nexts[p := v]) ! q) < length src"
+    proof (cases "q = p")
+      case True
+      then show ?thesis
+        using v_ok p_lt_nexts by (simp add: nth_list_update)
+    next
+      case False
+      have i_le_q: "i \<le> q"
+        using p_def i_pos p_le_q False by arith
+      have old_ok:
+        "nexts ! q = no_entry32 \<or> unat (nexts ! q) < length src"
+        using wf i_le_q q_match
+        unfolding source_index_nexts_wf_from_def by blast
+      show ?thesis
+        using old_ok False q_lt by simp
+    qed
+  qed
+qed
 
 lemma heap_w32_list_update_outside:
   assumes outside: "\<forall>i < n. arr +\<^sub>p int i \<noteq> ptr"
@@ -233,6 +318,56 @@ proof (rule nth_equalityI)
     show ?thesis
       using i_lt_n False ptr_ne by simp
   qed
+qed
+
+lemma source_index_heap_nexts_wf_from_step:
+  fixes next_arr head_arr :: "32 word ptr"
+    and new_head :: "32 word"
+  assumes wf: "source_index_heap_nexts_wf_from s src i next_arr"
+      and i_pos: "0 < i"
+      and p_def: "p = i - 1"
+      and p_match: "p + min_match \<le> length src"
+      and v_ok: "v = no_entry32 \<or> unat v < length src"
+      and next_no_alias:
+        "\<And>q. q < length src \<Longrightarrow> q \<noteq> p \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+      and head_next_disjoint:
+        "\<And>q. q < length src \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> head_arr +\<^sub>p int bucket"
+  defines "s_next \<equiv>
+    heap_w32_update (\<lambda>a. a(next_arr +\<^sub>p int p := v)) s"
+  defines "s_head \<equiv>
+    heap_w32_update (\<lambda>ha. ha(head_arr +\<^sub>p int bucket := new_head)) s_next"
+  shows "source_index_heap_nexts_wf_from s_head src p next_arr"
+proof -
+  let ?nexts = "heap_w32_list s next_arr (length src)"
+  have wf_arrays: "source_index_nexts_wf_from src i ?nexts"
+    using wf by (simp add: source_index_heap_nexts_wf_from_def)
+  have p_lt: "p < length src"
+    using p_match by (simp add: min_match_def)
+  have nexts_after_next:
+    "heap_w32_list s_next next_arr (length src) = ?nexts[p := v]"
+    unfolding s_next_def
+    apply (rule heap_w32_list_update_index)
+      apply (rule p_lt)
+     apply simp
+    using next_no_alias
+    apply auto
+    done
+  have nexts_after_head:
+    "heap_w32_list s_head next_arr (length src) = ?nexts[p := v]"
+    unfolding s_head_def
+    apply (subst nexts_after_next[symmetric])
+    apply (rule heap_w32_list_update_outside)
+    using head_next_disjoint
+    by auto
+  have wf_after:
+    "source_index_nexts_wf_from src p (?nexts[p := v])"
+    by (rule source_index_nexts_wf_from_update[
+        OF wf_arrays i_pos p_def p_match v_ok])
+  show ?thesis
+    using wf_after nexts_after_head
+    by (simp add: source_index_heap_nexts_wf_from_def)
 qed
 
 lemma heap_w32_update_read_current:
