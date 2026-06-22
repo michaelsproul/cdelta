@@ -189,6 +189,15 @@ lemma source_index_heap_nexts_wf_len:
   shows "length (heap_w32_list s next_arr (length src)) = length src"
   using assms by simp
 
+lemma source_index_nexts_wf_update:
+  assumes wf: "source_index_nexts_wf src nexts"
+      and p_match: "p + min_match \<le> length src"
+      and v_ok: "v = no_entry32 \<or> unat v < length src"
+  shows "source_index_nexts_wf src (nexts[p := v])"
+  using assms
+  unfolding source_index_nexts_wf_def
+  by (auto simp: min_match_def nth_list_update)
+
 lemma heap_w32_list_update_outside:
   assumes outside: "\<forall>i < n. arr +\<^sub>p int i \<noteq> ptr"
   shows "heap_w32_list (heap_w32_update (\<lambda>h. h(ptr := v)) s) arr n =
@@ -381,6 +390,63 @@ lemma source_index_bucket_from_member_bounds:
   shows "start \<le> p \<and> p + min_match \<le> length src"
   using p_in source_positions_from_member_bounds[of p src start]
   by (auto simp: source_index_bucket_from_def)
+
+lemma source_index_arrays_rel_from_head_wf:
+  assumes rel: "source_index_arrays_rel_from src start heads nexts"
+      and h_lt: "h < hash_size"
+      and src_len_word: "length src < unat (no_entry32 :: 32 word)"
+  shows "heads ! h = no_entry32 \<or> unat (heads ! h) < length src"
+proof -
+  let ?bucket = "source_index_bucket_from src start h"
+  have rel_h:
+    "let bucket = ?bucket in
+      if bucket = [] then heads ! h = no_entry32
+      else heads ! h = word_of_nat (hd bucket) \<and>
+           match_word_chain nexts (length bucket) (heads ! h) = bucket"
+    using rel h_lt
+    unfolding source_index_arrays_rel_from_def by blast
+  show ?thesis
+  proof (cases "?bucket = []")
+    case True
+    then show ?thesis
+      using rel_h by (simp add: Let_def)
+  next
+    case False
+    have head_eq: "heads ! h = (of_nat (hd ?bucket) :: 32 word)"
+      using rel_h False by (simp add: Let_def)
+    have hd_in: "hd ?bucket \<in> set ?bucket"
+      using False by simp
+    have hd_bound: "hd ?bucket + min_match \<le> length src"
+      using source_index_bucket_from_member_bounds[OF hd_in] by simp
+    have hd_lt_src: "hd ?bucket < length src"
+      using hd_bound by (simp add: min_match_def)
+    have unat_head: "unat (of_nat (hd ?bucket) :: 32 word) = hd ?bucket"
+      using hd_lt_src src_len_word by (simp add: unat_of_nat_eq)
+    show ?thesis
+      using head_eq hd_lt_src unat_head by simp
+  qed
+qed
+
+lemma source_index_heap_rel_from_head_wf:
+  assumes rel: "source_index_heap_rel_from s src start head_arr next_arr"
+      and h_lt: "h < hash_size"
+      and src_len_word: "length src < unat (no_entry32 :: 32 word)"
+  shows "heap_w32 s (head_arr +\<^sub>p int h) = no_entry32 \<or>
+         unat (heap_w32 s (head_arr +\<^sub>p int h)) < length src"
+proof -
+  have arrays:
+    "source_index_arrays_rel_from src start
+      (heap_w32_list s head_arr hash_size)
+      (heap_w32_list s next_arr (length src))"
+    using rel by (simp add: source_index_heap_rel_from_def)
+  have head_ok:
+    "heap_w32_list s head_arr hash_size ! h = no_entry32 \<or>
+     unat (heap_w32_list s head_arr hash_size ! h) < length src"
+    by (rule source_index_arrays_rel_from_head_wf[
+        OF arrays h_lt src_len_word])
+  show ?thesis
+    using head_ok h_lt by simp
+qed
 
 lemma source_index_arrays_rel_head_length:
   assumes "source_index_arrays_rel src heads nexts"
