@@ -11035,6 +11035,234 @@ next
     by simp
 qed
 
+lemma flush_pending_outer_scan_tail_preserves_inv:
+  assumes inv:
+        "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+          spec_st add_start i sec_cur t"
+      and i_lt_len: "i < len"
+      and b_eq_t: "b = heap_w8 t (pending +\<^sub>p uint i)"
+      and pending_valid_t: "\<forall>j < unat len.
+        ptr_valid (heap_typing t)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and emit_pre:
+        "flush_pending_outer_emit_pre src_len s0 data data_cap inst inst_cap
+          addr pending len spec_st add_start i sec_cur t"
+  shows "(((do {
+             ret \<leftarrow> liftE
+               ((do {
+                  x \<leftarrow> guard
+                    (\<lambda>st. i + 1 < len \<longrightarrow>
+                      IS_VALID(8 word) st (pending +\<^sub>p uint (i + 1)));
+                  gets
+                    (\<lambda>st. if i + 1 < len \<and>
+                      heap_w8 st (pending +\<^sub>p uint (i + 1)) = b
+                     then (1 :: int) else 0)
+                }) :: (int, lifted_globals) res_monad);
+             liftE
+               ((whileLoop
+                 (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
+                 (\<lambda>(j, ret). do {
+                    x \<leftarrow> guard
+                      (\<lambda>st. j + 1 < len \<longrightarrow>
+                        IS_VALID(8 word) st
+                          (pending +\<^sub>p uint (j + 1)));
+                    ret \<leftarrow> gets
+                      (\<lambda>st. j + 1 < len \<and>
+                        heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
+                    return (j + 1, if ret then 1 else 0)
+                 })
+                 (i + 1, ret)) :: (32 word \<times> int, lifted_globals) res_monad)
+           }) :: (sections_t_C, 32 word \<times> int, lifted_globals) exn_monad) >>=
+           (\<lambda>(j, ret). condition (\<lambda>st. (4 :: 32 word) \<le> j - i)
+              (flush_pending_outer_run_branch data data_cap inst inst_cap
+                pending add_start i j b sec_cur)
+              (return (add_start, j, sec_cur)))) \<bullet> t
+         \<lbrace> \<lambda>r u.
+              \<exists>add_start' i' sec_cur'.
+                r = Result (add_start', i', sec_cur') \<and>
+                i < i' \<and> i' \<le> len \<and>
+                flush_pending_outer_loop_inv src_len s0 data inst addr
+                  pending len spec_st add_start' i' sec_cur' u \<rbrace>"
+proof -
+  obtain pending_frame where
+      pending_frame:
+        "heap_bytes_word t pending 0 len =
+         heap_bytes_word s0 pending 0 len"
+    using inv by (auto simp: flush_pending_outer_loop_inv_def)
+  have b_eq_s0: "b = heap_w8 s0 (pending +\<^sub>p uint i)"
+    using b_eq_t heap_bytes_word_frame_heap_w8_zero[
+      OF pending_frame i_lt_len] by simp
+  have scan:
+    "((do {
+        ret \<leftarrow> liftE
+          ((do {
+             x \<leftarrow> guard
+               (\<lambda>st. i + 1 < len \<longrightarrow>
+                 IS_VALID(8 word) st (pending +\<^sub>p uint (i + 1)));
+             gets
+               (\<lambda>st. if i + 1 < len \<and>
+                 heap_w8 st (pending +\<^sub>p uint (i + 1)) = b
+                then (1 :: int) else 0)
+           }) :: (int, lifted_globals) res_monad);
+        liftE
+          ((whileLoop
+            (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
+            (\<lambda>(j, ret). do {
+               x \<leftarrow> guard
+                 (\<lambda>st. j + 1 < len \<longrightarrow>
+                   IS_VALID(8 word) st
+                     (pending +\<^sub>p uint (j + 1)));
+               ret \<leftarrow> gets
+                 (\<lambda>st. j + 1 < len \<and>
+                   heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
+               return (j + 1, if ret then 1 else 0)
+            })
+            (i + 1, ret)) :: (32 word \<times> int, lifted_globals) res_monad)
+      }) :: (sections_t_C, 32 word \<times> int, lifted_globals) exn_monad) \<bullet> t
+     \<lbrace> \<lambda>r u.
+          \<exists>j. r = Result (j, 0) \<and> u = t \<and>
+            i < j \<and> j \<le> len \<and>
+            pending_run_end (heap_bytes_word s0 pending 0 len) (unat i) =
+              unat j \<rbrace>"
+    apply (rule runs_to_weaken[
+      OF flush_pending'_scan_tail_from_liftE_split_pending_run_end[
+        where s = t and pending = pending and len = len and i = i
+          and b = b]])
+       apply (rule i_lt_len)
+      using b_eq_t apply simp
+     apply (rule pending_valid_t)
+    using pending_frame by auto
+  show ?thesis
+    apply (rule runs_to_bind_exception)
+    apply (rule runs_to_weaken[OF scan])
+    apply clarsimp
+    subgoal for j
+      by (rule flush_pending_outer_after_scan_preserves_inv[
+        OF inv _ _ _ b_eq_s0 emit_pre]) auto
+    done
+qed
+
+lemma flush_pending_outer_scan_tail_preserves_inv_do:
+  assumes inv:
+        "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+          spec_st add_start i sec_cur t"
+      and i_lt_len: "i < len"
+      and b_eq_t: "b = heap_w8 t (pending +\<^sub>p uint i)"
+      and pending_valid_t: "\<forall>j < unat len.
+        ptr_valid (heap_typing t)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and emit_pre:
+        "flush_pending_outer_emit_pre src_len s0 data data_cap inst inst_cap
+          addr pending len spec_st add_start i sec_cur t"
+  shows "((do {
+            ret \<leftarrow> liftE
+              ((do {
+                 x \<leftarrow> guard
+                   (\<lambda>st. i + 1 < len \<longrightarrow>
+                     IS_VALID(8 word) st (pending +\<^sub>p uint (i + 1)));
+                 gets
+                   (\<lambda>st. if i + 1 < len \<and>
+                     heap_w8 st (pending +\<^sub>p uint (i + 1)) = b
+                    then (1 :: int) else 0)
+               }) :: (int, lifted_globals) res_monad);
+            (j, ret) \<leftarrow> liftE
+              ((whileLoop
+                (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
+                (\<lambda>(j, ret). do {
+                   x \<leftarrow> guard
+                     (\<lambda>st. j + 1 < len \<longrightarrow>
+                       IS_VALID(8 word) st
+                         (pending +\<^sub>p uint (j + 1)));
+                   ret \<leftarrow> gets
+                     (\<lambda>st. j + 1 < len \<and>
+                       heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
+                   return (j + 1, if ret then 1 else 0)
+                })
+                (i + 1, ret)) :: (32 word \<times> int, lifted_globals) res_monad);
+            condition (\<lambda>st. (4 :: 32 word) \<le> j - i)
+              (flush_pending_outer_run_branch data data_cap inst inst_cap
+                pending add_start i j b sec_cur)
+              (return (add_start, j, sec_cur))
+          }) :: (sections_t_C, 32 word \<times> 32 word \<times> sections_t_C,
+            lifted_globals) exn_monad) \<bullet> t
+         \<lbrace> \<lambda>r u.
+              \<exists>add_start' i' sec_cur'.
+                r = Result (add_start', i', sec_cur') \<and>
+                i < i' \<and> i' \<le> len \<and>
+                flush_pending_outer_loop_inv src_len s0 data inst addr
+                  pending len spec_st add_start' i' sec_cur' u \<rbrace>"
+proof -
+  show ?thesis
+    using flush_pending_outer_scan_tail_preserves_inv[
+      OF inv i_lt_len b_eq_t pending_valid_t emit_pre]
+    by (simp add: bind_assoc)
+qed
+
+lemma flush_pending_outer_read_scan_tail_preserves_inv:
+  assumes inv:
+        "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
+          spec_st add_start i sec_cur t"
+      and i_lt_len: "i < len"
+      and pending_valid_t: "\<forall>j < unat len.
+        ptr_valid (heap_typing t)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and emit_pre:
+        "flush_pending_outer_emit_pre src_len s0 data data_cap inst inst_cap
+          addr pending len spec_st add_start i sec_cur t"
+  shows "((do {
+            b \<leftarrow> gets (\<lambda>st. heap_w8 st (pending +\<^sub>p uint i));
+            ret \<leftarrow> liftE
+              ((do {
+                 x \<leftarrow> guard
+                   (\<lambda>st. i + 1 < len \<longrightarrow>
+                     IS_VALID(8 word) st (pending +\<^sub>p uint (i + 1)));
+                 gets
+                   (\<lambda>st. if i + 1 < len \<and>
+                     heap_w8 st (pending +\<^sub>p uint (i + 1)) = b
+                    then (1 :: int) else 0)
+               }) :: (int, lifted_globals) res_monad);
+            (j, ret) \<leftarrow> liftE
+              ((whileLoop
+                (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
+                (\<lambda>(j, ret). do {
+                   x \<leftarrow> guard
+                     (\<lambda>st. j + 1 < len \<longrightarrow>
+                       IS_VALID(8 word) st
+                         (pending +\<^sub>p uint (j + 1)));
+                   ret \<leftarrow> gets
+                     (\<lambda>st. j + 1 < len \<and>
+                       heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
+                   return (j + 1, if ret then 1 else 0)
+                })
+                (i + 1, ret)) :: (32 word \<times> int, lifted_globals) res_monad);
+            condition (\<lambda>st. (4 :: 32 word) \<le> j - i)
+              (flush_pending_outer_run_branch data data_cap inst inst_cap
+                pending add_start i j b sec_cur)
+              (return (add_start, j, sec_cur))
+          }) :: (sections_t_C, 32 word \<times> 32 word \<times> sections_t_C,
+            lifted_globals) exn_monad) \<bullet> t
+         \<lbrace> \<lambda>r u.
+              \<exists>add_start' i' sec_cur'.
+                r = Result (add_start', i', sec_cur') \<and>
+                i < i' \<and> i' \<le> len \<and>
+                flush_pending_outer_loop_inv src_len s0 data inst addr
+                  pending len spec_st add_start' i' sec_cur' u \<rbrace>"
+proof -
+  have get_b:
+    "((gets (\<lambda>st. heap_w8 st (pending +\<^sub>p uint i))) ::
+       (sections_t_C, 8 word, lifted_globals) exn_monad) \<bullet> t
+     \<lbrace> \<lambda>r u. r = Result (heap_w8 t (pending +\<^sub>p uint i)) \<and> u = t \<rbrace>"
+    by runs_to_vcg
+  show ?thesis
+  apply (rule runs_to_bind_exception)
+   apply (rule runs_to_weaken[OF get_b])
+   apply clarsimp
+   apply (rule flush_pending_outer_scan_tail_preserves_inv_do[
+     OF inv i_lt_len _ pending_valid_t emit_pre])
+   apply simp
+  done
+qed
+
 lemma flush_pending_outer_body_preserves_inv:
   assumes inv:
         "flush_pending_outer_loop_inv src_len s0 data inst addr pending len
@@ -11054,7 +11282,31 @@ lemma flush_pending_outer_body_preserves_inv:
                 i < i' \<and> i' \<le> len \<and>
                 flush_pending_outer_loop_inv src_len s0 data inst addr
                   pending len spec_st add_start' i' sec_cur' u \<rbrace>"
-  sorry
+proof -
+  have typing: "heap_typing t = heap_typing s0"
+    using inv by (simp add: flush_pending_outer_loop_inv_def)
+  have pending_valid_t:
+    "\<forall>j < unat len.
+      ptr_valid (heap_typing t)
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+    using pending_valid typing by simp
+  have guard_i:
+    "((guard (\<lambda>st. IS_VALID(8 word) st (pending +\<^sub>p uint i))) ::
+       (sections_t_C, unit, lifted_globals) exn_monad) \<bullet> t
+     \<lbrace> \<lambda>r u. r = Result () \<and> u = t \<rbrace>"
+    apply runs_to_vcg
+    using pending_valid_t[rule_format, of "unat i"] i_lt_len
+    by (auto simp: word_less_nat_alt word_unat.Rep_inverse)
+  show ?thesis
+    unfolding flush_pending_outer_body_def
+    apply simp
+    apply (rule runs_to_bind_exception)
+    apply (rule runs_to_weaken[OF guard_i])
+    apply clarsimp
+    apply (rule flush_pending_outer_read_scan_tail_preserves_inv[
+      OF inv i_lt_len pending_valid_t emit_pre])
+    done
+qed
 
 lemma unat_diff_measure_decrease_word:
   fixes i i' len :: "32 word"
