@@ -416,6 +416,34 @@ lemma build_index_head_init_loop:
   qed
   done
 
+lemma build_index'_short_source_index_heap_rel:
+  fixes src :: "8 word ptr"
+    and src_len :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes src_short: "src_len < 4"
+      and head_valid:
+        "\<And>i. i < (0x10000 :: 32 word) \<Longrightarrow>
+          IS_VALID(32 word) s (head +\<^sub>p uint i)"
+  shows "build_index' src src_len head next_arr \<bullet> s
+    \<lbrace> \<lambda>r t. r = Result () \<and>
+        source_index_heap_rel t (heap_bytes s src (unat src_len)) head next_arr
+        \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding build_index'_def
+  apply runs_to_vcg
+  subgoal
+    apply (rule runs_to_weaken[OF build_index_head_init_loop[OF head_valid]])
+     apply simp
+    using src_short
+    apply (clarsimp simp: runs_to_iff source_index_heap_rel_def word_less_nat_alt min_match_def
+        split: exception_or_result_splits)
+    apply (rule source_index_arrays_rel_short)
+       apply (simp add: min_match_def)
+      apply simp
+     apply (simp add: heap_w32_list_nth)
+    apply simp
+    done
+  done
+
 lemma match_valid_heap_bytesI:
   assumes src_bound: "pos + len \<le> src_len"
       and tgt_bound: "tp + len \<le> tgt_len"
