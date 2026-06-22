@@ -114,7 +114,8 @@ definition source_index_heap_rel ::
 definition source_index_nexts_wf :: "byte list \<Rightarrow> 32 word list \<Rightarrow> bool" where
   "source_index_nexts_wf src nexts \<longleftrightarrow>
      length nexts = length src \<and>
-     (\<forall>p < length src. nexts ! p = no_entry32 \<or> unat (nexts ! p) < length src)"
+     (\<forall>p. p + min_match \<le> length src \<longrightarrow>
+       nexts ! p = no_entry32 \<or> unat (nexts ! p) < length src)"
 
 definition source_index_heap_nexts_wf ::
     "lifted_globals \<Rightarrow> byte list \<Rightarrow> 32 word ptr \<Rightarrow> bool" where
@@ -163,11 +164,25 @@ lemma heap_w32_list_nth[simp]:
 
 lemma source_index_heap_nexts_wfD:
   assumes wf: "source_index_heap_nexts_wf s src next_arr"
-      and p_lt: "p < length src"
+      and p_match: "p + min_match \<le> length src"
   shows "heap_w32 s (next_arr +\<^sub>p int p) = no_entry32 \<or>
          unat (heap_w32 s (next_arr +\<^sub>p int p)) < length src"
-  using assms
-  by (simp add: source_index_heap_nexts_wf_def source_index_nexts_wf_def)
+proof -
+  have p_lt: "p < length src"
+    using p_match by (simp add: min_match_def)
+  have nth_eq:
+    "heap_w32_list s next_arr (length src) ! p =
+     heap_w32 s (next_arr +\<^sub>p int p)"
+    using p_lt by simp
+  have list_ok:
+    "heap_w32_list s next_arr (length src) ! p = no_entry32 \<or>
+     unat (heap_w32_list s next_arr (length src) ! p) < length src"
+    using wf p_match
+    unfolding source_index_heap_nexts_wf_def source_index_nexts_wf_def
+    by blast
+  show ?thesis
+    using list_ok nth_eq by simp
+qed
 
 lemma source_index_heap_nexts_wf_len:
   assumes "source_index_heap_nexts_wf s src next_arr"
