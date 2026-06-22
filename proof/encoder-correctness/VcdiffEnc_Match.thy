@@ -305,6 +305,31 @@ proof -
     by (auto dest: in_set_takeD)
 qed
 
+lemma source_index_arrays_rel_short:
+  assumes src_short: "length src < min_match"
+      and heads_len: "length heads = hash_size"
+      and nexts_len: "length nexts = length src"
+      and heads_empty: "\<And>h. h < hash_size \<Longrightarrow> heads ! h = no_entry32"
+  shows "source_index_arrays_rel src heads nexts"
+  unfolding source_index_arrays_rel_def
+proof (intro conjI allI impI)
+  show "length heads = hash_size"
+    using heads_len .
+  show "length nexts = length src"
+    using nexts_len .
+  fix h
+  assume h_lt: "h < hash_size"
+  have bucket_empty: "index_bucket_spec (build_index_spec src) h = []"
+    using src_short h_lt
+    by (simp add: index_bucket_spec_def build_index_spec_def source_positions_spec_def)
+  show "let bucket = index_bucket_spec (build_index_spec src) h in
+        if bucket = [] then heads ! h = no_entry32
+        else heads ! h = word_of_nat (hd bucket) \<and>
+             match_word_chain nexts (length bucket) (heads ! h) = bucket"
+    using bucket_empty heads_empty[OF h_lt]
+    by simp
+qed
+
 context vcdiff_enc_global_addresses begin
 
 lemma match_valid_heap_bytesI:
