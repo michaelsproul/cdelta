@@ -2665,8 +2665,8 @@ proof -
   let ?eq = "\<lambda>i.
     heap_w8 s (src +\<^sub>p uint (cand + of_nat i :: 32 word)) =
     heap_w8 s (tgt +\<^sub>p uint (tp + of_nat i :: 32 word))"
-  let ?C = "\<lambda>(n :: 32 word, ret :: 32 word) s. ret \<noteq> 0"
-  let ?B = "\<lambda>(n :: 32 word, ret :: 32 word).
+  let ?C = "\<lambda>(n :: 32 word, ret :: int) s. ret \<noteq> 0"
+  let ?B = "\<lambda>(n :: 32 word, ret :: int).
     do {
       ret <-
         ocondition
@@ -2686,7 +2686,7 @@ proof -
           (oreturn 0);
       oreturn (n + 1, ret)
     }"
-  let ?I = "\<lambda>(n :: 32 word, ret :: 32 word) s.
+  let ?I = "\<lambda>(n :: 32 word, ret :: int) s.
     unat n \<le> unat limit \<and>
     (\<forall>i < unat n. ?eq i) \<and>
     (ret \<noteq> 0 \<longrightarrow> unat n < unat limit \<and> ?eq (unat n))"
@@ -2694,7 +2694,8 @@ proof -
     "\<And>n ret n' ret'. \<lbrakk>?I (n, ret) s; ret \<noteq> 0;
       ?B (n, ret) s = Some (n', ret')\<rbrakk> \<Longrightarrow> ?I (n', ret') s"
   proof -
-    fix n ret n' ret' :: "32 word"
+    fix n n' :: "32 word"
+    fix ret ret' :: int
     assume inv: "?I (n, ret) s"
     assume ret_ne: "ret \<noteq> 0"
     assume body: "?B (n, ret) s = Some (n', ret')"
@@ -2788,7 +2789,8 @@ proof -
         (oreturn 0) s = Some ret'\<rbrakk> \<Longrightarrow>
       ?I (n + 1, ret') s"
   proof -
-    fix n ret ret' :: "32 word"
+    fix n :: "32 word"
+    fix ret ret' :: int
     assume inv: "?I (n, ret) s"
     assume ret_ne: "ret \<noteq> 0"
     assume step:
@@ -2830,7 +2832,8 @@ proof -
         (oreturn 0) s = Some ret'\<rbrakk> \<Longrightarrow>
       ?I (n + 1, ret') s"
   proof -
-    fix n ret' :: "32 word"
+    fix n :: "32 word"
+    fix ret' :: int
     assume prefix: "\<forall>i < unat n. ?eq i"
     assume n_lt: "unat n < unat limit"
     assume n_eq: "?eq (unat n)"
@@ -2854,7 +2857,7 @@ proof -
       by (rule body_preserves_step[OF inv _ step]) simp
   qed
   have body_preserves_expanded:
-    "\<And>(n :: 32 word) (n' :: 32 word) (ret' :: 32 word). \<lbrakk>
+    "\<And>(n :: 32 word) (n' :: 32 word) (ret' :: int). \<lbrakk>
       \<forall>i < unat n. ?eq i;
       unat n < unat limit;
       ?eq (unat n);
@@ -2911,7 +2914,7 @@ proof -
       | Some r \<Rightarrow> ?I r s"
     apply (rule Reader_Monad.owhile_rule[
       where I = ?I
-        and M = "measure (\<lambda>(n :: 32 word, ret :: 32 word).
+        and M = "measure (\<lambda>(n :: 32 word, ret :: int).
           unat limit - unat n)"])
         apply (simp split: prod.splits)
        apply simp
@@ -2993,14 +2996,16 @@ proof -
          oreturn n
        }) s"
       unfolding common_prefix'_def limit_def[symmetric]
-      sorry
+      by (simp add: fun_eq_iff split_def)
     thus ?thesis
       using result by simp
   qed
-  obtain ret :: "32 word" where ret_step: "?Init s = Some ret"
-    sorry
-  obtain ret_final :: "32 word" where loop_res: "owhile ?C ?B (0, ret) s = Some (l, ret_final)"
-    sorry
+  obtain ret :: int where ret_step: "?Init s = Some ret"
+    using result_unfolded
+    by (auto simp: obind_def split: option.splits)
+  obtain ret_final :: int where loop_res: "owhile ?C ?B (0, ret) s = Some (l, ret_final)"
+    using result_unfolded ret_step
+    by (auto simp: obind_def oreturn_def K_def split: option.splits prod.splits)
   have init_inv: "?I (0, ret) s"
     using ret_step
     unfolding limit_def
