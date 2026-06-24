@@ -34,6 +34,11 @@ lemma match_validD:
         "take len (drop pos src) = take len (drop tp tgt)"
   using assms by (simp_all add: match_valid_def)
 
+lemma reader_obind_SomeE:
+  assumes "obind m f s = Some y"
+  obtains x where "m s = Some x" "f x s = Some y"
+  using assms by (cases "m s") (simp_all add: obind_def)
+
 lemma match_source_positions_spec_set:
   "set (source_positions_spec src) =
     (if length src < min_match then {} else {0..<length src - min_match + 1})"
@@ -3109,6 +3114,11 @@ lemma find_best_match'_early_zero_valid:
   using find_best_match'_early_zero[OF early]
   by auto
 
+lemma match_t_C_sel_simps:
+  "match_t_C.pos_C (match_t_C pos len) = pos"
+  "match_t_C.len_C (match_t_C pos len) = len"
+  by simp_all
+
 lemma find_best_match'_match_valid_if_common_prefix:
   assumes common_prefix_valid:
     "\<And>cand l. common_prefix' src cand src_len tgt tp tgt_len s = Some l \<Longrightarrow>
@@ -3218,18 +3228,71 @@ proof -
     apply simp
     done
   show ?thesis
-    using result
-    unfolding find_best_match'_def
-    apply (auto simp: obind_def ocondition_def oreturn_def ogets_def
-                      oguard_def K_def
-                split: option.splits prod.splits if_splits)
-    subgoal for h best_len best_pos cand checked
-      apply (rule loop_valid_zero_some
-        [unfolded obind_def ocondition_def oreturn_def ogets_def
-                  oguard_def K_def, simplified o_def])
-      apply assumption
+  proof (cases "src_len < 4 \<or> tgt_len - tp < 4")
+    case True
+    hence m_eq: "m = match_t_C 0 0"
+      using result find_best_match'_early_zero[of src_len tgt_len tp src tgt
+          head_arr next_arr s]
+      by simp
+    show ?thesis
+      using m_eq by simp
+  next
+    case False
+    obtain h best_len best_pos cand checked :: "32 word" where ow_unfolded:
+        "owhile
+          (\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+             cand :: 32 word, checked :: 32 word) s.
+              cand \<noteq> no_entry32 \<and> checked < (0x10 :: 32 word))
+          (\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+             cand :: 32 word, checked :: 32 word) s.
+              case if cand + 4 \<le> src_len
+                   then case common_prefix' src cand src_len tgt tp tgt_len s of
+                     None \<Rightarrow> None
+                   | Some l \<Rightarrow>
+                       Some (if 4 \<le> l \<and> best_len < l
+                         then (l, cand) else (best_len, best_pos))
+                   else Some (best_len, best_pos) of
+                None \<Rightarrow> None
+              | Some p \<Rightarrow>
+                  (case p of
+                   (best_len, best_pos) \<Rightarrow>
+                     \<lambda>s. case if IS_VALID(32 word) s
+                         (next_arr +\<^sub>p uint cand)
+                       then Some () else None of
+                         None \<Rightarrow> None
+                       | Some _ \<Rightarrow>
+                           Some (best_len, best_pos,
+                             heap_w32 s (next_arr +\<^sub>p uint cand),
+                             checked + (1 :: 32 word)))
+                  s)
+          ((0 :: 32 word), (0 :: 32 word),
+            heap_w32 s (head_arr +\<^sub>p uint (h && 0xFFFF)),
+            (0 :: 32 word)) s =
+         Some (best_len, best_pos, cand, checked)"
+      and m_eq: "m = match_t_C best_pos best_len"
+      using result False
+      unfolding find_best_match'_def
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: option.splits prod.splits if_splits)
+    have ow:
+      "owhile ?C ?B
+        (0, 0, heap_w32 s (head_arr +\<^sub>p uint (h && 0xFFFF)), 0) s =
+       Some (best_len, best_pos, cand, checked)"
+      using ow_unfolded
+      by (simp add: obind_def ocondition_def oreturn_def ogets_def
+                    oguard_def K_def)
+    have valid_best: "match_valid src_bytes tgt_bytes (unat tp)
+        (unat best_pos) (unat best_len)"
+      by (rule loop_valid_zero_some[OF ow])
+    show ?thesis
+      apply (subst m_eq)
+      apply (subst match_t_C_sel_simps(1))
+      apply (subst m_eq)
+      apply (subst match_t_C_sel_simps(2))
+      apply (rule valid_best)
       done
-	    done
+  qed
 qed
 
 lemma find_best_match'_match_valid_heap_bytes_if_common_prefix_cand_le:
@@ -3279,22 +3342,29 @@ proof -
   let ?C = "\<lambda>(best_len :: 32 word, best_pos :: 32 word,
                  cand :: 32 word, checked :: 32 word) s.
       cand \<noteq> no_entry32 \<and> checked < 0x10"
-  let ?B = "\<lambda>(best_len :: 32 word, best_pos :: 32 word,
-                 cand :: 32 word, checked :: 32 word).
+  let ?Update = "\<lambda>(best_len :: 32 word) (best_pos :: 32 word)
+                    (cand :: 32 word).
+      ocondition (\<lambda>s. cand + 4 \<le> src_len)
+        (do {
+          l <- common_prefix' src cand src_len tgt tp tgt_len;
+          oreturn
+            (if 4 \<le> l \<and> best_len < l then (l, cand)
+             else (best_len, best_pos))
+        })
+        (oreturn (best_len, best_pos))"
+  let ?After = "\<lambda>(cand :: 32 word) (checked :: 32 word)
+                  (best_len :: 32 word, best_pos :: 32 word).
       do {
-        (best_len, best_pos) <-
-          ocondition (\<lambda>s. cand + 4 \<le> src_len)
-            (do {
-              l <- common_prefix' src cand src_len tgt tp tgt_len;
-              oreturn
-                (if 4 \<le> l \<and> best_len < l then (l, cand)
-                 else (best_len, best_pos))
-            })
-            (oreturn (best_len, best_pos));
         oguard (\<lambda>s. IS_VALID(32 word) s (next_arr +\<^sub>p uint cand));
         ogets
           (\<lambda>s. (best_len, best_pos,
                 heap_w32 s (next_arr +\<^sub>p uint cand), checked + 1))
+      }"
+  let ?B = "\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+                 cand :: 32 word, checked :: 32 word).
+      do {
+        p <- ?Update best_len best_pos cand;
+        ?After cand checked p
       }"
   have src_len_word_le:
     "length ?src_bytes \<le> unat (no_entry32 :: 32 word)"
@@ -3303,8 +3373,32 @@ proof -
     "source_index_heap_rel_from s ?src_bytes 0 head_arr next_arr"
     using rel by (simp add: source_index_heap_rel_from_0)
   have initial_cand_ok:
-    "\<And>hv. ?cand_ok (heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF)))"
-    sorry
+    "\<And>hv :: 32 word.
+      heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF)) = no_entry32 \<or>
+      unat (heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF))) + min_match
+        \<le> length ?src_bytes"
+  proof (goal_cases)
+    case (1 hv)
+    let ?h = "unat (hv && 0xFFFF)"
+    have h_lt: "?h < hash_size"
+      by (rule hash_mask_word_unat_lt_hash_size)
+    have head_ok_int:
+      "heap_w32 s (head_arr +\<^sub>p int ?h) = no_entry32 \<or>
+       unat (heap_w32 s (head_arr +\<^sub>p int ?h)) + min_match \<le> length ?src_bytes"
+      by (rule source_index_heap_rel_from_head_wf[
+          OF rel_from h_lt src_len_word_le])
+    have heap_eq:
+      "heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF)) =
+       heap_w32 s (head_arr +\<^sub>p int ?h)"
+      by (simp only: uint_nat)
+    have head_ok_uint:
+      "heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF)) = no_entry32 \<or>
+       unat (heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF))) + min_match
+          \<le> length ?src_bytes"
+      using head_ok_int by (simp only: heap_eq)
+    show ?case
+      using head_ok_uint by simp
+  qed
   have common_prefix_valid:
     "\<And>cand l. \<lbrakk>?cand_ok cand; cand \<noteq> no_entry32;
         common_prefix' src cand src_len tgt tp tgt_len s = Some l\<rbrakk>
@@ -3347,6 +3441,165 @@ proof -
     show "?cand_ok (heap_w32 s (next_arr +\<^sub>p uint cand))"
       using next_ok_uint by simp
   qed
+  have body_preserves:
+    "\<And>best_len best_pos cand checked best_len' best_pos' cand' checked'.
+      \<lbrakk>match_valid ?src_bytes ?tgt_bytes (unat tp)
+          (unat best_pos) (unat best_len) \<and> ?cand_ok cand;
+        cand \<noteq> no_entry32;
+        ?B (best_len, best_pos, cand, checked) s =
+          Some (best_len', best_pos', cand', checked')\<rbrakk>
+      \<Longrightarrow> match_valid ?src_bytes ?tgt_bytes (unat tp)
+            (unat best_pos') (unat best_len') \<and> ?cand_ok cand'"
+  proof -
+    fix best_len best_pos cand checked best_len' best_pos' cand' checked' :: "32 word"
+    assume inv:
+      "match_valid ?src_bytes ?tgt_bytes (unat tp)
+        (unat best_pos) (unat best_len) \<and> ?cand_ok cand"
+    assume cand_not_noentry: "cand \<noteq> no_entry32"
+    assume body:
+      "?B (best_len, best_pos, cand, checked) s =
+        Some (best_len', best_pos', cand', checked')"
+    have body_obind:
+      "obind (?Update best_len best_pos cand) (?After cand checked) s =
+        Some (best_len', best_pos', cand', checked')"
+      using body by simp
+    obtain upd where upd_res0: "?Update best_len best_pos cand s = Some upd"
+      and after_res: "?After cand checked upd s =
+        Some (best_len', best_pos', cand', checked')"
+      using reader_obind_SomeE[OF body_obind] by blast
+    obtain upd_len upd_pos where upd_eq: "upd = (upd_len, upd_pos)"
+      by (cases upd) auto
+    let ?valid_next = "IS_VALID(32 word) s (next_arr +\<^sub>p uint cand)"
+    have after_res_pair:
+      "?After cand checked (upd_len, upd_pos) s =
+        Some (best_len', best_pos', cand', checked')"
+      using after_res upd_eq by simp
+    have after_unfold:
+      "?After cand checked (upd_len, upd_pos) s =
+        (if ?valid_next
+         then Some (upd_len, upd_pos,
+           heap_w32 s (next_arr +\<^sub>p uint cand), checked + 1)
+         else None)"
+      by (simp add: obind_def oguard_def ogets_def K_def)
+    have after_tuple_eq:
+      "(upd_len, upd_pos, heap_w32 s (next_arr +\<^sub>p uint cand), checked + 1) =
+       (best_len', best_pos', cand', checked')"
+      using after_res_pair after_unfold
+      by (cases ?valid_next) simp_all
+    have best_len'_eq: "best_len' = upd_len"
+      and best_pos'_eq: "best_pos' = upd_pos"
+      and cand'_eq: "cand' = heap_w32 s (next_arr +\<^sub>p uint cand)"
+      and checked'_eq: "checked' = checked + 1"
+      using after_tuple_eq by simp_all
+    have upd_valid:
+      "match_valid ?src_bytes ?tgt_bytes (unat tp)
+        (unat upd_pos) (unat upd_len)"
+    proof (cases "cand + 4 \<le> src_len")
+      case False
+      have "?Update best_len best_pos cand s = Some (best_len, best_pos)"
+        using False by (simp add: ocondition_def oreturn_def K_def)
+      hence "(upd_len, upd_pos) = (best_len, best_pos)"
+        using upd_res0 upd_eq by simp
+      thus ?thesis
+        using inv by simp
+    next
+      case True
+      have upd_do:
+        "(do {
+           l <- common_prefix' src cand src_len tgt tp tgt_len;
+           oreturn
+             (if 4 \<le> l \<and> best_len < l then (l, cand)
+              else (best_len, best_pos))
+         }) s = Some (upd_len, upd_pos)"
+        using upd_res0 upd_eq True
+        by (simp add: ocondition_def)
+      obtain l where cp:
+        "common_prefix' src cand src_len tgt tp tgt_len s = Some l"
+        and upd_pair:
+        "(upd_len, upd_pos) =
+          (if 4 \<le> l \<and> best_len < l then (l, cand)
+           else (best_len, best_pos))"
+      proof (cases "common_prefix' src cand src_len tgt tp tgt_len s")
+        case None
+        thus ?thesis
+          using upd_do by (simp add: obind_def)
+      next
+        case (Some l)
+        have "(upd_len, upd_pos) =
+          (if 4 \<le> l \<and> best_len < l then (l, cand)
+           else (best_len, best_pos))"
+          using upd_do Some by (simp add: obind_def oreturn_def K_def)
+        thus ?thesis
+          using Some that by blast
+      qed
+      show ?thesis
+      proof (cases "4 \<le> l \<and> best_len < l")
+        case True
+        have "match_valid ?src_bytes ?tgt_bytes (unat tp) (unat cand) (unat l)"
+          by (rule common_prefix_valid[OF _ cand_not_noentry cp]) (use inv in simp)
+        thus ?thesis
+          using upd_pair True by simp
+      next
+        case False
+        have upd_old: "(upd_len, upd_pos) = (best_len, best_pos)"
+          using upd_pair False by simp
+        show ?thesis
+          using upd_old inv by simp
+      qed
+    qed
+    have preserved_match:
+      "match_valid ?src_bytes ?tgt_bytes (unat tp)
+        (unat best_pos') (unat best_len')"
+      using upd_valid best_len'_eq best_pos'_eq by simp
+    have preserved_cand: "?cand_ok cand'"
+      using inv cand_not_noentry cand'_eq next_cand_ok[of cand] by simp
+    show "match_valid ?src_bytes ?tgt_bytes (unat tp)
+            (unat best_pos') (unat best_len') \<and> ?cand_ok cand'"
+      using preserved_match preserved_cand by simp
+  qed
+  have body_decreases:
+    "\<And>best_len best_pos cand checked best_len' best_pos' cand' checked'.
+      \<lbrakk>checked < 0x10;
+        ?B (best_len, best_pos, cand, checked) s =
+          Some (best_len', best_pos', cand', checked')\<rbrakk>
+      \<Longrightarrow> 16 - unat checked' < 16 - unat checked"
+  proof -
+    fix best_len best_pos cand checked best_len' best_pos' cand' checked' :: "32 word"
+    assume checked_lt: "checked < 0x10"
+    assume body:
+      "?B (best_len, best_pos, cand, checked) s =
+        Some (best_len', best_pos', cand', checked')"
+    have body_obind:
+      "obind (?Update best_len best_pos cand) (?After cand checked) s =
+        Some (best_len', best_pos', cand', checked')"
+      using body by simp
+    obtain upd where after_res:
+      "?After cand checked upd s = Some (best_len', best_pos', cand', checked')"
+      using reader_obind_SomeE[OF body_obind] by blast
+    obtain upd_len upd_pos where upd_eq: "upd = (upd_len, upd_pos)"
+      by (cases upd) auto
+    let ?valid_next = "IS_VALID(32 word) s (next_arr +\<^sub>p uint cand)"
+    have after_res_pair:
+      "?After cand checked (upd_len, upd_pos) s =
+        Some (best_len', best_pos', cand', checked')"
+      using after_res upd_eq by simp
+    have after_unfold:
+      "?After cand checked (upd_len, upd_pos) s =
+        (if ?valid_next
+         then Some (upd_len, upd_pos,
+           heap_w32 s (next_arr +\<^sub>p uint cand), checked + 1)
+         else None)"
+      by (simp add: obind_def oguard_def ogets_def K_def)
+    have after_tuple_eq:
+      "(upd_len, upd_pos, heap_w32 s (next_arr +\<^sub>p uint cand), checked + 1) =
+       (best_len', best_pos', cand', checked')"
+      using after_res_pair after_unfold
+      by (cases ?valid_next) simp_all
+    have checked'_eq: "checked' = checked + 1"
+      using after_tuple_eq by simp
+    show "16 - unat checked' < 16 - unat checked"
+      using checked_measure_decreases[OF checked_lt] checked'_eq by simp
+  qed
   have loop_preserves:
     "\<And>init. (case init of (best_len, best_pos, cand, checked) \<Rightarrow>
         match_valid ?src_bytes ?tgt_bytes (unat tp)
@@ -3356,7 +3609,48 @@ proof -
       | Some (best_len, best_pos, cand, checked) \<Rightarrow>
           match_valid ?src_bytes ?tgt_bytes (unat tp)
             (unat best_pos) (unat best_len)"
-    sorry
+    apply (rule Reader_Monad.owhile_rule[
+      where I = "\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+                     cand :: 32 word, checked :: 32 word) s.
+          match_valid ?src_bytes ?tgt_bytes (unat tp)
+            (unat best_pos) (unat best_len) \<and> ?cand_ok cand"
+        and M = "measure
+          (\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+               cand :: 32 word, checked :: 32 word). 16 - unat checked)"])
+       apply (simp split: prod.splits)
+      apply simp
+    subgoal for r r'
+      apply (cases r; cases r')
+      apply (clarsimp simp: ogets_def K_def intro!: checked_measure_decreases)
+      done
+    subgoal premises prems for r r' r''
+    proof -
+      obtain best_len best_pos cand checked where cur_eq:
+        "r' = (best_len, best_pos, cand, checked)"
+        by (cases r') auto
+      obtain best_len' best_pos' cand' checked' where res_eq:
+        "r'' = (best_len', best_pos', cand', checked')"
+        by (cases r'') auto
+      have inv:
+        "match_valid ?src_bytes ?tgt_bytes (unat tp)
+          (unat best_pos) (unat best_len) \<and> ?cand_ok cand"
+        using prems(2) cur_eq by simp
+      have cand_not_noentry: "cand \<noteq> no_entry32"
+        using prems(3) cur_eq by simp
+      have body:
+        "?B (best_len, best_pos, cand, checked) s =
+          Some (best_len', best_pos', cand', checked')"
+        using prems(4) cur_eq res_eq by simp
+      have preserved:
+        "match_valid ?src_bytes ?tgt_bytes (unat tp)
+          (unat best_pos') (unat best_len') \<and> ?cand_ok cand'"
+        by (rule body_preserves[OF inv cand_not_noentry body])
+      show ?thesis
+        using preserved res_eq by simp
+    qed
+     apply simp
+    apply (clarsimp split: prod.splits)
+    done
   have loop_valid_some:
     "\<And>(init :: 32 word \<times> 32 word \<times> 32 word \<times> 32 word)
         (best_len :: 32 word) (best_pos :: 32 word)
@@ -3401,8 +3695,66 @@ proof -
     apply simp
     done
   show ?thesis
-    using result initial_cand_ok loop_valid_zero_some
-    sorry
+  proof -
+    obtain h best_len best_pos cand checked :: "32 word" where ow_unfolded:
+        "owhile
+          (\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+             cand :: 32 word, checked :: 32 word) s.
+              cand \<noteq> no_entry32 \<and> checked < (0x10 :: 32 word))
+          (\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+             cand :: 32 word, checked :: 32 word) s.
+              case if cand + 4 \<le> src_len
+                   then case common_prefix' src cand src_len tgt tp tgt_len s of
+                     None \<Rightarrow> None
+                   | Some l \<Rightarrow>
+                       Some (if 4 \<le> l \<and> best_len < l
+                         then (l, cand) else (best_len, best_pos))
+                   else Some (best_len, best_pos) of
+                None \<Rightarrow> None
+              | Some p \<Rightarrow>
+                  (case p of
+                   (best_len, best_pos) \<Rightarrow>
+                     \<lambda>s. case if IS_VALID(32 word) s
+                         (next_arr +\<^sub>p uint cand)
+                       then Some () else None of
+                         None \<Rightarrow> None
+                       | Some _ \<Rightarrow>
+                           Some (best_len, best_pos,
+                             heap_w32 s (next_arr +\<^sub>p uint cand),
+                             checked + (1 :: 32 word)))
+                  s)
+          ((0 :: 32 word), (0 :: 32 word),
+            heap_w32 s (head_arr +\<^sub>p uint (h && 0xFFFF)),
+            (0 :: 32 word)) s =
+         Some (best_len, best_pos, cand, checked)"
+      and m_eq: "m = match_t_C best_pos best_len"
+      using result not_early
+      unfolding find_best_match'_def
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: option.splits prod.splits if_splits)
+    have cand0_ok:
+      "?cand_ok (heap_w32 s (head_arr +\<^sub>p uint (h && 0xFFFF)))"
+      using initial_cand_ok[of h] by simp
+    have ow:
+      "owhile ?C ?B
+        (0, 0, heap_w32 s (head_arr +\<^sub>p uint (h && 0xFFFF)), 0) s =
+       Some (best_len, best_pos, cand, checked)"
+      using ow_unfolded
+      by (simp add: obind_def ocondition_def oreturn_def ogets_def
+                    oguard_def K_def)
+    have valid_best:
+      "match_valid ?src_bytes ?tgt_bytes (unat tp)
+        (unat best_pos) (unat best_len)"
+      by (rule loop_valid_zero_some[OF cand0_ok ow])
+    show ?thesis
+      apply (subst m_eq)
+      apply (subst match_t_C_sel_simps(1))
+      apply (subst m_eq)
+      apply (subst match_t_C_sel_simps(2))
+      apply (rule valid_best)
+      done
+  qed
 qed
 
 lemma find_best_match'_match_valid_heap_bytes_source_index:
