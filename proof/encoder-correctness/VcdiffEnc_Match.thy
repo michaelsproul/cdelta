@@ -124,6 +124,22 @@ definition source_index_heap_rel ::
        (heap_w32_list s head_arr hash_size)
        (heap_w32_list s next_arr (length src))"
 
+definition source_index_arrays_chains_closed ::
+    "byte list \<Rightarrow> 32 word list \<Rightarrow> 32 word list \<Rightarrow> bool" where
+  "source_index_arrays_chains_closed src heads nexts \<longleftrightarrow>
+     length heads = hash_size \<and>
+     length nexts = length src \<and>
+     (\<forall>h < hash_size.
+       (let bucket = index_bucket_spec (build_index_spec src) h in
+        match_word_chain nexts (Suc (length bucket)) (heads ! h) = bucket))"
+
+definition source_index_heap_chains_closed ::
+    "lifted_globals \<Rightarrow> byte list \<Rightarrow> 32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow> bool" where
+  "source_index_heap_chains_closed s src head_arr next_arr \<longleftrightarrow>
+     source_index_arrays_chains_closed src
+       (heap_w32_list s head_arr hash_size)
+       (heap_w32_list s next_arr (length src))"
+
 definition source_index_nexts_wf :: "byte list \<Rightarrow> 32 word list \<Rightarrow> bool" where
   "source_index_nexts_wf src nexts \<longleftrightarrow>
      length nexts = length src \<and>
@@ -724,6 +740,64 @@ next
   qed
 qed
 
+lemma match_word_chain_closed_take:
+  assumes closed: "match_word_chain nexts (Suc (length xs)) cand = xs"
+  shows "match_word_chain nexts n cand = take n xs"
+  using closed
+proof (induction xs arbitrary: cand n)
+  case Nil
+  show ?case
+  proof (cases n)
+    case 0
+    then show ?thesis
+      by simp
+  next
+    case (Suc n')
+    have stop: "cand = no_entry32 \<or> \<not> unat cand < length nexts"
+      using Nil.prems by (auto split: if_splits)
+    then show ?thesis
+      using Suc by (cases n') auto
+  qed
+next
+  case (Cons x xs)
+  have cand_ok: "cand \<noteq> no_entry32" "unat cand < length nexts"
+    using Cons.prems by (auto split: if_splits)
+  have chain_unfold:
+    "match_word_chain nexts (Suc (Suc (length xs))) cand =
+     unat cand #
+      match_word_chain nexts (Suc (length xs)) (nexts ! unat cand)"
+    apply (subst match_word_chain.simps)
+    using cand_ok by (simp only: if_False if_True)
+  have len_eq: "Suc (length (x # xs)) = Suc (Suc (length xs))"
+    by simp
+  have chain_eq:
+    "match_word_chain nexts (Suc (Suc (length xs))) cand = x # xs"
+    using Cons.prems len_eq by metis
+  have chain_cons:
+    "unat cand #
+      match_word_chain nexts (Suc (length xs)) (nexts ! unat cand) =
+     x # xs"
+    using chain_eq by (simp only: chain_unfold)
+  have x_eq: "x = unat cand"
+    using chain_cons by (metis list.inject)
+  have tail_closed:
+    "match_word_chain nexts (Suc (length xs)) (nexts ! unat cand) = xs"
+    using chain_cons by (metis list.inject)
+  show ?case
+  proof (cases n)
+    case 0
+    then show ?thesis
+      by simp
+  next
+    case (Suc n')
+    have tail:
+      "match_word_chain nexts n' (nexts ! unat cand) = take n' xs"
+      by (rule Cons.IH[OF tail_closed])
+    show ?thesis
+      using Suc cand_ok x_eq tail by simp
+  qed
+qed
+
 lemma match_word_chain_append_cursor:
   "match_word_chain nexts (m + n) cand =
    match_word_chain nexts m cand @
@@ -1192,6 +1266,43 @@ proof -
        (heap_w32_list s head_arr hash_size ! h) =
      take n (index_bucket_spec (build_index_spec src) h)"
     by (rule source_index_arrays_rel_take_bucket_chain[OF arrays h_lt])
+  thus ?thesis
+    using h_lt by simp
+qed
+
+lemma source_index_arrays_chains_closed_take_bucket_chain:
+  assumes closed: "source_index_arrays_chains_closed src heads nexts"
+      and h_lt: "h < hash_size"
+  shows "match_word_chain nexts n (heads ! h) =
+         take n (index_bucket_spec (build_index_spec src) h)"
+proof -
+  let ?bucket = "index_bucket_spec (build_index_spec src) h"
+  have closed_h:
+    "match_word_chain nexts (Suc (length ?bucket)) (heads ! h) = ?bucket"
+    using closed h_lt
+    by (simp add: source_index_arrays_chains_closed_def Let_def)
+  show ?thesis
+    by (rule match_word_chain_closed_take[OF closed_h])
+qed
+
+lemma source_index_heap_chains_closed_take_bucket_chain:
+  assumes closed: "source_index_heap_chains_closed s src head_arr next_arr"
+      and h_lt: "h < hash_size"
+  shows "match_word_chain (heap_w32_list s next_arr (length src)) n
+           (heap_w32 s (head_arr +\<^sub>p int h)) =
+         take n (index_bucket_spec (build_index_spec src) h)"
+proof -
+  have arrays:
+    "source_index_arrays_chains_closed src
+      (heap_w32_list s head_arr hash_size)
+      (heap_w32_list s next_arr (length src))"
+    using closed by (simp add: source_index_heap_chains_closed_def)
+  have chain:
+    "match_word_chain (heap_w32_list s next_arr (length src)) n
+       (heap_w32_list s head_arr hash_size ! h) =
+     take n (index_bucket_spec (build_index_spec src) h)"
+    by (rule source_index_arrays_chains_closed_take_bucket_chain[
+        OF arrays h_lt])
   thus ?thesis
     using h_lt by simp
 qed
