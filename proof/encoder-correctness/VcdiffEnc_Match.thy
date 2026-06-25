@@ -95,6 +95,14 @@ fun match_word_chain :: "32 word list \<Rightarrow> nat \<Rightarrow> 32 word \<
        unat cand # match_word_chain next fuel (next ! unat cand)
      else [])"
 
+fun match_word_cursor :: "32 word list \<Rightarrow> nat \<Rightarrow> 32 word \<Rightarrow> 32 word" where
+  "match_word_cursor next 0 cand = cand"
+| "match_word_cursor next (Suc fuel) cand =
+    (if cand = no_entry32 then no_entry32
+     else if unat cand < length next then
+       match_word_cursor next fuel (next ! unat cand)
+     else cand)"
+
 definition heap_w32_list :: "lifted_globals \<Rightarrow> 32 word ptr \<Rightarrow> nat \<Rightarrow> 32 word list" where
   "heap_w32_list s arr n = map (\<lambda>i. heap_w32 s (arr +\<^sub>p int i)) [0..<n]"
 
@@ -714,6 +722,74 @@ next
         by simp
     qed
   qed
+qed
+
+lemma match_word_chain_append_cursor:
+  "match_word_chain nexts (m + n) cand =
+   match_word_chain nexts m cand @
+   match_word_chain nexts n (match_word_cursor nexts m cand)"
+proof (induction m arbitrary: cand)
+  case 0
+  then show ?case
+    by simp
+next
+  case (Suc m)
+  show ?case
+  proof (cases "cand = no_entry32 \<or> \<not> unat cand < length nexts")
+    case True
+    then show ?thesis
+      by (cases n) auto
+  next
+    case False
+    then have cand_ok: "cand \<noteq> no_entry32" "unat cand < length nexts"
+      by auto
+    show ?thesis
+      using Suc.IH[of "nexts ! unat cand"] cand_ok by simp
+  qed
+qed
+
+lemma match_word_chain_Suc_cursor:
+  assumes cand: "match_word_cursor nexts n cand0 = cand"
+      and cand_not_noentry: "cand \<noteq> no_entry32"
+      and cand_lt: "unat cand < length nexts"
+  shows "match_word_chain nexts (Suc n) cand0 =
+         match_word_chain nexts n cand0 @ [unat cand]"
+proof -
+  have "match_word_chain nexts (n + 1) cand0 =
+        match_word_chain nexts n cand0 @
+        match_word_chain nexts 1 (match_word_cursor nexts n cand0)"
+    by (rule match_word_chain_append_cursor)
+  thus ?thesis
+    using assms by simp
+qed
+
+lemma match_word_cursor_Suc_step:
+  assumes cand: "match_word_cursor nexts n cand0 = cand"
+      and cand_not_noentry: "cand \<noteq> no_entry32"
+      and cand_lt: "unat cand < length nexts"
+  shows "match_word_cursor nexts (Suc n) cand0 = nexts ! unat cand"
+proof -
+  have "match_word_cursor nexts (n + 1) cand0 =
+        match_word_cursor nexts 1 (match_word_cursor nexts n cand0)"
+  proof (induction n arbitrary: cand0)
+    case 0
+    then show ?case
+      by simp
+  next
+    case (Suc n)
+    show ?case
+    proof (cases "cand0 = no_entry32 \<or> \<not> unat cand0 < length nexts")
+      case True
+      then show ?thesis
+        by auto
+    next
+      case False
+      then show ?thesis
+        using Suc.IH[of "nexts ! unat cand0"] by simp
+    qed
+  qed
+  thus ?thesis
+    using assms by simp
 qed
 
 lemma match_word_chain_update_irrelevant:
@@ -3782,6 +3858,37 @@ proof -
   show ?thesis
     using find_best_match'_early_zero[OF early_word]
     by (simp add: spec_no no_match_def)
+qed
+
+lemma choose_match_spec_heap_word:
+  fixes src tgt :: "8 word ptr"
+    and best_len best_pos cand l src_len tp tgt_len :: "32 word"
+    and s :: lifted_globals
+  defines "src_bytes \<equiv> heap_bytes s src (unat src_len)"
+  defines "tgt_bytes \<equiv> heap_bytes s tgt (unat tgt_len)"
+  defines "best \<equiv> \<lparr>em_pos = unat best_pos, em_len = unat best_len\<rparr>"
+  assumes cp: "common_prefix' src cand src_len tgt tp tgt_len s = Some l"
+      and cand_match: "unat cand + min_match \<le> length src_bytes"
+      and cand_le: "cand \<le> src_len"
+      and tp_le: "tp \<le> tgt_len"
+  shows "choose_match_spec src_bytes tgt_bytes (unat tp) (unat cand) best =
+    (if 4 \<le> l \<and> best_len < l
+     then \<lparr>em_pos = unat cand, em_len = unat l\<rparr>
+     else best)"
+proof -
+  have cp_eq:
+    "common_prefix_spec src_bytes (unat cand) (length src_bytes)
+       tgt_bytes (unat tp) (length tgt_bytes) = unat l"
+    using common_prefix'_eq_common_prefix_spec_heap_bytes[
+        OF cp cand_le tp_le]
+    by (simp add: src_bytes_def tgt_bytes_def)
+  have min_l_iff: "(min_match \<le> unat l) \<longleftrightarrow> 4 \<le> l"
+    by (simp add: min_match_def word_le_nat_alt)
+  have best_l_iff: "(em_len best < unat l) \<longleftrightarrow> best_len < l"
+    by (simp add: best_def word_less_nat_alt)
+  show ?thesis
+    using cand_match cp_eq min_l_iff best_l_iff
+    by (simp add: choose_match_spec_def best_def Let_def)
 qed
 
 lemma match_t_C_sel_simps:
