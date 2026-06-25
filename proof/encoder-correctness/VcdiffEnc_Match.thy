@@ -1583,6 +1583,15 @@ proof -
     using h_lt by simp
 qed
 
+lemma source_index_heap_chains_closed_max_chain_candidates:
+  assumes closed: "source_index_heap_chains_closed s src head_arr next_arr"
+      and h_lt: "h < hash_size"
+  shows "match_word_chain (heap_w32_list s next_arr (length src)) max_chain
+           (heap_w32 s (head_arr +\<^sub>p int h)) =
+         take max_chain (index_bucket_spec (build_index_spec src) h)"
+  by (rule source_index_heap_chains_closed_take_bucket_chain[
+      OF closed h_lt])
+
 lemma source_index_heap_rel_take_chain_member_sound:
   assumes rel: "source_index_heap_rel s src head_arr next_arr"
       and h_lt: "h < hash_size"
