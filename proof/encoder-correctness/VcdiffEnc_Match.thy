@@ -1596,6 +1596,36 @@ proof -
     done
 qed
 
+lemma hash4'_heap_bytes_buf_valid:
+  fixes src :: "8 word ptr"
+    and p src_len :: "32 word"
+  assumes len: "unat p + min_match \<le> unat src_len"
+      and src_ok: "buf_valid st src (unat src_len)"
+  shows "hash4' src p st =
+    Some (of_nat
+      (hash4_spec (heap_bytes st src (unat src_len)) (unat p)) :: 32 word)"
+proof (rule hash4'_heap_bytes[
+    where n = "unat src_len" and src_bytes = "heap_bytes st src (unat src_len)"])
+  show "heap_bytes st src (unat src_len) =
+      heap_bytes st src (unat src_len)"
+    by simp
+  show "unat p + min_match \<le> length (heap_bytes st src (unat src_len))"
+    using len by simp
+  show "length (heap_bytes st src (unat src_len)) < 2 ^ 32"
+    using unat_lt2p[of src_len] by simp
+  fix k
+  assume k_lt: "k < min_match"
+  have no_overflow: "unat p + unat (4 :: 32 word) < 2 ^ 32"
+    using len unat_lt2p[of src_len] by (simp add: min_match_def)
+  have idx: "unat (p + of_nat k :: 32 word) = unat p + k"
+    by (rule unat_add_of_nat_index[where sz = "4", OF _ no_overflow])
+       (use k_lt in \<open>simp add: min_match_def\<close>)
+  have idx_lt: "unat (p + of_nat k :: 32 word) < unat src_len"
+    using len k_lt by (simp add: idx min_match_def)
+  show "IS_VALID(8 word) st (src +\<^sub>p uint (p + of_nat k :: 32 word))"
+    by (rule buf_valid_uintD[OF src_ok idx_lt])
+qed
+
 lemma build_index_hashes_okI:
   fixes src :: "8 word ptr"
   assumes src_valid:
@@ -3858,6 +3888,58 @@ proof -
   show ?thesis
     using find_best_match'_early_zero[OF early_word]
     by (simp add: spec_no no_match_def)
+qed
+
+lemma find_best_match'_not_early_src_bound:
+  fixes src_len tgt_len tp :: "32 word"
+  assumes not_early: "\<not> (src_len < (4 :: 32 word) \<or> tgt_len - tp < 4)"
+  shows "min_match \<le> unat src_len"
+  using not_early
+  by (simp add: min_match_def word_less_nat_alt)
+
+lemma find_best_match'_not_early_tgt_bound:
+  fixes src_len tgt_len tp :: "32 word"
+  assumes tp_le: "tp \<le> tgt_len"
+      and not_early: "\<not> (src_len < (4 :: 32 word) \<or> tgt_len - tp < 4)"
+  shows "unat tp + min_match \<le> unat tgt_len"
+proof -
+  have not_lt: "\<not> (tgt_len - tp < (4 :: 32 word))"
+    using not_early by simp
+  have "unat (4 :: 32 word) \<le> unat (tgt_len - tp)"
+    using not_lt by (simp add: word_less_nat_alt not_less)
+  hence "4 \<le> unat (tgt_len - tp)"
+    by simp
+  also have "\<dots> = unat tgt_len - unat tp"
+    using tp_le by (simp add: unat_sub word_le_nat_alt)
+  finally show ?thesis
+    by (simp add: min_match_def)
+qed
+
+lemma find_best_match'_target_hash_bucket:
+  fixes tgt :: "8 word ptr"
+    and src_len tgt_len tp hv :: "32 word"
+  assumes tp_le: "tp \<le> tgt_len"
+      and not_early: "\<not> (src_len < (4 :: 32 word) \<or> tgt_len - tp < 4)"
+      and tgt_ok: "buf_valid s tgt (unat tgt_len)"
+      and hash_res: "hash4' tgt tp s = Some hv"
+  shows "hv && 0xFFFF =
+    (of_nat (hash_bucket_spec (heap_bytes s tgt (unat tgt_len)) (unat tp))
+      :: 32 word)"
+proof -
+  have len: "unat tp + min_match \<le> unat tgt_len"
+    by (rule find_best_match'_not_early_tgt_bound[OF tp_le not_early])
+  have hash_eq:
+    "hash4' tgt tp s =
+      Some (of_nat
+        (hash4_spec (heap_bytes s tgt (unat tgt_len)) (unat tp)) :: 32 word)"
+    by (rule hash4'_heap_bytes_buf_valid[OF len tgt_ok])
+  hence hv_eq:
+    "hv =
+      (of_nat
+        (hash4_spec (heap_bytes s tgt (unat tgt_len)) (unat tp)) :: 32 word)"
+    using hash_res by simp
+  show ?thesis
+    using hv_eq by (simp add: hash_bucket_word_from_hash4_spec)
 qed
 
 lemma choose_match_spec_heap_word:
