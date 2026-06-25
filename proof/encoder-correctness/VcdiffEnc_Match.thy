@@ -2488,6 +2488,88 @@ proof -
   qed
 qed
 
+lemma build_index'_source_index_heap_rel_nexts_wf:
+  fixes src :: "8 word ptr"
+    and src_len :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes src_len_word:
+        "unat src_len < unat (no_entry32 :: 32 word)"
+      and src_valid:
+        "\<And>(off :: 32 word) (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; unat off < unat src_len\<rbrakk> \<Longrightarrow>
+          IS_VALID(8 word) st' (src +\<^sub>p uint off)"
+      and head_valid:
+        "\<And>h (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; h < hash_size\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (head +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; p < unat src_len\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+      and head_no_alias:
+        "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> head +\<^sub>p int bucket"
+      and next_no_alias:
+        "\<And>q p. \<lbrakk>q < unat src_len; p < unat src_len; q \<noteq> p\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+      and next_head_disjoint:
+        "\<And>h p. \<lbrakk>h < hash_size; p < unat src_len\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+      and head_next_disjoint:
+        "\<And>q bucket. \<lbrakk>q < unat src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int bucket"
+  shows "build_index' src src_len head next_arr \<bullet> s
+    \<lbrace> \<lambda>r t. r = Result () \<and>
+        source_index_heap_rel t (heap_bytes s src (unat src_len)) head next_arr
+        \<and> source_index_heap_nexts_wf t
+          (heap_bytes s src (unat src_len)) next_arr
+        \<and> heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have hashes:
+    "build_index_hashes_ok s src src_len
+      (heap_bytes s src (unat src_len))"
+    by (rule build_index_hashes_okI[OF src_valid])
+  show ?thesis
+  proof (cases "src_len < (4 :: 32 word)")
+    case True
+    have head_valid_word:
+      "\<And>idx. idx < (0x10000 :: 32 word) \<Longrightarrow>
+        IS_VALID(32 word) s (head +\<^sub>p uint idx)"
+    proof -
+      fix idx :: "32 word"
+      assume idx_lt: "idx < (0x10000 :: 32 word)"
+      have idx_nat_lt: "unat idx < hash_size"
+        using idx_lt by (simp add: word_less_nat_alt)
+      have ptr_eq: "head +\<^sub>p uint idx = head +\<^sub>p int (unat idx)"
+        by (simp only: uint_nat)
+      show "IS_VALID(32 word) s (head +\<^sub>p uint idx)"
+        apply (subst ptr_eq)
+        by (rule head_valid[where st' = s and h = "unat idx", OF _ idx_nat_lt])
+           simp
+    qed
+    have short:
+      "build_index' src src_len head next_arr \<bullet> s
+        \<lbrace> \<lambda>r t. r = Result () \<and>
+            source_index_heap_rel t
+              (heap_bytes s src (unat src_len)) head next_arr \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+      by (rule build_index'_short_source_index_heap_rel[
+            OF True head_valid_word])
+    show ?thesis
+      apply (rule runs_to_weaken[OF short])
+      apply (insert True)
+      apply (clarsimp simp: source_index_heap_nexts_wf_def
+          source_index_nexts_wf_def min_match_def word_less_nat_alt)
+      done
+  next
+    case False
+    show ?thesis
+      by (rule build_index'_long_source_index_heap_rel[
+          OF False src_len_word hashes head_valid next_valid head_no_alias
+            next_no_alias next_head_disjoint head_next_disjoint])
+  qed
+qed
+
 lemma build_index'_source_index_heap_rel_buf_valid:
   fixes src :: "8 word ptr"
     and src_len :: "32 word"
@@ -2520,6 +2602,52 @@ lemma build_index'_source_index_heap_rel_buf_valid:
         source_index_heap_rel t (heap_bytes s src (unat src_len)) head next_arr
         \<and> heap_typing t = heap_typing s \<rbrace>"
 proof (rule build_index'_source_index_heap_rel[
+    OF src_len_word _ head_valid next_valid head_no_alias next_no_alias
+      next_head_disjoint head_next_disjoint])
+  fix off :: "32 word"
+  fix st' :: lifted_globals
+  assume typing: "heap_typing st' = heap_typing s"
+  assume off_lt: "unat off < unat src_len"
+  have ptr: "ptr_valid (heap_typing s) (src +\<^sub>p uint off)"
+    by (rule buf_valid_uintD[OF src_ok off_lt])
+  show "IS_VALID(8 word) st' (src +\<^sub>p uint off)"
+    using ptr typing by simp
+qed
+
+lemma build_index'_source_index_heap_rel_nexts_wf_buf_valid:
+  fixes src :: "8 word ptr"
+    and src_len :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes src_len_word:
+        "unat src_len < unat (no_entry32 :: 32 word)"
+      and src_ok: "buf_valid s src (unat src_len)"
+      and head_valid:
+        "\<And>h (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; h < hash_size\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (head +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; p < unat src_len\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+      and head_no_alias:
+        "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> head +\<^sub>p int bucket"
+      and next_no_alias:
+        "\<And>q p. \<lbrakk>q < unat src_len; p < unat src_len; q \<noteq> p\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+      and next_head_disjoint:
+        "\<And>h p. \<lbrakk>h < hash_size; p < unat src_len\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+      and head_next_disjoint:
+        "\<And>q bucket. \<lbrakk>q < unat src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int bucket"
+  shows "build_index' src src_len head next_arr \<bullet> s
+    \<lbrace> \<lambda>r t. r = Result () \<and>
+        source_index_heap_rel t (heap_bytes s src (unat src_len)) head next_arr
+        \<and> source_index_heap_nexts_wf t
+          (heap_bytes s src (unat src_len)) next_arr
+        \<and> heap_typing t = heap_typing s \<rbrace>"
+proof (rule build_index'_source_index_heap_rel_nexts_wf[
     OF src_len_word _ head_valid next_valid head_no_alias next_no_alias
       next_head_disjoint head_next_disjoint])
   fix off :: "32 word"
@@ -2653,6 +2781,76 @@ proof -
     using no_overflow by (simp add: unat_word_ariths(1))
   show ?thesis
     using checked_lt by (simp add: unat_suc)
+qed
+
+lemma common_prefix_fuel_eqI:
+  assumes l_le: "l \<le> fuel"
+      and prefix:
+        "\<And>i. i < l \<Longrightarrow>
+          apos + i < length a \<and>
+          bpos + i < length b \<and>
+          a ! (apos + i) = b ! (bpos + i)"
+      and stop:
+        "l = fuel \<or>
+         apos + l \<ge> length a \<or>
+         bpos + l \<ge> length b \<or>
+         a ! (apos + l) \<noteq> b ! (bpos + l)"
+  shows "common_prefix_fuel fuel a apos b bpos = l"
+  using assms
+proof (induction fuel arbitrary: apos bpos l)
+  case 0
+  then show ?case by simp
+next
+  case (Suc fuel)
+  show ?case
+  proof (cases l)
+    case 0
+    have stop0:
+      "apos \<ge> length a \<or>
+       bpos \<ge> length b \<or>
+       a ! apos \<noteq> b ! bpos"
+      using Suc.prems(3) 0 by auto
+    show ?thesis
+      using 0 stop0 by auto
+  next
+    case (Suc l')
+    have cond:
+      "apos < length a \<and> bpos < length b \<and> a ! apos = b ! bpos"
+      using Suc.prems(2)[of 0] Suc by simp
+    have l'_le: "l' \<le> fuel"
+      using Suc.prems(1) Suc by simp
+    have prefix':
+      "\<And>i. i < l' \<Longrightarrow>
+        (apos + 1) + i < length a \<and>
+        (bpos + 1) + i < length b \<and>
+        a ! ((apos + 1) + i) = b ! ((bpos + 1) + i)"
+    proof -
+      fix i
+      assume i_lt: "i < l'"
+      have "Suc i < l"
+        using i_lt Suc by simp
+      have step: "apos + Suc i = (apos + 1) + i"
+        by simp
+      have step_b: "bpos + Suc i = (bpos + 1) + i"
+        by simp
+      show "(apos + 1) + i < length a \<and>
+        (bpos + 1) + i < length b \<and>
+        a ! ((apos + 1) + i) = b ! ((bpos + 1) + i)"
+        using Suc.prems(2)[OF \<open>Suc i < l\<close>]
+        by (simp add: step step_b)
+    qed
+    have stop':
+      "l' = fuel \<or>
+       (apos + 1) + l' \<ge> length a \<or>
+       (bpos + 1) + l' \<ge> length b \<or>
+       a ! ((apos + 1) + l') \<noteq> b ! ((bpos + 1) + l')"
+      using Suc.prems(3) Suc by auto
+    have rec:
+      "common_prefix_fuel fuel a (apos + 1) b (bpos + 1) = l'"
+      by (rule Suc.IH[OF l'_le prefix' stop'])
+    show ?thesis
+      using Suc cond rec by simp
+  qed
 qed
 
 lemma common_prefix'_result_sound_word:
@@ -3023,6 +3221,435 @@ proof -
     by simp
 qed
 
+lemma common_prefix'_result_maximal_word:
+  fixes src tgt :: "8 word ptr"
+    and cand src_len tp tgt_len l :: "32 word"
+  assumes result:
+    "common_prefix' src cand src_len tgt tp tgt_len s = Some l"
+  defines "limit \<equiv>
+    (if src_len - cand < tgt_len - tp then src_len - cand else tgt_len - tp)"
+  shows "unat l = unat limit \<or>
+    heap_w8 s (src +\<^sub>p uint (cand + of_nat (unat l) :: 32 word)) \<noteq>
+    heap_w8 s (tgt +\<^sub>p uint (tp + of_nat (unat l) :: 32 word))"
+proof -
+  let ?eq = "\<lambda>i.
+    heap_w8 s (src +\<^sub>p uint (cand + of_nat i :: 32 word)) =
+    heap_w8 s (tgt +\<^sub>p uint (tp + of_nat i :: 32 word))"
+  let ?C = "\<lambda>(n :: 32 word, ret :: int) s. ret \<noteq> 0"
+  let ?B = "\<lambda>(n :: 32 word, ret :: int).
+    do {
+      ret <-
+        ocondition
+          (\<lambda>s. n + 1 < limit)
+          (do {
+             oguard
+              (\<lambda>st.
+                  IS_VALID(8 word) st
+                    (tgt +\<^sub>p uint (tp + (n + 1))) \<and>
+                  IS_VALID(8 word) st
+                    (src +\<^sub>p uint (cand + (n + 1))));
+             ogets
+              (\<lambda>s. if heap_w8 s (src +\<^sub>p uint (cand + (n + 1))) =
+                      heap_w8 s (tgt +\<^sub>p uint (tp + (n + 1)))
+                   then 1 else 0)
+           })
+          (oreturn 0);
+      oreturn (n + 1, ret)
+    }"
+  let ?I = "\<lambda>(n :: 32 word, ret :: int) s.
+    unat n \<le> unat limit \<and>
+    (\<forall>i < unat n. ?eq i) \<and>
+    (ret \<noteq> 0 \<longleftrightarrow> unat n < unat limit \<and> ?eq (unat n))"
+  have body_preserves:
+    "\<And>n ret n' ret'. \<lbrakk>?I (n, ret) s; ret \<noteq> 0;
+      ?B (n, ret) s = Some (n', ret')\<rbrakk> \<Longrightarrow> ?I (n', ret') s"
+  proof -
+    fix n n' :: "32 word"
+    fix ret ret' :: int
+    assume inv: "?I (n, ret) s"
+    assume ret_ne: "ret \<noteq> 0"
+    assume body: "?B (n, ret) s = Some (n', ret')"
+    have n_lt: "unat n < unat limit"
+      using inv ret_ne by simp
+    have n_word_lt: "n < limit"
+      using n_lt by (simp add: word_less_nat_alt)
+    have n_suc_unat: "unat (n + 1) = Suc (unat n)"
+      by (rule unat_suc_word_less[OF n_word_lt])
+    have n'_eq: "n' = n + 1"
+      using body
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: if_splits)
+    have old_eq: "\<And>i. i < unat n \<Longrightarrow> ?eq i"
+      using inv by simp
+    have n_eq: "?eq (unat n)"
+      using inv ret_ne by simp
+    have prefix': "\<And>i. i < unat (n + 1) \<Longrightarrow> ?eq i"
+    proof -
+      fix i
+      assume i_lt: "i < unat (n + 1)"
+      hence "i < unat n \<or> i = unat n"
+        using n_suc_unat by (simp add: less_Suc_eq)
+      thus "?eq i"
+        using old_eq n_eq by auto
+    qed
+    have ret'_iff:
+      "ret' \<noteq> 0 \<longleftrightarrow> unat (n + 1) < unat limit \<and> ?eq (unat (n + 1))"
+      using body
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def word_less_nat_alt add.commute
+               split: if_splits)
+    show "?I (n', ret') s"
+      using n'_eq n_lt n_suc_unat prefix' ret'_iff by (auto simp: add.commute)
+  qed
+  have body_decreases:
+    "\<And>n ret n' ret'. \<lbrakk>?I (n, ret) s; ret \<noteq> 0;
+      ?B (n, ret) s = Some (n', ret')\<rbrakk> \<Longrightarrow>
+      unat limit - unat n' < unat limit - unat n"
+  proof (goal_cases)
+    case (1 n ret n' ret')
+    have n_lt: "unat n < unat limit"
+      using 1(1,2) by simp
+    have n_word_lt: "n < limit"
+      using n_lt by (simp add: word_less_nat_alt)
+    have n_suc_unat: "unat (n + 1) = Suc (unat n)"
+      by (rule unat_suc_word_less[OF n_word_lt])
+    have n'_eq: "n' = n + 1"
+      using 1(3)
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: if_splits)
+    have dec: "unat limit - unat (n + 1) < unat limit - unat n"
+      using n_lt n_suc_unat by simp
+    show ?case
+      using dec n'_eq by simp
+  qed
+  let ?Init =
+    "ocondition
+      (\<lambda>s. 0 < limit)
+      (do {
+         oguard
+          (\<lambda>st.
+              IS_VALID(8 word) st (tgt +\<^sub>p uint tp) \<and>
+              IS_VALID(8 word) st (src +\<^sub>p uint cand));
+         ogets
+          (\<lambda>s. if heap_w8 s (src +\<^sub>p uint cand) =
+                  heap_w8 s (tgt +\<^sub>p uint tp)
+               then 1 else 0)
+       })
+      (oreturn 0)"
+  have result_unfolded:
+    "(do {
+       ret <- ?Init;
+       (n, ret) <- owhile ?C ?B (0, ret);
+       oreturn n
+     }) s = Some l"
+  proof -
+    have "common_prefix' src cand src_len tgt tp tgt_len s =
+      (do {
+         ret <- ?Init;
+         (n, ret) <- owhile ?C ?B (0, ret);
+         oreturn n
+       }) s"
+      unfolding common_prefix'_def limit_def[symmetric]
+      by (simp add: fun_eq_iff split_def)
+    thus ?thesis
+      using result by simp
+  qed
+  obtain ret :: int where ret_step: "?Init s = Some ret"
+    using result_unfolded
+    by (auto simp: obind_def split: option.splits)
+  obtain ret_final :: int where loop_res:
+      "owhile ?C ?B (0, ret) s = Some (l, ret_final)"
+    using result_unfolded ret_step
+    by (auto simp: obind_def oreturn_def K_def split: option.splits prod.splits)
+  have init_inv: "?I (0, ret) s"
+    using ret_step
+    by (auto simp: ocondition_def obind_def oreturn_def ogets_def oguard_def
+                   K_def word_less_nat_alt
+             split: if_splits)
+  have loop_post:
+    "case owhile ?C ?B (0, ret) s of
+       None \<Rightarrow> True
+     | Some (n, ret') \<Rightarrow> ?I (n, ret') s \<and> ret' = 0"
+  proof (rule Reader_Monad.owhile_rule[
+      where I = ?I
+        and M = "measure (\<lambda>(n :: 32 word, ret :: int).
+          unat limit - unat n)"])
+    show "?I (0, ret) s"
+      by (rule init_inv)
+  next
+    show "wf (measure (\<lambda>(n :: 32 word, ret :: int).
+          unat limit - unat n))"
+      by simp
+  next
+    fix r r' :: "32 word \<times> int"
+    assume inv: "?I r s"
+      and cond: "?C r s"
+      and body: "?B r s = Some r'"
+    obtain n ret0 where r_eq: "r = (n, ret0)"
+      by (cases r) auto
+    obtain n' ret' where r'_eq: "r' = (n', ret')"
+      by (cases r') auto
+    have inv_pair: "?I (n, ret0) s"
+      using inv r_eq by simp
+    have cond_pair: "ret0 \<noteq> 0"
+      using cond r_eq by simp
+    have body_pair: "?B (n, ret0) s = Some (n', ret')"
+      using body r_eq r'_eq by simp
+    have "unat limit - unat n' < unat limit - unat n"
+      by (rule body_decreases[OF inv_pair cond_pair body_pair])
+    thus "(r', r) \<in> measure (\<lambda>(n :: 32 word, ret :: int).
+          unat limit - unat n)"
+      using r_eq r'_eq by simp
+  next
+    fix r r' :: "32 word \<times> int"
+    assume inv: "?I r s"
+      and cond: "?C r s"
+      and body: "?B r s = Some r'"
+    obtain n ret0 where r_eq: "r = (n, ret0)"
+      by (cases r) auto
+    obtain n' ret' where r'_eq: "r' = (n', ret')"
+      by (cases r') auto
+    have inv_pair: "?I (n, ret0) s"
+      using inv r_eq by simp
+    have cond_pair: "ret0 \<noteq> 0"
+      using cond r_eq by simp
+    have body_pair: "?B (n, ret0) s = Some (n', ret')"
+      using body r_eq r'_eq by simp
+    have "?I (n', ret') s"
+      by (rule body_preserves[OF inv_pair cond_pair body_pair])
+    thus "?I r' s"
+      using r'_eq by simp
+  next
+    fix r :: "32 word \<times> int"
+    assume "?I r s" "?C r s" "?B r s = None"
+    show "case None of None \<Rightarrow> True
+      | Some (n, ret') \<Rightarrow> ?I (n, ret') s \<and> ret' = 0"
+      by simp
+  next
+    fix r :: "32 word \<times> int"
+    assume inv: "?I r s"
+      and exit: "\<not> ?C r s"
+    obtain n ret0 where r_eq: "r = (n, ret0)"
+      by (cases r) auto
+    have ret0_zero: "ret0 = 0"
+      using exit r_eq by simp
+    show "case Some r of None \<Rightarrow> True
+      | Some (n, ret') \<Rightarrow> ?I (n, ret') s \<and> ret' = 0"
+      using inv ret0_zero r_eq by simp
+  qed
+  have post_case:
+    "(case Some (l, ret_final) of
+       None \<Rightarrow> True
+     | Some (n, ret') \<Rightarrow> ?I (n, ret') s \<and> ret' = 0)"
+    using loop_post by (simp only: loop_res)
+  have post_pair: "?I (l, ret_final) s \<and> ret_final = 0"
+    using post_case by auto
+  have final_inv: "?I (l, ret_final) s"
+    by (rule conjunct1[OF post_pair])
+  have ret_final_zero: "ret_final = 0"
+    by (rule conjunct2[OF post_pair])
+  show ?thesis
+  proof (cases "unat l = unat limit")
+    case True
+    then show ?thesis by simp
+  next
+    case False
+    have l_le: "unat l \<le> unat limit"
+      using final_inv by simp
+    have "unat l < unat limit"
+      using l_le False by linarith
+    hence "\<not> ?eq (unat l)"
+      using final_inv ret_final_zero by (simp add: word_unat.Rep_inverse)
+    then show ?thesis by (simp add: word_unat.Rep_inverse)
+  qed
+qed
+
+lemma common_prefix'_eq_common_prefix_spec_heap_bytes:
+  fixes src tgt :: "8 word ptr"
+    and cand src_len tp tgt_len l :: "32 word"
+  assumes cp: "common_prefix' src cand src_len tgt tp tgt_len s = Some l"
+      and cand_le: "cand \<le> src_len"
+      and tp_le: "tp \<le> tgt_len"
+  shows "unat l =
+    common_prefix_spec
+      (heap_bytes s src (unat src_len)) (unat cand) (unat src_len)
+      (heap_bytes s tgt (unat tgt_len)) (unat tp) (unat tgt_len)"
+proof -
+  let ?src_bytes = "heap_bytes s src (unat src_len)"
+  let ?tgt_bytes = "heap_bytes s tgt (unat tgt_len)"
+  let ?limit =
+    "if src_len - cand < tgt_len - tp then src_len - cand else tgt_len - tp"
+  let ?fuel = "min (unat src_len - unat cand) (unat tgt_len - unat tp)"
+  have limit_nat:
+    "unat ?limit = ?fuel"
+  proof (cases "src_len - cand < tgt_len - tp")
+    case True
+    have left: "unat (src_len - cand) = unat src_len - unat cand"
+      using cand_le by (simp add: unat_sub word_le_nat_alt)
+    have le: "unat (src_len - cand) \<le> unat (tgt_len - tp)"
+      using True by (simp add: word_less_nat_alt)
+    have right_ge:
+      "unat src_len - unat cand \<le> unat tgt_len - unat tp"
+      using le left tp_le by (simp add: unat_sub word_le_nat_alt)
+    show ?thesis
+      using True left right_ge by simp
+  next
+    case False
+    have right: "unat (tgt_len - tp) = unat tgt_len - unat tp"
+      using tp_le by (simp add: unat_sub word_le_nat_alt)
+    have word_le: "tgt_len - tp \<le> src_len - cand"
+      using False by simp
+    have le: "unat (tgt_len - tp) \<le> unat (src_len - cand)"
+      using word_le by (simp add: word_le_nat_alt)
+    have left_ge:
+      "unat tgt_len - unat tp \<le> unat src_len - unat cand"
+      using le right cand_le by (simp add: unat_sub word_le_nat_alt)
+    show ?thesis
+      using False right left_ge by simp
+  qed
+  have sound:
+    "unat l \<le> unat ?limit \<and>
+     (\<forall>i < unat l.
+       heap_w8 s (src +\<^sub>p uint (cand + of_nat i :: 32 word)) =
+       heap_w8 s (tgt +\<^sub>p uint (tp + of_nat i :: 32 word)))"
+    using common_prefix'_result_sound_word[OF cp] by simp
+  have maximal:
+    "unat l = unat ?limit \<or>
+     heap_w8 s (src +\<^sub>p uint (cand + of_nat (unat l) :: 32 word)) \<noteq>
+     heap_w8 s (tgt +\<^sub>p uint (tp + of_nat (unat l) :: 32 word))"
+    using common_prefix'_result_maximal_word[OF cp] by simp
+  have l_le_fuel: "unat l \<le> ?fuel"
+    using sound limit_nat by simp
+  have fuel_src: "?fuel \<le> unat src_len - unat cand"
+    by simp
+  have fuel_tgt: "?fuel \<le> unat tgt_len - unat tp"
+    by simp
+  have prefix_list:
+    "\<And>i. i < unat l \<Longrightarrow>
+      unat cand + i < length ?src_bytes \<and>
+      unat tp + i < length ?tgt_bytes \<and>
+      ?src_bytes ! (unat cand + i) = ?tgt_bytes ! (unat tp + i)"
+  proof -
+    fix i
+    assume i_lt: "i < unat l"
+    have src_bound: "unat cand + i < unat src_len"
+      using i_lt l_le_fuel fuel_src cand_le
+      by (simp add: word_le_nat_alt, linarith)
+    have tgt_bound: "unat tp + i < unat tgt_len"
+      using i_lt l_le_fuel fuel_tgt tp_le
+      by (simp add: word_le_nat_alt, linarith)
+    have src_no_overflow: "unat cand + i < 2 ^ 32"
+      using src_bound unat_lt2p[of src_len] by simp
+    have tgt_no_overflow: "unat tp + i < 2 ^ 32"
+      using tgt_bound unat_lt2p[of tgt_len] by simp
+    have i_lt32: "i < 2 ^ 32"
+      using src_no_overflow by simp
+    have of_i_unat: "unat (of_nat i :: 32 word) = i"
+      using i_lt32 by (simp add: unat_of_nat_eq)
+    have src_idx: "unat (cand + of_nat i :: 32 word) = unat cand + i"
+      using src_no_overflow of_i_unat by (simp add: unat_word_ariths)
+    have tgt_idx: "unat (tp + of_nat i :: 32 word) = unat tp + i"
+      using tgt_no_overflow of_i_unat by (simp add: unat_word_ariths)
+    have ptr_eq:
+      "heap_w8 s (src +\<^sub>p uint (cand + of_nat i :: 32 word)) =
+       heap_w8 s (tgt +\<^sub>p uint (tp + of_nat i :: 32 word))"
+      using sound i_lt by blast
+    have src_ptr:
+      "src +\<^sub>p uint (cand + of_nat i :: 32 word) =
+       src +\<^sub>p int (unat cand + i)"
+      by (simp only: src_idx uint_nat)
+    have tgt_ptr:
+      "tgt +\<^sub>p uint (tp + of_nat i :: 32 word) =
+       tgt +\<^sub>p int (unat tp + i)"
+      by (simp only: tgt_idx uint_nat)
+    have src_byte:
+      "?src_bytes ! (unat cand + i) =
+       heap_w8 s (src +\<^sub>p int (unat cand + i))"
+      using src_bound by (simp add: heap_bytes_nth)
+    have tgt_byte:
+      "?tgt_bytes ! (unat tp + i) =
+       heap_w8 s (tgt +\<^sub>p int (unat tp + i))"
+      using tgt_bound by (simp add: heap_bytes_nth)
+    have byte_eq:
+      "?src_bytes ! (unat cand + i) = ?tgt_bytes ! (unat tp + i)"
+      using ptr_eq src_ptr tgt_ptr src_byte tgt_byte by simp
+    show "unat cand + i < length ?src_bytes \<and>
+      unat tp + i < length ?tgt_bytes \<and>
+      ?src_bytes ! (unat cand + i) = ?tgt_bytes ! (unat tp + i)"
+      using src_bound tgt_bound byte_eq by simp
+  qed
+  have stop:
+    "unat l = ?fuel \<or>
+     unat cand + unat l \<ge> length ?src_bytes \<or>
+     unat tp + unat l \<ge> length ?tgt_bytes \<or>
+     ?src_bytes ! (unat cand + unat l) \<noteq>
+     ?tgt_bytes ! (unat tp + unat l)"
+  proof (cases "unat l = unat ?limit")
+    case True
+    then show ?thesis
+      using limit_nat by simp
+  next
+    case False
+    have l_lt_limit: "unat l < unat ?limit"
+      using sound False by linarith
+    have src_bound: "unat cand + unat l < unat src_len"
+      using l_lt_limit limit_nat fuel_src cand_le
+      by (simp add: word_le_nat_alt, linarith)
+    have tgt_bound: "unat tp + unat l < unat tgt_len"
+      using l_lt_limit limit_nat fuel_tgt tp_le
+      by (simp add: word_le_nat_alt, linarith)
+    have src_no_overflow: "unat cand + unat l < 2 ^ 32"
+      using src_bound unat_lt2p[of src_len] by simp
+    have tgt_no_overflow: "unat tp + unat l < 2 ^ 32"
+      using tgt_bound unat_lt2p[of tgt_len] by simp
+    have l_lt32: "unat l < 2 ^ 32"
+      using src_no_overflow by simp
+    have of_l_unat: "unat (of_nat (unat l) :: 32 word) = unat l"
+      using l_lt32 by (simp add: unat_of_nat_eq)
+    have src_idx:
+      "unat (cand + of_nat (unat l) :: 32 word) = unat cand + unat l"
+      using src_no_overflow of_l_unat by (simp add: unat_word_ariths)
+    have tgt_idx:
+      "unat (tp + of_nat (unat l) :: 32 word) = unat tp + unat l"
+      using tgt_no_overflow of_l_unat by (simp add: unat_word_ariths)
+    have ptr_neq:
+      "heap_w8 s (src +\<^sub>p uint (cand + of_nat (unat l) :: 32 word)) \<noteq>
+       heap_w8 s (tgt +\<^sub>p uint (tp + of_nat (unat l) :: 32 word))"
+      using maximal False by simp
+    have src_ptr:
+      "src +\<^sub>p uint (cand + of_nat (unat l) :: 32 word) =
+       src +\<^sub>p int (unat cand + unat l)"
+      by (simp only: src_idx uint_nat)
+    have tgt_ptr:
+      "tgt +\<^sub>p uint (tp + of_nat (unat l) :: 32 word) =
+       tgt +\<^sub>p int (unat tp + unat l)"
+      by (simp only: tgt_idx uint_nat)
+    have src_byte:
+      "?src_bytes ! (unat cand + unat l) =
+       heap_w8 s (src +\<^sub>p int (unat cand + unat l))"
+      using src_bound by (simp add: heap_bytes_nth)
+    have tgt_byte:
+      "?tgt_bytes ! (unat tp + unat l) =
+       heap_w8 s (tgt +\<^sub>p int (unat tp + unat l))"
+      using tgt_bound by (simp add: heap_bytes_nth)
+    have byte_neq:
+      "?src_bytes ! (unat cand + unat l) \<noteq>
+       ?tgt_bytes ! (unat tp + unat l)"
+      using ptr_neq src_ptr tgt_ptr src_byte tgt_byte by simp
+    show ?thesis
+      using byte_neq by simp
+  qed
+  have fuel_eq:
+    "common_prefix_fuel ?fuel ?src_bytes (unat cand) ?tgt_bytes (unat tp) =
+     unat l"
+    by (rule common_prefix_fuel_eqI[OF l_le_fuel prefix_list stop])
+  show ?thesis
+    using fuel_eq
+    by (simp add: common_prefix_spec_def)
+qed
+
 lemma common_prefix'_match_valid_heap_bytes:
   fixes src tgt :: "8 word ptr"
     and cand src_len tp tgt_len l :: "32 word"
@@ -3113,6 +3740,49 @@ lemma find_best_match'_early_zero_valid:
        (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
   using find_best_match'_early_zero[OF early]
   by auto
+
+lemma match_t_C_eq_enc_matchI:
+  assumes pos: "match_t_C.pos_C m = of_nat (em_pos pm)"
+      and len: "match_t_C.len_C m = of_nat (em_len pm)"
+  shows "m = match_t_C (of_nat (em_pos pm)) (of_nat (em_len pm))"
+  using assms
+  by (cases m) simp
+
+lemma find_best_match'_early_eq_find_best_match_spec:
+  fixes index :: source_index
+  assumes early_word: "src_len < 4 \<or> tgt_len - tp < 4"
+      and src_len_eq: "length src_bytes = unat src_len"
+      and tgt_len_eq: "length tgt_bytes = unat tgt_len"
+      and tp_le: "tp \<le> tgt_len"
+  shows "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+    Some (match_t_C
+      (of_nat (em_pos (find_best_match_spec src_bytes tgt_bytes (unat tp) index)))
+      (of_nat (em_len (find_best_match_spec src_bytes tgt_bytes (unat tp) index))))"
+proof -
+  have early_nat:
+    "length src_bytes < min_match \<or>
+     length tgt_bytes - unat tp < min_match"
+  proof (cases "src_len < 4")
+    case True
+    then show ?thesis
+      using src_len_eq by (simp add: word_less_nat_alt min_match_def)
+  next
+    case False
+    with early_word have tgt_early: "tgt_len - tp < 4"
+      by simp
+    have "unat (tgt_len - tp) = unat tgt_len - unat tp"
+      using tp_le by (simp add: unat_sub word_le_nat_alt)
+    with tgt_early show ?thesis
+      using tgt_len_eq by (simp add: word_less_nat_alt min_match_def)
+  qed
+  have spec_no:
+    "find_best_match_spec src_bytes tgt_bytes (unat tp) index = no_match"
+    using early_nat
+    by (simp add: find_best_match_spec_def no_match_def)
+  show ?thesis
+    using find_best_match'_early_zero[OF early_word]
+    by (simp add: spec_no no_match_def)
+qed
 
 lemma match_t_C_sel_simps:
   "match_t_C.pos_C (match_t_C pos len) = pos"
