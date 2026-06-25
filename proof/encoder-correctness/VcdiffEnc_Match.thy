@@ -1628,6 +1628,55 @@ proof (intro conjI allI impI)
     by simp
 qed
 
+lemma source_index_arrays_rel_short_chains_closed:
+  assumes rel: "source_index_arrays_rel src heads nexts"
+      and src_short: "length src < min_match"
+  shows "source_index_arrays_chains_closed src heads nexts"
+proof -
+  have heads_len: "length heads = hash_size"
+    using rel by (simp add: source_index_arrays_rel_def)
+  have nexts_len: "length nexts = length src"
+    using rel by (simp add: source_index_arrays_rel_def)
+  show ?thesis
+    unfolding source_index_arrays_chains_closed_def
+  proof (intro conjI allI impI)
+    show "length heads = hash_size"
+      by (rule heads_len)
+    show "length nexts = length src"
+      by (rule nexts_len)
+    fix h
+    assume h_lt: "h < hash_size"
+    have bucket_empty: "index_bucket_spec (build_index_spec src) h = []"
+      using src_short h_lt
+      by (simp add: index_bucket_spec_def build_index_spec_def source_positions_spec_def)
+    have head_empty: "heads ! h = no_entry32"
+      using rel h_lt bucket_empty
+      by (simp add: source_index_arrays_rel_def Let_def)
+    show "let bucket = index_bucket_spec (build_index_spec src) h in
+        match_word_chain nexts (Suc (length bucket)) (heads ! h) = bucket"
+      using bucket_empty head_empty by simp
+  qed
+qed
+
+lemma source_index_heap_rel_short_chains_closed:
+  assumes rel: "source_index_heap_rel s src head_arr next_arr"
+      and src_short: "length src < min_match"
+  shows "source_index_heap_chains_closed s src head_arr next_arr"
+proof -
+  have arrays:
+    "source_index_arrays_rel src
+      (heap_w32_list s head_arr hash_size)
+      (heap_w32_list s next_arr (length src))"
+    using rel by (simp add: source_index_heap_rel_def)
+  have closed:
+    "source_index_arrays_chains_closed src
+      (heap_w32_list s head_arr hash_size)
+      (heap_w32_list s next_arr (length src))"
+    by (rule source_index_arrays_rel_short_chains_closed[OF arrays src_short])
+  show ?thesis
+    using closed by (simp add: source_index_heap_chains_closed_def)
+qed
+
 context vcdiff_enc_global_addresses begin
 
 lemma source_index_heap_rel_take_chain_member_word_le:
@@ -2070,6 +2119,7 @@ definition build_index_fill_inv ::
      length src_bytes < unat (no_entry32 :: 32 word) \<and>
      unat i \<le> length src_bytes - min_match + 1 \<and>
      source_index_heap_rel_from st src_bytes (unat i) head_arr next_arr \<and>
+     source_index_heap_chains_closed_from st src_bytes (unat i) head_arr next_arr \<and>
      source_index_heap_nexts_wf_from st src_bytes (unat i) next_arr"
 
 lemma build_index_fill_body_preserves_inv:
@@ -2133,6 +2183,9 @@ proof -
   have i_le: "unat i \<le> length src_bytes - min_match + 1"
     using inv unfolding build_index_fill_inv_def by blast
   have rel: "source_index_heap_rel_from st src_bytes (unat i) head next_arr"
+    using inv by (simp add: build_index_fill_inv_def)
+  have closed:
+    "source_index_heap_chains_closed_from st src_bytes (unat i) head next_arr"
     using inv by (simp add: build_index_fill_inv_def)
   have nexts_wf:
     "source_index_heap_nexts_wf_from st src_bytes (unat i) next_arr"
@@ -2287,6 +2340,59 @@ proof -
     show "?bucket = hash_bucket_spec src_bytes ?p"
       by simp
   qed
+  have step_closed:
+    "source_index_heap_chains_closed_from ?s_head src_bytes ?p head next_arr"
+  proof (rule source_index_heap_chains_closed_from_step[
+      where i = "unat i" and s = st and p = ?p and bucket = ?bucket])
+    show "source_index_heap_chains_closed_from st src_bytes (unat i) head next_arr"
+      by (rule closed)
+    show "min_match \<le> length src_bytes"
+      by (rule src_long)
+    show "0 < unat i"
+      by (rule i_pos_nat)
+    show "unat i \<le> length src_bytes - min_match + 1"
+      by (rule i_le)
+    show "length src_bytes < unat (no_entry32 :: 32 word)"
+      by (rule src_len_word)
+    show "\<And>h. h < hash_size \<Longrightarrow> h \<noteq> ?bucket \<Longrightarrow>
+        head +\<^sub>p int h \<noteq> head +\<^sub>p int ?bucket"
+    proof -
+      fix h
+      assume h_lt: "h < hash_size"
+      assume h_ne: "h \<noteq> ?bucket"
+      show "head +\<^sub>p int h \<noteq> head +\<^sub>p int ?bucket"
+        by (rule head_no_alias[OF h_lt bucket_lt h_ne])
+    qed
+    show "\<And>q. q < length src_bytes \<Longrightarrow> q \<noteq> ?p \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int ?p"
+    proof -
+      fix q
+      assume q_lt: "q < length src_bytes"
+      assume q_ne: "q \<noteq> ?p"
+      show "next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int ?p"
+        by (rule next_no_alias[OF q_lt p_lt_src q_ne])
+    qed
+    show "\<And>h. h < hash_size \<Longrightarrow>
+        head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int ?p"
+    proof -
+      fix h
+      assume h_lt: "h < hash_size"
+      show "head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int ?p"
+        by (rule next_head_disjoint[OF h_lt p_lt_src])
+    qed
+    show "\<And>q. q < length src_bytes \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int ?bucket"
+    proof -
+      fix q
+      assume q_lt: "q < length src_bytes"
+      show "next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int ?bucket"
+        by (rule head_next_disjoint[OF q_lt bucket_lt])
+    qed
+    show "?p = unat i - 1"
+      by (rule p_unat)
+    show "?bucket = hash_bucket_spec src_bytes ?p"
+      by simp
+  qed
   have final_state_eq:
     "heap_w32_update
         (\<lambda>ha. ha(head +\<^sub>p uint ((of_nat ?hash :: 32 word) && 0xFFFF) :=
@@ -2316,6 +2422,16 @@ proof -
             a (head +\<^sub>p uint ((of_nat ?hash :: 32 word) && 0xFFFF)))) st))
       src_bytes (unat ?p_word) head next_arr"
     by (subst final_state_eq, rule step_rel)
+  have step_closed_c:
+    "source_index_heap_chains_closed_from
+      (heap_w32_update
+        (\<lambda>ha. ha(head +\<^sub>p uint ((of_nat ?hash :: 32 word) && 0xFFFF) :=
+          ?p_word))
+        (heap_w32_update
+          (\<lambda>a. a(next_arr +\<^sub>p uint ?p_word :=
+            a (head +\<^sub>p uint ((of_nat ?hash :: 32 word) && 0xFFFF)))) st))
+      src_bytes (unat ?p_word) head next_arr"
+    by (subst final_state_eq, rule step_closed)
   have hash_gets:
     "gets_the (hash4' src ?p_word) \<bullet> st
       \<lbrace>\<lambda>r t. t = st \<and> r = Result (of_nat ?hash :: 32 word)\<rbrace>"
@@ -2342,11 +2458,12 @@ proof -
     apply (intro conjI)
           apply (simp only: heap_typing_heap_w32_update typing)
          apply (simp only: heap_bytes_w32_update bytes)
-        apply (rule len_src)
-       apply (rule src_long)
-      apply (rule src_len_word)
-     apply (rule p_le)
-     apply (rule step_rel_c)
+           apply (rule len_src)
+          apply (rule src_long)
+         apply (rule src_len_word)
+        apply (rule p_le)
+       apply (rule step_rel_c)
+      apply (rule step_closed_c)
     apply (rule step_nexts_wf_c)
     done
   have inv_after_bucket:
@@ -2583,6 +2700,7 @@ lemma build_index_fill_loop_source_index_heap_rel_nexts_wf:
     \<lbrace>\<lambda>r t. r = Result 0 \<and>
       source_index_heap_rel t src_bytes head next_arr \<and>
       source_index_heap_nexts_wf t src_bytes next_arr \<and>
+      source_index_heap_chains_closed t src_bytes head next_arr \<and>
       heap_typing t = heap_typing s0\<rbrace>"
   apply (rule runs_to_weaken[OF build_index_fill_loop_preserves_inv[
         OF inv0 hashes]])
@@ -2590,7 +2708,8 @@ lemma build_index_fill_loop_source_index_heap_rel_nexts_wf:
           dest: head_no_alias next_no_alias next_head_disjoint
             head_next_disjoint
           simp: build_index_fill_inv_def source_index_heap_rel_from_0
-            source_index_heap_nexts_wf_from_0)
+            source_index_heap_nexts_wf_from_0
+            source_index_heap_chains_closed_from_0)
    apply (metis head_no_alias hash_size_0x10000)
   done
 
@@ -2764,6 +2883,8 @@ lemma build_index'_long_source_index_heap_rel:
         source_index_heap_rel t (heap_bytes s src (unat src_len)) head next_arr
         \<and> source_index_heap_nexts_wf t
           (heap_bytes s src (unat src_len)) next_arr
+        \<and> source_index_heap_chains_closed t
+          (heap_bytes s src (unat src_len)) head next_arr
         \<and> heap_typing t = heap_typing s \<rbrace>"
 proof -
   let ?src_bytes = "heap_bytes s src (unat src_len)"
@@ -2833,6 +2954,17 @@ proof -
         have init_nexts_wf:
           "source_index_heap_nexts_wf_from t ?src_bytes (unat ?start) next_arr"
           by (rule source_index_heap_nexts_wf_from_empty[OF start_ge])
+        have init_closed:
+          "source_index_heap_chains_closed_from t ?src_bytes (unat ?start) head next_arr"
+        proof (rule source_index_heap_chains_closed_from_empty)
+          fix h
+          assume h_lt: "h < hash_size"
+          show "heap_w32 t (head +\<^sub>p int h) = no_entry32"
+            by (rule heads_empty[OF h_lt])
+        next
+          show "length ?src_bytes - min_match + 1 \<le> unat ?start"
+            by (rule start_ge)
+        qed
         have init_inv:
           "build_index_fill_inv s src src_len ?src_bytes head next_arr ?start t"
           unfolding build_index_fill_inv_def
@@ -2844,6 +2976,7 @@ proof -
              apply (rule src_len_word_bytes)
             apply (rule start_le)
            apply (rule rel_start)
+          apply (rule init_closed)
           apply (rule init_nexts_wf)
           done
         have fill:
@@ -2863,6 +2996,7 @@ proof -
           \<lbrace>\<lambda>r t. r = Result 0 \<and>
             source_index_heap_rel t ?src_bytes head next_arr \<and>
             source_index_heap_nexts_wf t ?src_bytes next_arr \<and>
+            source_index_heap_chains_closed t ?src_bytes head next_arr \<and>
             heap_typing t = heap_typing s\<rbrace>"
           apply (rule build_index_fill_loop_source_index_heap_rel_nexts_wf[
                 OF init_inv hashes])
@@ -2889,6 +3023,7 @@ proof -
           \<lbrace>\<lambda>r t. r = Result 0 \<and>
             source_index_heap_rel t ?src_bytes head next_arr \<and>
             source_index_heap_nexts_wf t ?src_bytes next_arr \<and>
+            source_index_heap_chains_closed t ?src_bytes head next_arr \<and>
             heap_typing t = heap_typing s\<rbrace>"
           using fill by (simp only: Spec_Monad.return_bind)
         show ?thesis
@@ -2970,6 +3105,8 @@ proof -
               (heap_bytes s src (unat src_len)) head next_arr \<and>
             source_index_heap_nexts_wf t
               (heap_bytes s src (unat src_len)) next_arr \<and>
+            source_index_heap_chains_closed t
+              (heap_bytes s src (unat src_len)) head next_arr \<and>
             heap_typing t = heap_typing s \<rbrace>"
       by (rule build_index'_long_source_index_heap_rel[
           OF False src_len_word hashes head_valid next_valid head_no_alias
@@ -3053,6 +3190,106 @@ proof -
       apply (insert True)
       apply (clarsimp simp: source_index_heap_nexts_wf_def
           source_index_nexts_wf_def min_match_def word_less_nat_alt)
+      done
+  next
+    case False
+    have long:
+      "build_index' src src_len head next_arr \<bullet> s
+        \<lbrace> \<lambda>r t. r = Result () \<and>
+            source_index_heap_rel t
+              (heap_bytes s src (unat src_len)) head next_arr \<and>
+            source_index_heap_nexts_wf t
+              (heap_bytes s src (unat src_len)) next_arr \<and>
+            source_index_heap_chains_closed t
+              (heap_bytes s src (unat src_len)) head next_arr \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+      by (rule build_index'_long_source_index_heap_rel[
+          OF False src_len_word hashes head_valid next_valid head_no_alias
+            next_no_alias next_head_disjoint head_next_disjoint])
+    show ?thesis
+      apply (rule runs_to_weaken[OF long])
+      apply simp
+      done
+  qed
+qed
+
+lemma build_index'_source_index_heap_rel_nexts_wf_chains_closed:
+  fixes src :: "8 word ptr"
+    and src_len :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes src_len_word:
+        "unat src_len < unat (no_entry32 :: 32 word)"
+      and src_valid:
+        "\<And>(off :: 32 word) (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; unat off < unat src_len\<rbrakk> \<Longrightarrow>
+          IS_VALID(8 word) st' (src +\<^sub>p uint off)"
+      and head_valid:
+        "\<And>h (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; h < hash_size\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (head +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; p < unat src_len\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+      and head_no_alias:
+        "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> head +\<^sub>p int bucket"
+      and next_no_alias:
+        "\<And>q p. \<lbrakk>q < unat src_len; p < unat src_len; q \<noteq> p\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+      and next_head_disjoint:
+        "\<And>h p. \<lbrakk>h < hash_size; p < unat src_len\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+      and head_next_disjoint:
+        "\<And>q bucket. \<lbrakk>q < unat src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int bucket"
+  shows "build_index' src src_len head next_arr \<bullet> s
+    \<lbrace> \<lambda>r t. r = Result () \<and>
+        source_index_heap_rel t (heap_bytes s src (unat src_len)) head next_arr
+        \<and> source_index_heap_nexts_wf t
+          (heap_bytes s src (unat src_len)) next_arr
+        \<and> source_index_heap_chains_closed t
+          (heap_bytes s src (unat src_len)) head next_arr
+        \<and> heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have hashes:
+    "build_index_hashes_ok s src src_len
+      (heap_bytes s src (unat src_len))"
+    by (rule build_index_hashes_okI[OF src_valid])
+  show ?thesis
+  proof (cases "src_len < (4 :: 32 word)")
+    case True
+    have head_valid_word:
+      "\<And>idx. idx < (0x10000 :: 32 word) \<Longrightarrow>
+        IS_VALID(32 word) s (head +\<^sub>p uint idx)"
+    proof -
+      fix idx :: "32 word"
+      assume idx_lt: "idx < (0x10000 :: 32 word)"
+      have idx_nat_lt: "unat idx < hash_size"
+        using idx_lt by (simp add: word_less_nat_alt)
+      have ptr_eq: "head +\<^sub>p uint idx = head +\<^sub>p int (unat idx)"
+        by (simp only: uint_nat)
+      show "IS_VALID(32 word) s (head +\<^sub>p uint idx)"
+        apply (subst ptr_eq)
+        by (rule head_valid[where st' = s and h = "unat idx", OF _ idx_nat_lt])
+           simp
+    qed
+    have short:
+      "build_index' src src_len head next_arr \<bullet> s
+        \<lbrace> \<lambda>r t. r = Result () \<and>
+            source_index_heap_rel t
+              (heap_bytes s src (unat src_len)) head next_arr \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+      by (rule build_index'_short_source_index_heap_rel[
+            OF True head_valid_word])
+    show ?thesis
+      apply (rule runs_to_weaken[OF short])
+      apply (insert True)
+      apply (clarsimp simp: source_index_heap_nexts_wf_def
+          source_index_nexts_wf_def min_match_def word_less_nat_alt)
+      apply (rule source_index_heap_rel_short_chains_closed)
+       apply assumption
+      apply (simp add: min_match_def word_less_nat_alt)
       done
   next
     case False
@@ -3141,6 +3378,54 @@ lemma build_index'_source_index_heap_rel_nexts_wf_buf_valid:
           (heap_bytes s src (unat src_len)) next_arr
         \<and> heap_typing t = heap_typing s \<rbrace>"
 proof (rule build_index'_source_index_heap_rel_nexts_wf[
+    OF src_len_word _ head_valid next_valid head_no_alias next_no_alias
+      next_head_disjoint head_next_disjoint])
+  fix off :: "32 word"
+  fix st' :: lifted_globals
+  assume typing: "heap_typing st' = heap_typing s"
+  assume off_lt: "unat off < unat src_len"
+  have ptr: "ptr_valid (heap_typing s) (src +\<^sub>p uint off)"
+    by (rule buf_valid_uintD[OF src_ok off_lt])
+  show "IS_VALID(8 word) st' (src +\<^sub>p uint off)"
+    using ptr typing by simp
+qed
+
+lemma build_index'_source_index_heap_rel_nexts_wf_chains_closed_buf_valid:
+  fixes src :: "8 word ptr"
+    and src_len :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes src_len_word:
+        "unat src_len < unat (no_entry32 :: 32 word)"
+      and src_ok: "buf_valid s src (unat src_len)"
+      and head_valid:
+        "\<And>h (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; h < hash_size\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (head +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; p < unat src_len\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+      and head_no_alias:
+        "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> head +\<^sub>p int bucket"
+      and next_no_alias:
+        "\<And>q p. \<lbrakk>q < unat src_len; p < unat src_len; q \<noteq> p\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+      and next_head_disjoint:
+        "\<And>h p. \<lbrakk>h < hash_size; p < unat src_len\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+      and head_next_disjoint:
+        "\<And>q bucket. \<lbrakk>q < unat src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int bucket"
+  shows "build_index' src src_len head next_arr \<bullet> s
+    \<lbrace> \<lambda>r t. r = Result () \<and>
+        source_index_heap_rel t (heap_bytes s src (unat src_len)) head next_arr
+        \<and> source_index_heap_nexts_wf t
+          (heap_bytes s src (unat src_len)) next_arr
+        \<and> source_index_heap_chains_closed t
+          (heap_bytes s src (unat src_len)) head next_arr
+        \<and> heap_typing t = heap_typing s \<rbrace>"
+proof (rule build_index'_source_index_heap_rel_nexts_wf_chains_closed[
     OF src_len_word _ head_valid next_valid head_no_alias next_no_alias
       next_head_disjoint head_next_disjoint])
   fix off :: "32 word"
