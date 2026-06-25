@@ -189,11 +189,28 @@ definition source_index_arrays_rel_from ::
         else heads ! h = of_nat (hd bucket) \<and>
              match_word_chain nexts (length bucket) (heads ! h) = bucket))"
 
+definition source_index_arrays_chains_closed_from ::
+    "byte list \<Rightarrow> nat \<Rightarrow> 32 word list \<Rightarrow> 32 word list \<Rightarrow> bool" where
+  "source_index_arrays_chains_closed_from src start heads nexts \<longleftrightarrow>
+     length heads = hash_size \<and>
+     length nexts = length src \<and>
+     (\<forall>h < hash_size.
+       (let bucket = source_index_bucket_from src start h in
+        match_word_chain nexts (Suc (length bucket)) (heads ! h) = bucket))"
+
 definition source_index_heap_rel_from ::
     "lifted_globals \<Rightarrow> byte list \<Rightarrow> nat \<Rightarrow>
       32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow> bool" where
   "source_index_heap_rel_from s src start head_arr next_arr \<longleftrightarrow>
      source_index_arrays_rel_from src start
+       (heap_w32_list s head_arr hash_size)
+       (heap_w32_list s next_arr (length src))"
+
+definition source_index_heap_chains_closed_from ::
+    "lifted_globals \<Rightarrow> byte list \<Rightarrow> nat \<Rightarrow>
+      32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow> bool" where
+  "source_index_heap_chains_closed_from s src start head_arr next_arr \<longleftrightarrow>
+     source_index_arrays_chains_closed_from src start
        (heap_w32_list s head_arr hash_size)
        (heap_w32_list s next_arr (length src))"
 
@@ -459,6 +476,19 @@ lemma source_index_heap_rel_from_0:
   by (simp add: source_index_heap_rel_from_def source_index_heap_rel_def
       source_index_arrays_rel_from_0)
 
+lemma source_index_arrays_chains_closed_from_0:
+  "source_index_arrays_chains_closed_from src 0 heads nexts \<longleftrightarrow>
+   source_index_arrays_chains_closed src heads nexts"
+  by (simp add: source_index_arrays_chains_closed_from_def
+      source_index_arrays_chains_closed_def)
+
+lemma source_index_heap_chains_closed_from_0:
+  "source_index_heap_chains_closed_from s src 0 head_arr next_arr \<longleftrightarrow>
+   source_index_heap_chains_closed s src head_arr next_arr"
+  by (simp add: source_index_heap_chains_closed_from_def
+      source_index_heap_chains_closed_def
+      source_index_arrays_chains_closed_from_0)
+
 lemma source_index_arrays_rel_from_head_length:
   assumes "source_index_arrays_rel_from src start heads nexts"
   shows "length heads = hash_size"
@@ -508,6 +538,43 @@ lemma source_index_heap_rel_from_empty:
   shows "source_index_heap_rel_from s src start head_arr next_arr"
   unfolding source_index_heap_rel_from_def
   apply (rule source_index_arrays_rel_from_empty)
+     apply simp
+    apply simp
+   apply (simp add: heap_w32_list_nth heads_empty)
+  using start_ge
+  apply simp
+  done
+
+lemma source_index_arrays_chains_closed_from_empty:
+  assumes heads_len: "length heads = hash_size"
+      and nexts_len: "length nexts = length src"
+      and heads_empty: "\<And>h. h < hash_size \<Longrightarrow> heads ! h = no_entry32"
+      and start_ge: "length src - min_match + 1 \<le> start"
+  shows "source_index_arrays_chains_closed_from src start heads nexts"
+  unfolding source_index_arrays_chains_closed_from_def
+proof (intro conjI allI impI)
+  show "length heads = hash_size"
+    using heads_len .
+  show "length nexts = length src"
+    using nexts_len .
+  fix h
+  assume h_lt: "h < hash_size"
+  have bucket_empty: "source_index_bucket_from src start h = []"
+    using start_ge
+    by (simp add: source_index_bucket_from_def source_positions_from_empty)
+  show "let bucket = source_index_bucket_from src start h in
+        match_word_chain nexts (Suc (length bucket)) (heads ! h) = bucket"
+    using bucket_empty heads_empty[OF h_lt] by simp
+qed
+
+lemma source_index_heap_chains_closed_from_empty:
+  assumes heads_empty:
+        "\<And>h. h < hash_size \<Longrightarrow>
+          heap_w32 s (head_arr +\<^sub>p int h) = no_entry32"
+      and start_ge: "length src - min_match + 1 \<le> start"
+  shows "source_index_heap_chains_closed_from s src start head_arr next_arr"
+  unfolding source_index_heap_chains_closed_from_def
+  apply (rule source_index_arrays_chains_closed_from_empty)
      apply simp
     apply simp
    apply (simp add: heap_w32_list_nth heads_empty)
@@ -930,6 +997,25 @@ proof -
     by simp
 qed
 
+lemma match_word_chain_cons_update_closed:
+  assumes p_lt: "p < length nexts"
+      and p_unat: "unat (of_nat p :: 32 word) = p"
+      and p_not_sentinel: "(of_nat p :: 32 word) \<noteq> no_entry32"
+      and old_chain: "match_word_chain nexts (Suc fuel) old_head = bucket"
+      and p_notin: "p \<notin> set bucket"
+  shows "match_word_chain (nexts[p := old_head]) (Suc (Suc fuel)) (of_nat p) =
+         p # bucket"
+proof -
+  have updated_tail:
+    "match_word_chain (nexts[p := old_head]) (Suc fuel) old_head =
+     match_word_chain nexts (Suc fuel) old_head"
+    using old_chain p_notin
+    by (intro match_word_chain_update_irrelevant) simp
+  show ?thesis
+    using p_lt p_unat p_not_sentinel old_chain updated_tail
+    by simp
+qed
+
 lemma source_index_arrays_rel_from_step:
   assumes rel: "source_index_arrays_rel_from src i heads nexts"
       and src_long: "min_match \<le> length src"
@@ -1076,6 +1162,99 @@ proof -
   qed
 qed
 
+lemma source_index_arrays_chains_closed_from_step:
+  assumes closed: "source_index_arrays_chains_closed_from src i heads nexts"
+      and src_long: "min_match \<le> length src"
+      and i_pos: "0 < i"
+      and i_le: "i \<le> length src - min_match + 1"
+      and src_len_word: "length src < unat (no_entry32 :: 32 word)"
+  defines "p \<equiv> i - 1"
+  defines "bucket \<equiv> hash_bucket_spec src p"
+  shows "source_index_arrays_chains_closed_from src p
+    (heads[bucket := of_nat p]) (nexts[p := heads ! bucket])"
+proof -
+  have heads_len: "length heads = hash_size"
+    using closed by (simp add: source_index_arrays_chains_closed_from_def)
+  have nexts_len: "length nexts = length src"
+    using closed by (simp add: source_index_arrays_chains_closed_from_def)
+  have p_lt_src: "p < length src"
+    using src_long i_pos i_le
+    by (simp add: p_def min_match_def)
+  have p_lt_nexts: "p < length nexts"
+    using p_lt_src nexts_len by simp
+  have p_unat: "unat (of_nat p :: 32 word) = p"
+    using p_lt_src src_len_word
+    by (simp add: unat_of_nat_eq)
+  have p_not_sentinel: "(of_nat p :: 32 word) \<noteq> no_entry32"
+    using p_lt_src src_len_word
+    by (intro word32_of_nat_no_entry32) simp
+  have bucket_lt: "bucket < hash_size"
+    by (simp add: bucket_def)
+  show ?thesis
+    unfolding source_index_arrays_chains_closed_from_def
+  proof (intro conjI allI impI)
+    show "length (heads[bucket := of_nat p]) = hash_size"
+      using heads_len by simp
+    show "length (nexts[p := heads ! bucket]) = length src"
+      using nexts_len by simp
+    fix h
+    assume h_lt: "h < hash_size"
+    let ?old = "source_index_bucket_from src i h"
+    let ?new = "source_index_bucket_from src p h"
+    let ?heads' = "heads[bucket := of_nat p]"
+    let ?nexts' = "nexts[p := heads ! bucket]"
+    have bucket_step:
+      "?new = (if bucket = h then p # ?old else ?old)"
+      using source_index_bucket_from_step[OF src_long i_pos i_le, of h]
+      by (simp add: p_def bucket_def)
+    have old_closed:
+      "match_word_chain nexts (Suc (length ?old)) (heads ! h) = ?old"
+      using closed h_lt
+      by (simp add: source_index_arrays_chains_closed_from_def Let_def)
+    have p_notin_old: "p \<notin> set ?old"
+    proof
+      assume p_in: "p \<in> set ?old"
+      have "i \<le> p"
+        using source_index_bucket_from_member_bounds[OF p_in] by simp
+      with i_pos show False
+        by (simp add: p_def)
+    qed
+    show "let bucket = ?new in
+        match_word_chain ?nexts' (Suc (length bucket)) (?heads' ! h) = bucket"
+    proof (cases "bucket = h")
+      case True
+      have head_new: "?heads' ! h = of_nat p"
+        using True bucket_lt heads_len by simp
+      have chain_new:
+        "match_word_chain ?nexts' (Suc (length ?new)) (?heads' ! h) = ?new"
+        using match_word_chain_cons_update_closed[
+            OF p_lt_nexts p_unat p_not_sentinel old_closed p_notin_old]
+          bucket_step True head_new
+        by simp
+      show ?thesis
+        using chain_new by simp
+    next
+      case False
+      have head_same: "?heads' ! h = heads ! h"
+        using False by simp
+      have bucket_same: "?new = ?old"
+        using bucket_step False by simp
+      have chain_same:
+        "match_word_chain ?nexts' (Suc (length ?old)) (heads ! h) = ?old"
+      proof -
+        have "p \<notin> set (match_word_chain nexts (Suc (length ?old)) (heads ! h))"
+          using old_closed p_notin_old by simp
+        hence "match_word_chain ?nexts' (Suc (length ?old)) (heads ! h) =
+               match_word_chain nexts (Suc (length ?old)) (heads ! h)"
+          by (rule match_word_chain_update_irrelevant)
+        with old_closed show ?thesis by simp
+      qed
+      show ?thesis
+        using bucket_same head_same chain_same by simp
+    qed
+  qed
+qed
+
 lemma source_index_heap_rel_from_step:
   fixes head_arr next_arr :: "32 word ptr"
   assumes rel:
@@ -1171,6 +1350,103 @@ proof -
   show ?thesis
     using arrays_after heads_after_head nexts_after_head
     by (simp add: source_index_heap_rel_from_def)
+qed
+
+lemma source_index_heap_chains_closed_from_step:
+  fixes head_arr next_arr :: "32 word ptr"
+  assumes closed:
+      "source_index_heap_chains_closed_from s src i head_arr next_arr"
+    and src_long: "min_match \<le> length src"
+    and i_pos: "0 < i"
+    and i_le: "i \<le> length src - min_match + 1"
+    and src_len_word: "length src < unat (no_entry32 :: 32 word)"
+    and head_no_alias:
+      "\<And>h. h < hash_size \<Longrightarrow> h \<noteq> bucket \<Longrightarrow>
+        head_arr +\<^sub>p int h \<noteq> head_arr +\<^sub>p int bucket"
+    and next_no_alias:
+      "\<And>q. q < length src \<Longrightarrow> q \<noteq> p \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+    and next_head_disjoint:
+      "\<And>h. h < hash_size \<Longrightarrow>
+        head_arr +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+    and head_next_disjoint:
+      "\<And>q. q < length src \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> head_arr +\<^sub>p int bucket"
+    and p_def: "p = i - 1"
+    and bucket_def: "bucket = hash_bucket_spec src p"
+  defines "s_next \<equiv>
+    heap_w32_update
+      (\<lambda>a. a(next_arr +\<^sub>p int p :=
+        heap_w32 s (head_arr +\<^sub>p int bucket))) s"
+  defines "s_head \<equiv>
+    heap_w32_update
+      (\<lambda>ha. ha(head_arr +\<^sub>p int bucket := of_nat p)) s_next"
+  shows "source_index_heap_chains_closed_from s_head src p head_arr next_arr"
+proof -
+  let ?heads = "heap_w32_list s head_arr hash_size"
+  let ?nexts = "heap_w32_list s next_arr (length src)"
+  have arrays_closed:
+    "source_index_arrays_chains_closed_from src i ?heads ?nexts"
+    using closed by (simp add: source_index_heap_chains_closed_from_def)
+  have p_lt_src: "p < length src"
+    using src_long i_pos i_le
+    by (simp add: p_def min_match_def)
+  have bucket_lt: "bucket < hash_size"
+    by (simp add: bucket_def)
+  have head_value:
+    "heap_w32 s (head_arr +\<^sub>p int bucket) = ?heads ! bucket"
+    using bucket_lt by simp
+  have heads_after_next:
+    "heap_w32_list s_next head_arr hash_size = ?heads"
+    unfolding s_next_def
+    apply (rule heap_w32_list_update_outside)
+    using next_head_disjoint
+    by auto
+  have nexts_after_next:
+    "heap_w32_list s_next next_arr (length src) =
+     ?nexts[p := ?heads ! bucket]"
+    unfolding s_next_def
+    apply (subst head_value)
+    apply (rule heap_w32_list_update_index)
+      apply (rule p_lt_src)
+     apply simp
+    using next_no_alias
+    apply auto
+    done
+  have heads_after_head:
+    "heap_w32_list s_head head_arr hash_size =
+     ?heads[bucket := of_nat p]"
+    unfolding s_head_def
+    apply (subst heads_after_next[symmetric])
+    apply (rule heap_w32_list_update_index)
+      apply (rule bucket_lt)
+     apply simp
+    using head_no_alias
+    apply auto
+    done
+  have nexts_after_head:
+    "heap_w32_list s_head next_arr (length src) =
+     ?nexts[p := ?heads ! bucket]"
+    unfolding s_head_def
+    apply (subst nexts_after_next[symmetric])
+    apply (rule heap_w32_list_update_outside)
+    using head_next_disjoint
+    by auto
+  have arrays_after:
+    "source_index_arrays_chains_closed_from src p
+      (?heads[bucket := of_nat p]) (?nexts[p := ?heads ! bucket])"
+  proof -
+    have "source_index_arrays_chains_closed_from src (i - 1)
+      (?heads[hash_bucket_spec src (i - 1) := of_nat (i - 1)])
+      (?nexts[i - 1 := ?heads ! hash_bucket_spec src (i - 1)])"
+      by (rule source_index_arrays_chains_closed_from_step[
+          OF arrays_closed src_long i_pos i_le src_len_word])
+    then show ?thesis
+      by (simp add: p_def bucket_def)
+  qed
+  show ?thesis
+    using arrays_after heads_after_head nexts_after_head
+    by (simp add: source_index_heap_chains_closed_from_def)
 qed
 
 lemma source_index_arrays_rel_bucket_chain_all:
