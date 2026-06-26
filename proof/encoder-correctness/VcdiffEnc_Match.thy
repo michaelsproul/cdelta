@@ -5943,6 +5943,128 @@ proof -
     using exact src_bytes_eq by simp
 qed
 
+lemma build_index'_find_best_match'_eq_find_best_match_spec_buf_valid:
+  fixes src tgt :: "8 word ptr"
+    and src_len tgt_len tp :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes src_len_word:
+        "unat src_len < unat (no_entry32 :: 32 word)"
+      and src_ok: "buf_valid s src (unat src_len)"
+      and tgt_ok: "buf_valid s tgt (unat tgt_len)"
+      and tp_le: "tp \<le> tgt_len"
+      and head_valid:
+        "\<And>h (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; h < hash_size\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (head +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; p < unat src_len\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+      and head_no_alias:
+        "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> head +\<^sub>p int bucket"
+      and next_no_alias:
+        "\<And>q p. \<lbrakk>q < unat src_len; p < unat src_len; q \<noteq> p\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+      and next_head_disjoint:
+        "\<And>h p. \<lbrakk>h < hash_size; p < unat src_len\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+      and head_next_disjoint:
+        "\<And>q bucket. \<lbrakk>q < unat src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int bucket"
+  shows "build_index' src src_len head next_arr \<bullet> s
+    \<lbrace> \<lambda>r t. r = Result () \<and>
+        source_index_heap_rel t
+          (heap_bytes s src (unat src_len)) head next_arr
+        \<and> source_index_heap_nexts_wf t
+          (heap_bytes s src (unat src_len)) next_arr
+        \<and> source_index_heap_chains_closed t
+          (heap_bytes s src (unat src_len)) head next_arr
+        \<and> heap_typing t = heap_typing s
+        \<and> heap_bytes t src (unat src_len) =
+          heap_bytes s src (unat src_len)
+        \<and> (\<forall>m. find_best_match' src src_len tgt tgt_len tp head next_arr t =
+              Some m \<longrightarrow>
+            m = (let best = find_best_match_spec
+                (heap_bytes s src (unat src_len))
+                (heap_bytes t tgt (unat tgt_len)) (unat tp)
+                (build_index_spec (heap_bytes s src (unat src_len)))
+              in match_t_C (of_nat (em_pos best)) (of_nat (em_len best)))) \<rbrace>"
+proof (rule runs_to_weaken[
+    OF build_index'_source_index_heap_rel_nexts_wf_chains_closed_bytes_buf_valid[
+      OF src_len_word src_ok head_valid next_valid head_no_alias next_no_alias
+        next_head_disjoint head_next_disjoint]])
+  fix r t
+  assume post:
+    "r = Result () \<and>
+     source_index_heap_rel t (heap_bytes s src (unat src_len)) head next_arr \<and>
+     source_index_heap_nexts_wf t (heap_bytes s src (unat src_len)) next_arr \<and>
+     source_index_heap_chains_closed t
+       (heap_bytes s src (unat src_len)) head next_arr \<and>
+     heap_typing t = heap_typing s \<and>
+     heap_bytes t src (unat src_len) = heap_bytes s src (unat src_len)"
+  have r_ok: "r = Result ()"
+    using post by simp
+  have rel:
+    "source_index_heap_rel t (heap_bytes s src (unat src_len)) head next_arr"
+    using post by simp
+  have nexts_wf:
+    "source_index_heap_nexts_wf t
+      (heap_bytes s src (unat src_len)) next_arr"
+    using post by simp
+  have closed:
+    "source_index_heap_chains_closed t
+      (heap_bytes s src (unat src_len)) head next_arr"
+    using post by simp
+  have typing_t: "heap_typing t = heap_typing s"
+    using post by simp
+  have bytes_t:
+    "heap_bytes t src (unat src_len) = heap_bytes s src (unat src_len)"
+    using post by simp
+  have tgt_ok_t: "buf_valid t tgt (unat tgt_len)"
+    using tgt_ok typing_t by (simp add: buf_valid_def)
+  have matcher_exact:
+    "\<forall>m. find_best_match' src src_len tgt tgt_len tp head next_arr t =
+          Some m \<longrightarrow>
+        m = (let best = find_best_match_spec
+            (heap_bytes s src (unat src_len))
+            (heap_bytes t tgt (unat tgt_len)) (unat tp)
+            (build_index_spec (heap_bytes s src (unat src_len)))
+          in match_t_C (of_nat (em_pos best)) (of_nat (em_len best)))"
+  proof (intro allI impI)
+    fix m
+    assume result:
+      "find_best_match' src src_len tgt tgt_len tp head next_arr t = Some m"
+    show "m = (let best = find_best_match_spec
+        (heap_bytes s src (unat src_len))
+        (heap_bytes t tgt (unat tgt_len)) (unat tp)
+        (build_index_spec (heap_bytes s src (unat src_len)))
+      in match_t_C (of_nat (em_pos best)) (of_nat (em_len best)))"
+      unfolding Let_def
+      by (rule find_best_match'_eq_find_best_match_spec_src_bytes[
+          where s = t and src_bytes = "heap_bytes s src (unat src_len)",
+          OF bytes_t[symmetric] rel closed nexts_wf tp_le tgt_ok_t result])
+  qed
+  show "r = Result () \<and>
+    source_index_heap_rel t
+      (heap_bytes s src (unat src_len)) head next_arr \<and>
+    source_index_heap_nexts_wf t
+      (heap_bytes s src (unat src_len)) next_arr \<and>
+    source_index_heap_chains_closed t
+      (heap_bytes s src (unat src_len)) head next_arr \<and>
+    heap_typing t = heap_typing s \<and>
+    heap_bytes t src (unat src_len) =
+      heap_bytes s src (unat src_len) \<and>
+    (\<forall>m. find_best_match' src src_len tgt tgt_len tp head next_arr t =
+          Some m \<longrightarrow>
+        m = (let best = find_best_match_spec
+            (heap_bytes s src (unat src_len))
+            (heap_bytes t tgt (unat tgt_len)) (unat tp)
+            (build_index_spec (heap_bytes s src (unat src_len)))
+          in match_t_C (of_nat (em_pos best)) (of_nat (em_len best))))"
+    using r_ok rel nexts_wf closed typing_t bytes_t matcher_exact by simp
+qed
+
 lemma find_best_match'_match_valid_if_common_prefix:
   assumes common_prefix_valid:
     "\<And>cand l. common_prefix' src cand src_len tgt tp tgt_len s = Some l \<Longrightarrow>
