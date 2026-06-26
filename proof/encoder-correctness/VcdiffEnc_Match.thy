@@ -957,6 +957,24 @@ proof -
   finally show ?thesis .
 qed
 
+lemma match_word_chain_exit_prefix_max_chain:
+  assumes n_le: "n \<le> max_chain"
+      and cursor: "match_word_cursor nexts n cand0 = cand"
+      and exit: "cand = no_entry32 \<or> n = max_chain"
+  shows "match_word_chain nexts max_chain cand0 =
+         match_word_chain nexts n cand0"
+proof (cases "n = max_chain")
+  case True
+  then show ?thesis by simp
+next
+  case False
+  with exit have cand_noentry: "cand = no_entry32"
+    by simp
+  show ?thesis
+    by (rule match_word_chain_cursor_no_entry_prefix[
+        OF n_le]) (simp add: cursor cand_noentry)
+qed
+
 lemma match_word_chain_update_irrelevant:
   assumes p_notin: "p \<notin> set (match_word_chain nexts fuel cand)"
   shows "match_word_chain (nexts[p := v]) fuel cand =
@@ -4645,6 +4663,24 @@ proof -
     using hash_res by simp
   show ?thesis
     using hv_eq by (simp add: hash_bucket_word_from_hash4_spec)
+qed
+
+lemma find_best_match_spec_non_early_build_index:
+  assumes src_not_early: "min_match \<le> length src_bytes"
+      and tgt_not_early: "unat tp + min_match \<le> length tgt_bytes"
+  shows "find_best_match_spec src_bytes tgt_bytes (unat tp)
+      (build_index_spec src_bytes) =
+    foldl (\<lambda>best cand. choose_match_spec src_bytes tgt_bytes (unat tp) cand best)
+      no_match
+      (take max_chain
+        (index_bucket_spec (build_index_spec src_bytes)
+          (hash_bucket_spec tgt_bytes (unat tp))))"
+proof -
+  have tgt_len_not_early: "min_match \<le> length tgt_bytes - unat tp"
+    using tgt_not_early by simp
+  show ?thesis
+    using src_not_early tgt_len_not_early
+    by (simp add: find_best_match_spec_def Let_def)
 qed
 
 lemma match_candidate_word_guard:
