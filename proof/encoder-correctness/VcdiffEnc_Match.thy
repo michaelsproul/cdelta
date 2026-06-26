@@ -2761,6 +2761,63 @@ lemma build_index_fill_loop_source_index_heap_rel_nexts_wf:
           simp: build_index_fill_inv_def source_index_heap_rel_from_0
             source_index_heap_nexts_wf_from_0
             source_index_heap_chains_closed_from_0)
+  apply (metis head_no_alias hash_size_0x10000)
+  done
+
+lemma build_index_fill_loop_source_index_heap_rel_nexts_wf_bytes:
+  fixes src :: "8 word ptr"
+    and src_len start :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes inv0:
+      "build_index_fill_inv s0 src src_len src_bytes head next_arr start st"
+    and hashes: "build_index_hashes_ok s0 src src_len src_bytes"
+    and head_valid:
+      "\<And>h (st' :: lifted_globals).
+        \<lbrakk>heap_typing st' = heap_typing s0; h < hash_size\<rbrakk> \<Longrightarrow>
+        IS_VALID(32 word) st' (head +\<^sub>p int h)"
+    and next_valid:
+      "\<And>p (st' :: lifted_globals).
+        \<lbrakk>heap_typing st' = heap_typing s0; p < length src_bytes\<rbrakk> \<Longrightarrow>
+        IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+    and head_no_alias:
+      "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+        head +\<^sub>p int h \<noteq> head +\<^sub>p int bucket"
+    and next_no_alias:
+      "\<And>q p. \<lbrakk>q < length src_bytes; p < length src_bytes; q \<noteq> p\<rbrakk> \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+    and next_head_disjoint:
+      "\<And>h p. \<lbrakk>h < hash_size; p < length src_bytes\<rbrakk> \<Longrightarrow>
+        head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+    and head_next_disjoint:
+      "\<And>q bucket. \<lbrakk>q < length src_bytes; bucket < hash_size\<rbrakk> \<Longrightarrow>
+        next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int bucket"
+  shows "(whileLoop (\<lambda>(i :: 32 word) st. 0 < i)
+      (\<lambda>i. do {
+        p <- return (i - 1);
+        hv <- gets_the (hash4' src p);
+        h <- return (hv && 0xFFFF);
+        guard (\<lambda>s. IS_VALID(32 word) s (next_arr +\<^sub>p uint p));
+        guard (\<lambda>s. IS_VALID(32 word) s (head +\<^sub>p uint h));
+        modify
+          (heap_w32_update
+            (\<lambda>a. a(next_arr +\<^sub>p uint p := a (head +\<^sub>p uint h))));
+        modify (heap_w32_update (\<lambda>ha. ha(head +\<^sub>p uint h := p)));
+        return (i - 1)
+      }) start :: (32 word, lifted_globals) res_monad) \<bullet> st
+    \<lbrace>\<lambda>r t. r = Result 0 \<and>
+      source_index_heap_rel t src_bytes head next_arr \<and>
+      source_index_heap_nexts_wf t src_bytes next_arr \<and>
+      source_index_heap_chains_closed t src_bytes head next_arr \<and>
+      heap_typing t = heap_typing s0 \<and>
+      heap_bytes t src (unat src_len) = src_bytes\<rbrace>"
+  apply (rule runs_to_weaken[OF build_index_fill_loop_preserves_inv[
+        OF inv0 hashes]])
+        apply (auto intro: head_valid next_valid
+          dest: head_no_alias next_no_alias next_head_disjoint
+            head_next_disjoint
+          simp: build_index_fill_inv_def source_index_heap_rel_from_0
+            source_index_heap_nexts_wf_from_0
+            source_index_heap_chains_closed_from_0)
    apply (metis head_no_alias hash_size_0x10000)
   done
 
