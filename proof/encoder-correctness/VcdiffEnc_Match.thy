@@ -933,6 +933,30 @@ proof -
     using assms by simp
 qed
 
+lemma match_word_chain_no_entry[simp]:
+  "match_word_chain nexts n no_entry32 = []"
+  by (cases n) simp_all
+
+lemma match_word_chain_cursor_no_entry_prefix:
+  assumes n_le: "n \<le> fuel"
+      and cursor: "match_word_cursor nexts n cand0 = no_entry32"
+  shows "match_word_chain nexts fuel cand0 =
+         match_word_chain nexts n cand0"
+proof -
+  have fuel_eq: "fuel = n + (fuel - n)"
+    using n_le by simp
+  have "match_word_chain nexts fuel cand0 =
+        match_word_chain nexts (n + (fuel - n)) cand0"
+    using fuel_eq by simp
+  also have "\<dots> =
+        match_word_chain nexts n cand0 @
+        match_word_chain nexts (fuel - n) (match_word_cursor nexts n cand0)"
+    by (rule match_word_chain_append_cursor)
+  also have "\<dots> = match_word_chain nexts n cand0"
+    using cursor by simp
+  finally show ?thesis .
+qed
+
 lemma match_word_chain_update_irrelevant:
   assumes p_notin: "p \<notin> set (match_word_chain nexts fuel cand)"
   shows "match_word_chain (nexts[p := v]) fuel cand =
@@ -4621,6 +4645,21 @@ proof -
     using hash_res by simp
   show ?thesis
     using hv_eq by (simp add: hash_bucket_word_from_hash4_spec)
+qed
+
+lemma match_candidate_word_guard:
+  fixes cand src_len :: "32 word"
+  assumes cand_match: "unat cand + min_match \<le> unat src_len"
+  shows "cand + 4 \<le> src_len"
+proof -
+  have cand_4_le: "unat cand + 4 \<le> unat src_len"
+    using cand_match by (simp add: min_match_def)
+  have no_overflow: "unat cand + unat (4 :: 32 word) < 2 ^ 32"
+    using cand_4_le unat_lt2p[of src_len] by simp
+  have unat_add: "unat (cand + 4) = unat cand + 4"
+    using no_overflow by (simp add: unat_word_ariths(1))
+  show ?thesis
+    using cand_4_le by (simp add: word_le_nat_alt unat_add)
 qed
 
 lemma choose_match_spec_heap_word:
