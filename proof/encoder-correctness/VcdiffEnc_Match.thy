@@ -4665,6 +4665,10 @@ proof -
     using hv_eq by (simp add: hash_bucket_word_from_hash4_spec)
 qed
 
+definition enc_match_of_words :: "32 word \<Rightarrow> 32 word \<Rightarrow> enc_match" where
+  "enc_match_of_words best_len best_pos =
+     \<lparr>em_pos = unat best_pos, em_len = unat best_len\<rparr>"
+
 lemma find_best_match_spec_non_early_build_index:
   assumes src_not_early: "min_match \<le> length src_bytes"
       and tgt_not_early: "unat tp + min_match \<le> length tgt_bytes"
@@ -4727,6 +4731,40 @@ proof -
   show ?thesis
     using cand_match cp_eq min_l_iff best_l_iff
     by (simp add: choose_match_spec_def best_def Let_def)
+qed
+
+lemma enc_match_of_words_update_choose_match:
+  fixes src tgt :: "8 word ptr"
+    and best_len best_pos cand l src_len tp tgt_len :: "32 word"
+    and s :: lifted_globals
+  assumes cp: "common_prefix' src cand src_len tgt tp tgt_len s = Some l"
+      and cand_match:
+        "unat cand + min_match \<le> length (heap_bytes s src (unat src_len))"
+      and cand_le: "cand \<le> src_len"
+      and tp_le: "tp \<le> tgt_len"
+  shows "enc_match_of_words
+      (if 4 \<le> l \<and> best_len < l then l else best_len)
+      (if 4 \<le> l \<and> best_len < l then cand else best_pos) =
+    choose_match_spec
+      (heap_bytes s src (unat src_len))
+      (heap_bytes s tgt (unat tgt_len))
+      (unat tp) (unat cand)
+      (enc_match_of_words best_len best_pos)"
+proof -
+  have choose:
+    "choose_match_spec
+      (heap_bytes s src (unat src_len))
+      (heap_bytes s tgt (unat tgt_len))
+      (unat tp) (unat cand)
+      (enc_match_of_words best_len best_pos) =
+    (if 4 \<le> l \<and> best_len < l
+     then \<lparr>em_pos = unat cand, em_len = unat l\<rparr>
+     else enc_match_of_words best_len best_pos)"
+    unfolding enc_match_of_words_def
+    by (rule choose_match_spec_heap_word[
+        OF cp cand_match cand_le tp_le])
+  show ?thesis
+    using choose by (simp add: enc_match_of_words_def)
 qed
 
 lemma match_t_C_sel_simps:
