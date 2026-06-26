@@ -4734,6 +4734,51 @@ lemma match_t_C_sel_simps:
   "match_t_C.len_C (match_t_C pos len) = len"
   by simp_all
 
+lemma find_best_match'_nonearly_obtain_loop:
+  fixes src tgt :: "8 word ptr"
+    and src_len tgt_len tp :: "32 word"
+  assumes not_early: "\<not> (src_len < 4 \<or> tgt_len - tp < 4)"
+      and result:
+        "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s = Some m"
+  obtains hv best_len best_pos cand checked :: "32 word"
+    where "hash4' tgt tp s = Some hv"
+      and "owhile
+          (\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+             cand :: 32 word, checked :: 32 word) s.
+              cand \<noteq> no_entry32 \<and> checked < (0x10 :: 32 word))
+          (\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+             cand :: 32 word, checked :: 32 word) s.
+              case if cand + 4 \<le> src_len
+                   then case common_prefix' src cand src_len tgt tp tgt_len s of
+                     None \<Rightarrow> None
+                   | Some l \<Rightarrow>
+                       Some (if 4 \<le> l \<and> best_len < l
+                         then (l, cand) else (best_len, best_pos))
+                   else Some (best_len, best_pos) of
+                None \<Rightarrow> None
+              | Some p \<Rightarrow>
+                  (case p of
+                   (best_len, best_pos) \<Rightarrow>
+                     \<lambda>s. case if IS_VALID(32 word) s
+                         (next_arr +\<^sub>p uint cand)
+                       then Some () else None of
+                         None \<Rightarrow> None
+                       | Some _ \<Rightarrow>
+                           Some (best_len, best_pos,
+                             heap_w32 s (next_arr +\<^sub>p uint cand),
+                             checked + (1 :: 32 word)))
+                  s)
+          ((0 :: 32 word), (0 :: 32 word),
+            heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF)),
+            (0 :: 32 word)) s =
+         Some (best_len, best_pos, cand, checked)"
+      and "m = match_t_C best_pos best_len"
+  using result not_early
+  unfolding find_best_match'_def
+  by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                 oguard_def K_def
+           split: option.splits prod.splits if_splits)
+
 lemma find_best_match'_match_valid_if_common_prefix:
   assumes common_prefix_valid:
     "\<And>cand l. common_prefix' src cand src_len tgt tp tgt_len s = Some l \<Longrightarrow>
