@@ -5385,6 +5385,50 @@ proof -
     using m_eq pos_eq len_eq by simp
 qed
 
+lemma find_best_match'_eq_find_best_match_spec:
+  fixes src tgt :: "8 word ptr"
+    and src_len tgt_len tp :: "32 word"
+  assumes rel:
+    "source_index_heap_rel s (heap_bytes s src (unat src_len)) head_arr next_arr"
+      and closed:
+    "source_index_heap_chains_closed s (heap_bytes s src (unat src_len)) head_arr next_arr"
+      and nexts_wf:
+    "source_index_heap_nexts_wf s (heap_bytes s src (unat src_len)) next_arr"
+      and tp_le: "tp \<le> tgt_len"
+      and tgt_ok: "buf_valid s tgt (unat tgt_len)"
+      and result:
+    "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s = Some m"
+  shows "m = match_t_C
+    (of_nat (em_pos (find_best_match_spec
+      (heap_bytes s src (unat src_len))
+      (heap_bytes s tgt (unat tgt_len)) (unat tp)
+      (build_index_spec (heap_bytes s src (unat src_len))))))
+    (of_nat (em_len (find_best_match_spec
+      (heap_bytes s src (unat src_len))
+      (heap_bytes s tgt (unat tgt_len)) (unat tp)
+      (build_index_spec (heap_bytes s src (unat src_len))))))"
+proof (cases "src_len < 4 \<or> tgt_len - tp < 4")
+  case True
+  let ?src_bytes = "heap_bytes s src (unat src_len)"
+  let ?tgt_bytes = "heap_bytes s tgt (unat tgt_len)"
+  have f_eq:
+    "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+      Some (match_t_C
+        (of_nat (em_pos (find_best_match_spec ?src_bytes ?tgt_bytes
+          (unat tp) (build_index_spec ?src_bytes))))
+        (of_nat (em_len (find_best_match_spec ?src_bytes ?tgt_bytes
+          (unat tp) (build_index_spec ?src_bytes)))))"
+    by (rule find_best_match'_early_eq_find_best_match_spec[
+        OF True _ _ tp_le]) simp_all
+  show ?thesis
+    using result f_eq by simp
+next
+  case False
+  show ?thesis
+    by (rule find_best_match'_nonearly_eq_find_best_match_spec[
+        OF rel closed nexts_wf tp_le tgt_ok False result])
+qed
+
 lemma find_best_match'_match_valid_if_common_prefix:
   assumes common_prefix_valid:
     "\<And>cand l. common_prefix' src cand src_len tgt tp tgt_len s = Some l \<Longrightarrow>
