@@ -6732,6 +6732,41 @@ next
           OF rel nexts_wf tp_le False result])
 qed
 
+lemma find_best_match'_match_valid_heap_bytes_source_index_src_bytes:
+  fixes src tgt :: "8 word ptr"
+    and src_len tgt_len tp :: "32 word"
+  assumes src_bytes_eq:
+    "src_bytes = heap_bytes s src (unat src_len)"
+      and rel:
+    "source_index_heap_rel s src_bytes head_arr next_arr"
+      and nexts_wf:
+    "source_index_heap_nexts_wf s src_bytes next_arr"
+      and tp_le: "tp \<le> tgt_len"
+      and result:
+    "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s = Some m"
+  shows "match_valid src_bytes
+    (heap_bytes s tgt (unat tgt_len))
+    (unat tp) (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
+proof -
+  have rel':
+    "source_index_heap_rel s (heap_bytes s src (unat src_len))
+      head_arr next_arr"
+    using rel src_bytes_eq by simp
+  have nexts_wf':
+    "source_index_heap_nexts_wf s (heap_bytes s src (unat src_len))
+      next_arr"
+    using nexts_wf src_bytes_eq by simp
+  have valid:
+    "match_valid
+      (heap_bytes s src (unat src_len))
+      (heap_bytes s tgt (unat tgt_len))
+      (unat tp) (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
+    by (rule find_best_match'_match_valid_heap_bytes_source_index[
+        OF rel' nexts_wf' tp_le result])
+  show ?thesis
+    using valid src_bytes_eq by simp
+qed
+
 lemma build_index'_find_best_match'_match_valid_buf_valid:
   fixes src tgt :: "8 word ptr"
     and src_len tgt_len tp :: "32 word"
