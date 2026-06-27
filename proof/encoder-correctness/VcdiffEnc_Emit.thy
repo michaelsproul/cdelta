@@ -102,6 +102,28 @@ lemma emit_inst_spec_RRun_sections:
   using varint_bytes32_eq_varint_encode[OF size]
   by (simp_all add: emit_inst_spec_def Let_def find_single_run_opcode_def)
 
+lemma emit_inst_spec_RAdd_sections_general:
+  shows "enc_data (emit_inst_spec src_len (RAdd bs) st) = enc_data st @ bs"
+    and "enc_inst (emit_inst_spec src_len (RAdd bs) st) =
+         enc_inst st @ add_inst_bytes (length bs)"
+    and "enc_addr (emit_inst_spec src_len (RAdd bs) st) = enc_addr st"
+    and "enc_cache (emit_inst_spec src_len (RAdd bs) st) = enc_cache st"
+    and "enc_flushed (emit_inst_spec src_len (RAdd bs) st) =
+         enc_flushed st + length bs"
+  by (simp_all add: emit_inst_spec_def add_inst_bytes_def Let_def split: prod.splits)
+
+lemma emit_inst_spec_RRun_sections_general:
+  shows "enc_data (emit_inst_spec src_len (RRun fill n) st) =
+         enc_data st @ [fill]"
+    and "enc_inst (emit_inst_spec src_len (RRun fill n) st) =
+         enc_inst st @ run_inst_bytes n"
+    and "enc_addr (emit_inst_spec src_len (RRun fill n) st) = enc_addr st"
+    and "enc_cache (emit_inst_spec src_len (RRun fill n) st) = enc_cache st"
+    and "enc_flushed (emit_inst_spec src_len (RRun fill n) st) =
+         enc_flushed st + n"
+  by (simp_all add: emit_inst_spec_def run_inst_bytes_def Let_def
+                    find_single_run_opcode_def split: prod.splits)
+
 lemma emit_copy_spec_small_sections:
   fixes copy_addr copy_len :: "32 word"
   assumes sz_ge: "(4 :: 32 word) \<le> copy_len"
