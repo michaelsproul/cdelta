@@ -757,6 +757,50 @@ proof -
     by (simp add: emit_insts_spec_def emit_inst_spec_RRun_sections_general)
 qed
 
+lemma section_decodes_flush_pending_add_run_chunks:
+  assumes old:
+    "section_decodes src_seg tgt_len
+       (enc_data st) (enc_inst st) (enc_addr st) target (enc_cache st)"
+      and add32: "length add < 2 ^ 32"
+      and run_pos: "0 < n"
+      and run32: "n < 2 ^ 32"
+      and tgt_ok: "length target + length add + n \<le> tgt_len"
+  shows
+    "section_decodes src_seg tgt_len
+       (enc_data (emit_insts_spec src_len
+          (append_add_inst add [] @ [RRun b n]) st))
+       (enc_inst (emit_insts_spec src_len
+          (append_add_inst add [] @ [RRun b n]) st))
+       (enc_addr (emit_insts_spec src_len
+          (append_add_inst add [] @ [RRun b n]) st))
+       (target @ add @ replicate n b)
+       (enc_cache (emit_insts_spec src_len
+          (append_add_inst add [] @ [RRun b n]) st))"
+proof -
+  let ?st_add = "emit_insts_spec src_len (append_add_inst add []) st"
+  have add_tgt_ok: "length target + length add \<le> tgt_len"
+    using tgt_ok by simp
+  have add_dec:
+    "section_decodes src_seg tgt_len
+       (enc_data ?st_add) (enc_inst ?st_add) (enc_addr ?st_add)
+       (target @ add) (enc_cache ?st_add)"
+    by (rule section_decodes_emit_append_add_inst[
+        OF old add32 add_tgt_ok])
+  have run_tgt_ok: "length (target @ add) + n \<le> tgt_len"
+    using tgt_ok by simp
+  have run_dec:
+    "section_decodes src_seg tgt_len
+       (enc_data (emit_insts_spec src_len [RRun b n] ?st_add))
+       (enc_inst (emit_insts_spec src_len [RRun b n] ?st_add))
+       (enc_addr (emit_insts_spec src_len [RRun b n] ?st_add))
+       ((target @ add) @ replicate n b)
+       (enc_cache (emit_insts_spec src_len [RRun b n] ?st_add))"
+    by (rule section_decodes_emit_run_chunk[
+        OF add_dec run_pos run32 run_tgt_ok])
+  show ?thesis
+    using run_dec by (simp add: append_assoc)
+qed
+
 lemma takeWhile_eq_take_maximal_from:
   assumes i_lt_j: "i < j"
       and j_le: "j \<le> length xs"
