@@ -5943,6 +5943,43 @@ proof -
     using exact src_bytes_eq by simp
 qed
 
+lemma find_best_match'_eq_find_best_match_spec_bytes:
+  fixes src tgt :: "8 word ptr"
+    and src_len tgt_len tp :: "32 word"
+  assumes src_bytes_eq:
+    "src_bytes = heap_bytes s src (unat src_len)"
+      and tgt_bytes_eq:
+    "tgt_bytes = heap_bytes s tgt (unat tgt_len)"
+      and rel:
+    "source_index_heap_rel s src_bytes head_arr next_arr"
+      and closed:
+    "source_index_heap_chains_closed s src_bytes head_arr next_arr"
+      and nexts_wf:
+    "source_index_heap_nexts_wf s src_bytes next_arr"
+      and tp_le: "tp \<le> tgt_len"
+      and tgt_ok: "buf_valid s tgt (unat tgt_len)"
+      and result:
+    "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s = Some m"
+  shows "m = match_t_C
+    (of_nat (em_pos (find_best_match_spec src_bytes tgt_bytes (unat tp)
+      (build_index_spec src_bytes))))
+    (of_nat (em_len (find_best_match_spec src_bytes tgt_bytes (unat tp)
+      (build_index_spec src_bytes))))"
+proof -
+  have exact:
+    "m = match_t_C
+      (of_nat (em_pos (find_best_match_spec src_bytes
+        (heap_bytes s tgt (unat tgt_len)) (unat tp)
+        (build_index_spec src_bytes))))
+      (of_nat (em_len (find_best_match_spec src_bytes
+        (heap_bytes s tgt (unat tgt_len)) (unat tp)
+        (build_index_spec src_bytes))))"
+    by (rule find_best_match'_eq_find_best_match_spec_src_bytes[
+        OF src_bytes_eq rel closed nexts_wf tp_le tgt_ok result])
+  show ?thesis
+    using exact tgt_bytes_eq by simp
+qed
+
 lemma build_index'_find_best_match'_eq_find_best_match_spec_buf_valid:
   fixes src tgt :: "8 word ptr"
     and src_len tgt_len tp :: "32 word"
@@ -6765,6 +6802,33 @@ proof -
         OF rel' nexts_wf' tp_le result])
   show ?thesis
     using valid src_bytes_eq by simp
+qed
+
+lemma find_best_match'_match_valid_heap_bytes_source_index_bytes:
+  fixes src tgt :: "8 word ptr"
+    and src_len tgt_len tp :: "32 word"
+  assumes src_bytes_eq:
+    "src_bytes = heap_bytes s src (unat src_len)"
+      and tgt_bytes_eq:
+    "tgt_bytes = heap_bytes s tgt (unat tgt_len)"
+      and rel:
+    "source_index_heap_rel s src_bytes head_arr next_arr"
+      and nexts_wf:
+    "source_index_heap_nexts_wf s src_bytes next_arr"
+      and tp_le: "tp \<le> tgt_len"
+      and result:
+    "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s = Some m"
+  shows "match_valid src_bytes tgt_bytes
+    (unat tp) (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
+proof -
+  have valid:
+    "match_valid src_bytes
+      (heap_bytes s tgt (unat tgt_len))
+      (unat tp) (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
+    by (rule find_best_match'_match_valid_heap_bytes_source_index_src_bytes[
+        OF src_bytes_eq rel nexts_wf tp_le result])
+  show ?thesis
+    using valid tgt_bytes_eq by simp
 qed
 
 lemma build_index'_find_best_match'_match_valid_buf_valid:
