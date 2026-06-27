@@ -801,6 +801,75 @@ proof -
     using run_dec by (simp add: append_assoc)
 qed
 
+lemma section_decodes_copy_append_varint_addr:
+  assumes old:
+    "section_decodes src_seg tgt_len data inst addr target c"
+      and mode_wf: "enc_mode_arg_wf c copy_addr here m"
+      and mode_lt: "mode_t_C.mode_C m < (6 :: 32 word)"
+      and addr_size: "varint_size' (mode_t_C.arg_C m) s = Some an"
+      and here_eq: "unat here = length src_seg + length target"
+      and addr_ok: "unat copy_addr < length src_seg + length target"
+      and n_pos: "0 < n"
+      and n32: "n < 2 ^ 32"
+      and tgt_ok: "length target + n \<le> tgt_len"
+  shows
+    "section_decodes src_seg tgt_len
+       data (inst @ copy_inst_bytes n (unat (mode_t_C.mode_C m)))
+       (addr @ varint_bytes32 (mode_t_C.arg_C m) an)
+       (copy_loop src_seg target (unat copy_addr) n)
+       (cache_update c (unat copy_addr))"
+proof -
+  have mode_le: "unat (mode_t_C.mode_C m) \<le> 8"
+    by (rule enc_mode_arg_wf_mode_le8[OF mode_wf])
+  have here32: "length src_seg + length target < 2 ^ 32"
+    using here_eq unat_lt2p[of here] by simp
+  have copy_addr32: "unat copy_addr < 2 ^ 32"
+    using unat_lt2p[of copy_addr] by simp
+  have wf:
+    "wf_encoding c (unat copy_addr) (length src_seg + length target)
+       (unat (mode_t_C.mode_C m))
+       (varint_bytes32 (mode_t_C.arg_C m) an)"
+    using enc_mode_arg_wf_wf_encoding_varint_bytes32[
+        OF mode_wf mode_lt addr_size] here_eq
+    by simp
+  show ?thesis
+    by (rule section_decodes_copy_append[
+        OF old mode_le n_pos n32 copy_addr32 here32 addr_ok tgt_ok wf])
+qed
+
+lemma section_decodes_copy_append_byte_addr:
+  assumes old:
+    "section_decodes src_seg tgt_len data inst addr target c"
+      and mode_wf: "enc_mode_arg_wf c copy_addr here m"
+      and mode_ge: "\<not> mode_t_C.mode_C m < (6 :: 32 word)"
+      and here_eq: "unat here = length src_seg + length target"
+      and addr_ok: "unat copy_addr < length src_seg + length target"
+      and n_pos: "0 < n"
+      and n32: "n < 2 ^ 32"
+      and tgt_ok: "length target + n \<le> tgt_len"
+  shows
+    "section_decodes src_seg tgt_len
+       data (inst @ copy_inst_bytes n (unat (mode_t_C.mode_C m)))
+       (addr @ [ucast (mode_t_C.arg_C m)])
+       (copy_loop src_seg target (unat copy_addr) n)
+       (cache_update c (unat copy_addr))"
+proof -
+  have mode_le: "unat (mode_t_C.mode_C m) \<le> 8"
+    by (rule enc_mode_arg_wf_mode_le8[OF mode_wf])
+  have here32: "length src_seg + length target < 2 ^ 32"
+    using here_eq unat_lt2p[of here] by simp
+  have copy_addr32: "unat copy_addr < 2 ^ 32"
+    using unat_lt2p[of copy_addr] by simp
+  have wf:
+    "wf_encoding c (unat copy_addr) (length src_seg + length target)
+       (unat (mode_t_C.mode_C m)) [ucast (mode_t_C.arg_C m)]"
+    using enc_mode_arg_wf_wf_encoding_byte[OF mode_wf mode_ge] here_eq
+    by simp
+  show ?thesis
+    by (rule section_decodes_copy_append[
+        OF old mode_le n_pos n32 copy_addr32 here32 addr_ok tgt_ok wf])
+qed
+
 lemma takeWhile_eq_take_maximal_from:
   assumes i_lt_j: "i < j"
       and j_le: "j \<le> length xs"
