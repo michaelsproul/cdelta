@@ -354,6 +354,34 @@ proof -
     using find op_find op_entry by simp
 qed
 
+lemma add_copy_opcode_word_mode_le5_find:
+  assumes add_ge: "(1 :: 32 word) \<le> add_sz"
+      and add_le: "add_sz \<le> (4 :: 32 word)"
+      and mode_le: "mode \<le> (5 :: 32 word)"
+      and copy_ge: "(4 :: 32 word) \<le> copy_sz"
+      and copy_le: "copy_sz \<le> (6 :: 32 word)"
+  shows "find_add_copy_opcode (unat add_sz) (unat copy_sz) (unat mode) =
+         Some (unat (163 + mode * 12 + (add_sz - 1) * 3 + (copy_sz - 4) :: 32 word))"
+  using assms
+  by (simp add: find_add_copy_opcode_def word_le_nat_alt unat_word_ariths)
+
+lemma add_copy_opcode_word_mode_le5_find_capped:
+  fixes add_sz copy_sz mode csz :: "32 word"
+  defines "csz \<equiv> (if (6 :: 32 word) < copy_sz then (6 :: 32 word) else copy_sz)"
+  assumes add_ge: "(1 :: 32 word) \<le> add_sz"
+      and add_le: "add_sz \<le> (4 :: 32 word)"
+      and mode_le: "mode \<le> (5 :: 32 word)"
+      and copy_ge: "(4 :: 32 word) \<le> copy_sz"
+  shows "find_add_copy_opcode (unat add_sz) (unat csz) (unat mode) =
+         Some (unat (163 + mode * 12 + (add_sz - 1) * 3 + (csz - 4) :: 32 word))"
+proof -
+  have csz_range: "(4 :: 32 word) \<le> csz" "csz \<le> (6 :: 32 word)"
+    using copy_ge unfolding csz_def
+    by (auto simp: word_less_nat_alt word_le_nat_alt)
+  show ?thesis
+    by (rule add_copy_opcode_word_mode_le5_find[OF add_ge add_le mode_le csz_range])
+qed
+
 lemma add_copy_opcode_word_mode_gt5_default_entry:
   assumes add_ge: "(1 :: 32 word) \<le> add_sz"
       and add_le: "add_sz \<le> (4 :: 32 word)"
@@ -383,6 +411,18 @@ proof -
   show ?thesis
     using find op_find op_entry by simp
 qed
+
+lemma add_copy_opcode_word_mode_gt5_find:
+  assumes add_ge: "(1 :: 32 word) \<le> add_sz"
+      and add_le: "add_sz \<le> (4 :: 32 word)"
+      and mode_gt: "(5 :: 32 word) < mode"
+      and mode_le: "mode \<le> (8 :: 32 word)"
+      and copy_eq: "copy_sz = (4 :: 32 word)"
+  shows "find_add_copy_opcode (unat add_sz) (unat copy_sz) (unat mode) =
+         Some (unat (235 + (mode - 6) * 4 + (add_sz - 1) :: 32 word))"
+  using assms
+  by (simp add: find_add_copy_opcode_def word_le_nat_alt word_less_nat_alt
+                unat_word_ariths)
 
 lemma add_copy_opcode'_mode_le5:
   assumes add_ge: "(1 :: 32 word) \<le> add_sz"
