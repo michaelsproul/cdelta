@@ -702,6 +702,61 @@ lemma flush_pending_groups_exit:
   "flush_pending_groups add [] = append_add_inst add []"
   by simp
 
+lemma section_decodes_emit_append_add_inst:
+  assumes old:
+    "section_decodes src_seg tgt_len
+       (enc_data st) (enc_inst st) (enc_addr st) target (enc_cache st)"
+      and len32: "length add < 2 ^ 32"
+      and tgt_ok: "length target + length add \<le> tgt_len"
+  shows
+    "section_decodes src_seg tgt_len
+       (enc_data (emit_insts_spec src_len (append_add_inst add []) st))
+       (enc_inst (emit_insts_spec src_len (append_add_inst add []) st))
+       (enc_addr (emit_insts_spec src_len (append_add_inst add []) st))
+       (target @ add)
+       (enc_cache (emit_insts_spec src_len (append_add_inst add []) st))"
+proof (cases "add = []")
+  case True
+  then show ?thesis
+    using old by (simp add: append_add_inst_def emit_insts_spec_def)
+next
+  case False
+  have dec:
+    "section_decodes src_seg tgt_len
+       (enc_data st @ add) (enc_inst st @ add_inst_bytes (length add))
+       (enc_addr st) (target @ add) (enc_cache st)"
+    by (rule section_decodes_append_add[OF old len32 tgt_ok])
+  show ?thesis
+    using False dec
+    by (simp add: append_add_inst_def emit_insts_spec_def
+                  emit_inst_spec_RAdd_sections_general)
+qed
+
+lemma section_decodes_emit_run_chunk:
+  assumes old:
+    "section_decodes src_seg tgt_len
+       (enc_data st) (enc_inst st) (enc_addr st) target (enc_cache st)"
+      and n_pos: "0 < n"
+      and n32: "n < 2 ^ 32"
+      and tgt_ok: "length target + n \<le> tgt_len"
+  shows
+    "section_decodes src_seg tgt_len
+       (enc_data (emit_insts_spec src_len [RRun b n] st))
+       (enc_inst (emit_insts_spec src_len [RRun b n] st))
+       (enc_addr (emit_insts_spec src_len [RRun b n] st))
+       (target @ replicate n b)
+       (enc_cache (emit_insts_spec src_len [RRun b n] st))"
+proof -
+  have dec:
+    "section_decodes src_seg tgt_len
+       (enc_data st @ [b]) (enc_inst st @ run_inst_bytes n)
+       (enc_addr st) (target @ replicate n b) (enc_cache st)"
+    by (rule section_decodes_append_run[OF old n_pos n32 tgt_ok])
+  show ?thesis
+    using dec
+    by (simp add: emit_insts_spec_def emit_inst_spec_RRun_sections_general)
+qed
+
 lemma takeWhile_eq_take_maximal_from:
   assumes i_lt_j: "i < j"
       and j_le: "j \<le> length xs"
