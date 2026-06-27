@@ -968,6 +968,21 @@ lemma section_decodes_append_copy:
       rule section_decodes_prefix_append_copy
         [OF section_decodesD[OF old] mode n_pos n32 a32 here32 addr_ok tgt_ok wf])
 
+lemma section_decodes_copy_append:
+  assumes old: "section_decodes src_seg tgt_len data inst addr tgt c"
+      and mode: "mode \<le> 8" and n_pos: "n > 0" and n32: "n < 2 ^ 32"
+      and a32: "a < 2 ^ 32"
+      and here32: "length src_seg + length tgt < 2 ^ 32"
+      and addr_ok: "a < length src_seg + length tgt"
+      and tgt_ok: "length tgt + n \<le> tgt_len"
+      and wf: "wf_encoding c a (length src_seg + length tgt) mode abytes"
+  shows
+    "section_decodes src_seg tgt_len
+       data (inst @ copy_inst_bytes n mode) (addr @ abytes)
+       (copy_loop src_seg tgt a n) (cache_update c a)"
+  by (rule section_decodes_append_copy[
+      OF old mode n_pos n32 a32 here32 addr_ok tgt_ok wf])
+
 lemma section_decodes_append_add_copy_fused:
   assumes old: "section_decodes src_seg tgt_len data inst addr tgt c"
       and fop: "find_add_copy_opcode (length add_bs) copy_n mode = Some op"
@@ -983,6 +998,21 @@ lemma section_decodes_append_add_copy_fused:
   by (rule section_decodesI,
       rule section_decodes_prefix_append_add_copy_fused
         [OF section_decodesD[OF old] fop a32 here32 addr_ok tgt_ok wf])
+
+lemma section_decodes_fused_add_copy_append:
+  assumes old: "section_decodes src_seg tgt_len data inst addr tgt c"
+      and fop: "find_add_copy_opcode (length add_bs) copy_n mode = Some op"
+      and a32: "a < 2 ^ 32"
+      and here32: "length src_seg + length tgt + length add_bs < 2 ^ 32"
+      and addr_ok: "a < length src_seg + length tgt + length add_bs"
+      and tgt_ok: "length tgt + length add_bs + copy_n \<le> tgt_len"
+      and wf: "wf_encoding c a (length src_seg + length tgt + length add_bs) mode abytes"
+  shows
+    "section_decodes src_seg tgt_len
+       (data @ add_bs) (inst @ [word_of_nat op]) (addr @ abytes)
+       (copy_loop src_seg (tgt @ add_bs) a copy_n) (cache_update c a)"
+  by (rule section_decodes_append_add_copy_fused[
+      OF old fop a32 here32 addr_ok tgt_ok wf])
 
 lemma section_decodes_append_copy_add_fused:
   assumes old: "section_decodes src_seg tgt_len data inst addr tgt c"
