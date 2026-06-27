@@ -7633,6 +7633,182 @@ proof (rule runs_to_weaken[
     using post tgt_ok_t matcher by simp
 qed
 
+lemma build_index'_find_best_match'_spec_and_valid_preserves_tgt_buf_valid:
+  fixes src tgt :: "8 word ptr"
+    and src_len tgt_len tp :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes src_len_word:
+        "unat src_len < unat (no_entry32 :: 32 word)"
+      and src_ok: "buf_valid s src (unat src_len)"
+      and tgt_ok: "buf_valid s tgt (unat tgt_len)"
+      and tp_le: "tp \<le> tgt_len"
+      and head_valid:
+        "\<And>h (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; h < hash_size\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (head +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; p < unat src_len\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+      and head_no_alias:
+        "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> head +\<^sub>p int bucket"
+      and next_no_alias:
+        "\<And>q p. \<lbrakk>q < unat src_len; p < unat src_len; q \<noteq> p\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+      and next_head_disjoint:
+        "\<And>h p. \<lbrakk>h < hash_size; p < unat src_len\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+      and head_next_disjoint:
+        "\<And>q bucket. \<lbrakk>q < unat src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int bucket"
+  shows "build_index' src src_len head next_arr \<bullet> s
+    \<lbrace> \<lambda>r t. r = Result () \<and>
+        source_index_heap_rel t
+          (heap_bytes s src (unat src_len)) head next_arr
+        \<and> source_index_heap_nexts_wf t
+          (heap_bytes s src (unat src_len)) next_arr
+        \<and> source_index_heap_chains_closed t
+          (heap_bytes s src (unat src_len)) head next_arr
+        \<and> heap_typing t = heap_typing s
+        \<and> heap_bytes t src (unat src_len) =
+          heap_bytes s src (unat src_len)
+        \<and> heap_bytes t tgt (unat tgt_len) =
+          heap_bytes s tgt (unat tgt_len)
+        \<and> buf_valid t tgt (unat tgt_len)
+        \<and> (\<forall>m. find_best_match' src src_len tgt tgt_len tp head next_arr t =
+              Some m \<longrightarrow>
+            (m = (let best = find_best_match_spec
+                (heap_bytes s src (unat src_len))
+                (heap_bytes s tgt (unat tgt_len)) (unat tp)
+                (build_index_spec (heap_bytes s src (unat src_len)))
+              in match_t_C (of_nat (em_pos best)) (of_nat (em_len best)))
+            \<and> match_valid
+              (heap_bytes s src (unat src_len))
+              (heap_bytes s tgt (unat tgt_len))
+              (unat tp) (unat (match_t_C.pos_C m))
+              (unat (match_t_C.len_C m)))) \<rbrace>"
+proof -
+  let ?src_bytes = "heap_bytes s src (unat src_len)"
+  let ?tgt_bytes = "heap_bytes s tgt (unat tgt_len)"
+  have spec_and_valid:
+    "build_index' src src_len head next_arr \<bullet> s
+      \<lbrace> \<lambda>r t. r = Result () \<and>
+          source_index_heap_rel t ?src_bytes head next_arr
+        \<and> source_index_heap_nexts_wf t ?src_bytes next_arr
+        \<and> source_index_heap_chains_closed t ?src_bytes head next_arr
+        \<and> heap_typing t = heap_typing s
+        \<and> heap_bytes t src (unat src_len) = ?src_bytes
+        \<and> buf_valid t tgt (unat tgt_len)
+        \<and> (\<forall>m. find_best_match' src src_len tgt tgt_len tp head next_arr t =
+              Some m \<longrightarrow>
+            (m = (let best = find_best_match_spec
+                ?src_bytes (heap_bytes t tgt (unat tgt_len)) (unat tp)
+                (build_index_spec ?src_bytes)
+              in match_t_C (of_nat (em_pos best)) (of_nat (em_len best)))
+            \<and> match_valid ?src_bytes (heap_bytes t tgt (unat tgt_len))
+              (unat tp) (unat (match_t_C.pos_C m))
+              (unat (match_t_C.len_C m)))) \<rbrace>"
+    by (rule build_index'_find_best_match'_spec_and_valid_buf_valid[
+        OF src_len_word src_ok tgt_ok tp_le head_valid next_valid
+          head_no_alias next_no_alias next_head_disjoint head_next_disjoint])
+  have tgt_bytes:
+    "build_index' src src_len head next_arr \<bullet> s
+      \<lbrace> \<lambda>r t. r = Result () \<and>
+          heap_typing t = heap_typing s \<and>
+          heap_bytes t tgt (unat tgt_len) = ?tgt_bytes \<rbrace>"
+    by (rule build_index'_preserves_heap_bytes_buf_valid[
+        where buf = tgt and n = "unat tgt_len",
+        OF src_len_word src_ok head_valid next_valid head_no_alias next_no_alias
+          next_head_disjoint head_next_disjoint])
+  have combined:
+    "build_index' src src_len head next_arr \<bullet> s
+      \<lbrace> \<lambda>r t.
+          (r = Result () \<and>
+            source_index_heap_rel t ?src_bytes head next_arr
+          \<and> source_index_heap_nexts_wf t ?src_bytes next_arr
+          \<and> source_index_heap_chains_closed t ?src_bytes head next_arr
+          \<and> heap_typing t = heap_typing s
+          \<and> heap_bytes t src (unat src_len) = ?src_bytes
+          \<and> buf_valid t tgt (unat tgt_len)
+          \<and> (\<forall>m. find_best_match' src src_len tgt tgt_len tp head next_arr t =
+                Some m \<longrightarrow>
+              (m = (let best = find_best_match_spec
+                  ?src_bytes (heap_bytes t tgt (unat tgt_len)) (unat tp)
+                  (build_index_spec ?src_bytes)
+                in match_t_C (of_nat (em_pos best)) (of_nat (em_len best)))
+              \<and> match_valid ?src_bytes (heap_bytes t tgt (unat tgt_len))
+                (unat tp) (unat (match_t_C.pos_C m))
+                (unat (match_t_C.len_C m)))))
+        \<and> r = Result () \<and>
+          heap_typing t = heap_typing s \<and>
+          heap_bytes t tgt (unat tgt_len) = ?tgt_bytes \<rbrace>"
+    using spec_and_valid tgt_bytes by (simp add: runs_to_conj)
+  show ?thesis
+  proof (rule runs_to_weaken[OF combined])
+    fix r t
+    assume post:
+      "(r = Result () \<and>
+          source_index_heap_rel t ?src_bytes head next_arr
+        \<and> source_index_heap_nexts_wf t ?src_bytes next_arr
+        \<and> source_index_heap_chains_closed t ?src_bytes head next_arr
+        \<and> heap_typing t = heap_typing s
+        \<and> heap_bytes t src (unat src_len) = ?src_bytes
+        \<and> buf_valid t tgt (unat tgt_len)
+        \<and> (\<forall>m. find_best_match' src src_len tgt tgt_len tp head next_arr t =
+              Some m \<longrightarrow>
+            (m = (let best = find_best_match_spec
+                ?src_bytes (heap_bytes t tgt (unat tgt_len)) (unat tp)
+                (build_index_spec ?src_bytes)
+              in match_t_C (of_nat (em_pos best)) (of_nat (em_len best)))
+            \<and> match_valid ?src_bytes (heap_bytes t tgt (unat tgt_len))
+              (unat tp) (unat (match_t_C.pos_C m))
+              (unat (match_t_C.len_C m)))))
+        \<and> r = Result () \<and>
+          heap_typing t = heap_typing s \<and>
+          heap_bytes t tgt (unat tgt_len) = ?tgt_bytes"
+    have tgt_bytes_t: "heap_bytes t tgt (unat tgt_len) = ?tgt_bytes"
+      using post by simp
+    have matcher:
+      "\<forall>m. find_best_match' src src_len tgt tgt_len tp head next_arr t =
+            Some m \<longrightarrow>
+          (m = (let best = find_best_match_spec
+              ?src_bytes ?tgt_bytes (unat tp)
+              (build_index_spec ?src_bytes)
+            in match_t_C (of_nat (em_pos best)) (of_nat (em_len best)))
+          \<and> match_valid ?src_bytes ?tgt_bytes
+            (unat tp) (unat (match_t_C.pos_C m))
+            (unat (match_t_C.len_C m)))"
+      using post tgt_bytes_t by simp
+    show "r = Result () \<and>
+      source_index_heap_rel t
+        (heap_bytes s src (unat src_len)) head next_arr \<and>
+      source_index_heap_nexts_wf t
+        (heap_bytes s src (unat src_len)) next_arr \<and>
+      source_index_heap_chains_closed t
+        (heap_bytes s src (unat src_len)) head next_arr \<and>
+      heap_typing t = heap_typing s \<and>
+      heap_bytes t src (unat src_len) =
+        heap_bytes s src (unat src_len) \<and>
+      heap_bytes t tgt (unat tgt_len) =
+        heap_bytes s tgt (unat tgt_len) \<and>
+      buf_valid t tgt (unat tgt_len) \<and>
+      (\<forall>m. find_best_match' src src_len tgt tgt_len tp head next_arr t =
+            Some m \<longrightarrow>
+          (m = (let best = find_best_match_spec
+              (heap_bytes s src (unat src_len))
+              (heap_bytes s tgt (unat tgt_len)) (unat tp)
+              (build_index_spec (heap_bytes s src (unat src_len)))
+            in match_t_C (of_nat (em_pos best)) (of_nat (em_len best)))
+          \<and> match_valid
+            (heap_bytes s src (unat src_len))
+            (heap_bytes s tgt (unat tgt_len))
+            (unat tp) (unat (match_t_C.pos_C m))
+            (unat (match_t_C.len_C m))))"
+      using post matcher by simp
+  qed
+qed
+
 end
 
 end
