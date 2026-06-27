@@ -14316,11 +14316,8 @@ proof -
                    unat_word_ariths word_less_nat_alt word_le_nat_alt)
 qed
 
-(* Nontrivial COPY/flush/fused preservation needs these shared facts:
-   best_mode'_encode_address_correct for the C cache state,
-   section_decodes_copy_append,
-   section_decodes_flush_pending_add_run_chunks, and
-   section_decodes_fused_add_copy_append. *)
+(* The COPY/flush/fused section-decoder bridges above are ready to use when
+   tightening the higher-level encoder preservation proofs. *)
 
 end
 
