@@ -382,6 +382,26 @@ proof -
     by (rule add_copy_opcode_word_mode_le5_find[OF add_ge add_le mode_le csz_range])
 qed
 
+lemma add_copy_opcode_word_mode_le5_gt6_expr_nonzero:
+  assumes add_ge: "(1 :: 32 word) \<le> add_sz"
+      and add_le: "add_sz \<le> (4 :: 32 word)"
+      and mode_le: "mode \<le> (5 :: 32 word)"
+  shows "(0xA2 + (mode * 0xC + add_sz * 3) :: 32 word) \<noteq> 0"
+  using assms
+  by (auto simp: word_less_nat_alt word_le_nat_alt
+                 word_neq_0_conv unat_word_ariths)
+
+lemma add_copy_opcode_word_mode_le5_le6_expr_nonzero:
+  assumes add_ge: "(1 :: 32 word) \<le> add_sz"
+      and add_le: "add_sz \<le> (4 :: 32 word)"
+      and mode_le: "mode \<le> (5 :: 32 word)"
+      and copy_ge: "(4 :: 32 word) \<le> copy_sz"
+      and copy_le: "copy_sz \<le> (6 :: 32 word)"
+  shows "(0x9C + (mode * 0xC + (add_sz * 3 + copy_sz)) :: 32 word) \<noteq> 0"
+  using assms
+  by (auto simp: word_less_nat_alt word_le_nat_alt
+                 word_neq_0_conv unat_word_ariths)
+
 lemma add_copy_opcode_word_mode_gt5_default_entry:
   assumes add_ge: "(1 :: 32 word) \<le> add_sz"
       and add_le: "add_sz \<le> (4 :: 32 word)"
@@ -423,6 +443,16 @@ lemma add_copy_opcode_word_mode_gt5_find:
   using assms
   by (simp add: find_add_copy_opcode_def word_le_nat_alt word_less_nat_alt
                 unat_word_ariths)
+
+lemma add_copy_opcode_word_mode_gt5_expr_nonzero:
+  assumes add_ge: "(1 :: 32 word) \<le> add_sz"
+      and add_le: "add_sz \<le> (4 :: 32 word)"
+      and mode_gt: "(5 :: 32 word) < mode"
+      and mode_le: "mode \<le> (8 :: 32 word)"
+  shows "(0xD2 + (mode * 4 + add_sz) :: 32 word) \<noteq> 0"
+  using assms
+  by (auto simp: word_less_nat_alt word_le_nat_alt
+                 word_neq_0_conv unat_word_ariths)
 
 lemma add_copy_opcode'_mode_le5:
   assumes add_ge: "(1 :: 32 word) \<le> add_sz"
