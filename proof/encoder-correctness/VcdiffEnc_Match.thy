@@ -4526,6 +4526,50 @@ proof -
   qed
 qed
 
+lemma build_index'_preserves_heap_bytes_buf_valid:
+  fixes src buf :: "8 word ptr"
+    and src_len :: "32 word"
+    and head next_arr :: "32 word ptr"
+  assumes src_len_word:
+        "unat src_len < unat (no_entry32 :: 32 word)"
+      and src_ok: "buf_valid s src (unat src_len)"
+      and head_valid:
+        "\<And>h (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; h < hash_size\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (head +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p (st' :: lifted_globals).
+          \<lbrakk>heap_typing st' = heap_typing s; p < unat src_len\<rbrakk> \<Longrightarrow>
+          IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+      and head_no_alias:
+        "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> head +\<^sub>p int bucket"
+      and next_no_alias:
+        "\<And>q p. \<lbrakk>q < unat src_len; p < unat src_len; q \<noteq> p\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+      and next_head_disjoint:
+        "\<And>h p. \<lbrakk>h < hash_size; p < unat src_len\<rbrakk> \<Longrightarrow>
+          head +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+      and head_next_disjoint:
+        "\<And>q bucket. \<lbrakk>q < unat src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> head +\<^sub>p int bucket"
+  shows "build_index' src src_len head next_arr \<bullet> s
+    \<lbrace> \<lambda>r t. r = Result () \<and>
+        heap_typing t = heap_typing s \<and>
+        heap_bytes t buf n = heap_bytes s buf n \<rbrace>"
+proof (rule build_index'_preserves_heap_bytes[
+    OF src_len_word _ head_valid next_valid head_no_alias next_no_alias
+      next_head_disjoint head_next_disjoint])
+  fix off :: "32 word"
+  fix st' :: lifted_globals
+  assume typing: "heap_typing st' = heap_typing s"
+  assume off_lt: "unat off < unat src_len"
+  have ptr: "ptr_valid (heap_typing s) (src +\<^sub>p uint off)"
+    by (rule buf_valid_uintD[OF src_ok off_lt])
+  show "IS_VALID(8 word) st' (src +\<^sub>p uint off)"
+    using ptr typing by simp
+qed
+
 lemma unat_suc_word_less:
   fixes n limit :: "32 word"
   assumes "n < limit"
