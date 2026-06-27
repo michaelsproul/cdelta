@@ -1217,6 +1217,24 @@ lemma enc_mode_arg_wf_mode_word_le8:
   using enc_mode_arg_wf_mode_le8[OF assms]
   by (simp add: word_le_nat_alt)
 
+lemma enc_mode_arg_wf_wf_encoding_varint_bytes32:
+  assumes wf: "enc_mode_arg_wf c addr here m"
+      and mode_lt: "mode_t_C.mode_C m < (6 :: 32 word)"
+      and size: "varint_size' (mode_t_C.arg_C m) s = Some n"
+  shows "wf_encoding c (unat addr) (unat here)
+          (unat (mode_t_C.mode_C m))
+          (varint_bytes32 (mode_t_C.arg_C m) n)"
+  using wf mode_lt varint_bytes32_eq_varint_encode[OF size]
+  by (simp add: enc_mode_arg_wf_def)
+
+lemma enc_mode_arg_wf_wf_encoding_byte:
+  assumes wf: "enc_mode_arg_wf c addr here m"
+      and mode_ge: "\<not> mode_t_C.mode_C m < (6 :: 32 word)"
+  shows "wf_encoding c (unat addr) (unat here)
+          (unat (mode_t_C.mode_C m)) [ucast (mode_t_C.arg_C m)]"
+  using wf mode_ge
+  by (simp add: enc_mode_arg_wf_def)
+
 lemma enc_best_wf_self:
   "enc_best_wf s c addr here addr 0"
   by (simp add: enc_best_wf_def wf_encoding_def)
