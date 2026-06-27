@@ -13731,6 +13731,156 @@ proof -
     done
 qed
 
+lemma try_emit_add_copy'_mode_gt5_success_enc_sections_inv:
+  fixes op pend_len :: "32 word"
+    and m
+  defines "op \<equiv>
+    (235 + (mode_t_C.mode_C m - 6) * 4 + (pend_len - 1) :: 32 word)"
+  assumes inv:
+        "enc_sections_inv s data inst addr_buf sec src_seg tgt_len
+          data_bytes inst_bytes addr_bytes target c_out"
+      and abs: "enc_cache_abs s c_out"
+      and cache_wf: "enc_cache_wf c_out"
+      and bm: "best_mode' copy_addr here s = Some m"
+      and pend_ge: "(1 :: 32 word) \<le> pend_len"
+      and pend_le: "pend_len \<le> (4 :: 32 word)"
+      and copy_eq: "copy_len = (4 :: 32 word)"
+      and mode_gt: "(5 :: 32 word) < mode_t_C.mode_C m"
+      and mode_le: "mode_t_C.mode_C m \<le> (8 :: 32 word)"
+      and here_eq:
+        "unat here = length src_seg + length target + unat pend_len"
+      and addr_ok:
+        "unat copy_addr < length src_seg + length target + unat pend_len"
+      and target_room:
+        "length target + unat pend_len + unat copy_len \<le> tgt_len"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_byte_dist:
+        "ptr_range_distinct inst (Suc (unat (sections_t_C.inst_pos_C sec)))"
+      and inst_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr_buf +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_pending_disj:
+        "\<forall>i < unat pend_len.
+           pending +\<^sub>p uint (of_nat i :: 32 word) \<noteq>
+           inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and data_fits:
+        "\<not> data_cap - sections_t_C.data_pos_C sec < pend_len"
+      and data_valid: "\<forall>j < unat pend_len.
+        ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j))"
+      and pending_valid: "\<forall>j < unat pend_len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint (of_nat j :: 32 word))"
+      and data_pending_disj: "\<forall>i < unat pend_len. \<forall>j < unat pend_len.
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        pending +\<^sub>p uint (of_nat j :: 32 word)"
+      and data_inj: "\<forall>i < unat pend_len. \<forall>j < unat pend_len.
+        i \<noteq> j \<longrightarrow>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j)"
+      and data_prefix_disj: "\<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+        i < pend_len \<longrightarrow>
+        data +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_no_overflow:
+        "unat (sections_t_C.data_pos_C sec) + unat pend_len < 2 ^ 32"
+      and data_inst_disj: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+        i < pend_len \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+        i < pend_len \<longrightarrow>
+        addr_buf +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and addr_byte_fits: "sections_t_C.addr_pos_C sec < addr_cap"
+      and addr_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (addr_buf +\<^sub>p uint (sections_t_C.addr_pos_C sec))"
+      and addr_byte_dist:
+        "ptr_range_distinct addr_buf (Suc (unat (sections_t_C.addr_pos_C sec)))"
+      and addr_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec + pend_len).
+           data +\<^sub>p int i \<noteq> addr_buf +\<^sub>p uint (sections_t_C.addr_pos_C sec)"
+      and addr_byte_inst_disj:
+        "\<forall>i < unat (sections_t_C.inst_pos_C sec + 1).
+           inst +\<^sub>p int i \<noteq> addr_buf +\<^sub>p uint (sections_t_C.addr_pos_C sec)"
+  shows "try_emit_add_copy' sec data data_cap inst inst_cap addr_buf addr_cap
+            pending pend_len copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>f.
+                r = Result f \<and>
+                fused_t_C.fused_C f = copy_len \<and>
+                sections_result (fused_t_C.s_C f)
+                  (sections_t_C.data_pos_C sec + pend_len)
+                  (sections_t_C.inst_pos_C sec + 1)
+                  (sections_t_C.addr_pos_C sec + 1)
+                  ENC_OK \<and>
+                enc_sections_inv t data inst addr_buf (fused_t_C.s_C f)
+                  src_seg tgt_len
+                  (data_bytes @ heap_bytes_word s pending 0 pend_len)
+                  (inst_bytes @ [ucast op])
+                  (addr_bytes @ [ucast (mode_t_C.arg_C m)])
+                  (copy_loop src_seg
+                    (target @ heap_bytes_word s pending 0 pend_len)
+                    (unat copy_addr) (unat copy_len))
+                  (cache_update c_out (unat copy_addr))) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  let ?add = "heap_bytes_word s pending 0 pend_len"
+  have near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
+    by (rule enc_cache_abs_near_ptr_lt_word[OF abs])
+  have mode_wf:
+    "enc_mode_arg_wf c_out copy_addr here m"
+    by (rule best_mode'_encode_address_correct[OF abs cache_wf bm])
+  have mode_ge: "\<not> mode_t_C.mode_C m < (6 :: 32 word)"
+    using mode_gt by (simp add: word_less_nat_alt)
+  have fop:
+    "find_add_copy_opcode (length ?add) (unat copy_len)
+       (unat (mode_t_C.mode_C m)) = Some (unat op)"
+    unfolding op_def
+    using add_copy_opcode_word_mode_gt5_find[
+      OF pend_ge pend_le mode_gt mode_le copy_eq]
+    by simp
+  have op_byte: "(word_of_nat (unat op) :: byte) = ucast op"
+    by (rule byte_of_unat_ucast32)
+  have here_eq_add:
+    "unat here = length src_seg + length target + length ?add"
+    using here_eq by simp
+  have addr_ok_add:
+    "unat copy_addr < length src_seg + length target + length ?add"
+    using addr_ok by simp
+  have target_room_add:
+    "length target + length ?add + unat copy_len \<le> tgt_len"
+    using target_room by simp
+  have decodes_post:
+    "section_decodes src_seg tgt_len
+       (data_bytes @ ?add)
+       (inst_bytes @ [ucast op])
+       (addr_bytes @ [ucast (mode_t_C.arg_C m)])
+       (copy_loop src_seg (target @ ?add) (unat copy_addr) (unat copy_len))
+       (cache_update c_out (unat copy_addr))"
+    using section_decodes_fused_add_copy_append_byte_addr
+      [OF enc_sections_invD(2)[OF inv] fop mode_wf mode_ge here_eq_add
+          addr_ok_add target_room_add] op_byte
+    by simp
+  show ?thesis
+    apply (rule runs_to_weaken[
+      OF try_emit_add_copy'_mode_gt5_success_emitted_sections
+        [OF enc_sections_invD(1)[OF inv] bm pend_ge pend_le copy_eq
+            mode_gt mode_le sec_ok near_ptr_lt inst_byte_fits inst_byte_ptr
+            inst_byte_dist inst_byte_data_disj inst_byte_addr_disj
+            inst_byte_pending_disj data_fits data_valid pending_valid
+            data_pending_disj data_inj data_prefix_disj data_no_overflow
+            data_inst_disj data_addr_disj addr_byte_fits addr_byte_ptr
+            addr_byte_dist addr_byte_data_disj addr_byte_inst_disj,
+          folded op_def]])
+    using decodes_post by (auto simp: enc_sections_inv_def)
+qed
+
 lemma try_emit_add_copy'_mode_gt5_success_enc_sections_state_rel:
   fixes op pend_len :: "32 word"
     and m
