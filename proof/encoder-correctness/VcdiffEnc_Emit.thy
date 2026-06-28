@@ -11013,6 +11013,45 @@ lemma flush_pending'_len_lt_four_enc_sections_cache_inv_step:
           (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
       and target_room: "length target + unat len \<le> tgt_len"
       and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+      and inst_byte_fits: "sections_t_C.inst_pos_C sec < inst_cap"
+      and inst_byte_ptr:
+        "ptr_valid (heap_typing s)
+          (inst +\<^sub>p uint (sections_t_C.inst_pos_C sec))"
+      and inst_byte_dist:
+        "ptr_range_distinct inst (Suc (unat (sections_t_C.inst_pos_C sec)))"
+      and inst_byte_data_disj:
+        "\<forall>i < unat (sections_t_C.data_pos_C sec).
+           data +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_addr_disj:
+        "\<forall>i < unat (sections_t_C.addr_pos_C sec).
+           addr +\<^sub>p int i \<noteq> inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and inst_byte_pending_disj:
+        "\<forall>i < unat len.
+           pending +\<^sub>p uint ((0 :: 32 word) + of_nat i) \<noteq>
+           inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+      and data_fits:
+        "\<not> data_cap - sections_t_C.data_pos_C sec < len"
+      and data_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j))"
+      and data_pending_disj: "\<forall>i < unat len. \<forall>j < unat len.
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)"
+      and data_inj: "\<forall>i < unat len. \<forall>j < unat len.
+        i \<noteq> j \<longrightarrow>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+        data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j)"
+      and data_prefix_disj: "\<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+        i < len \<longrightarrow>
+        data +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_no_overflow:
+        "unat (sections_t_C.data_pos_C sec) + unat len < 2 ^ 32"
+      and data_inst_disj: "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+        i < len \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+      and data_addr_disj: "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+        i < len \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
   shows "flush_pending' sec data data_cap inst inst_cap pending len \<bullet> s
            \<lbrace> \<lambda>r t.
               (\<exists>sec' data_bytes' inst_bytes' addr_bytes'.
@@ -11023,7 +11062,170 @@ lemma flush_pending'_len_lt_four_enc_sections_cache_inv_step:
                 enc_cache_abs t c_out \<and>
                 enc_cache_wf c_out) \<and>
               heap_typing t = heap_typing s \<rbrace>"
-  sorry
+proof -
+  have len_unat_lt4: "unat len < 4"
+  proof -
+    have le4: "unat len \<le> 4"
+      using len_le by (simp add: word_le_nat_alt)
+    have ne4: "unat len \<noteq> 4"
+    proof
+      assume "unat len = 4"
+      then have "len = (4 :: 32 word)"
+        by (simp add: word_unat_eq_iff)
+      with len_ne_four show False by simp
+    qed
+    show ?thesis
+      using le4 ne4 by simp
+  qed
+  have len_cases:
+    "len = (0 :: 32 word) \<or> len = (1 :: 32 word) \<or>
+     len = (2 :: 32 word) \<or> len = (3 :: 32 word)"
+  proof -
+    have "unat len = 0 \<or> unat len = 1 \<or> unat len = 2 \<or> unat len = 3"
+      using len_unat_lt4 by arith
+    then show ?thesis
+      by (auto simp: word_unat_eq_iff)
+  qed
+  then consider
+      (zero) "len = (0 :: 32 word)"
+    | (one) "len = (1 :: 32 word)"
+    | (two) "len = (2 :: 32 word)"
+    | (three) "len = (3 :: 32 word)"
+    by blast
+  then show ?thesis
+  proof cases
+    case zero
+    have run:
+      "flush_pending' sec data data_cap inst inst_cap pending (0 :: 32 word) \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            enc_sections_inv t data inst addr sec' src_seg tgt_len
+              data_bytes inst_bytes addr_bytes target c_out \<and>
+            enc_cache_abs t c_out \<and>
+            enc_cache_wf c_out) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+      by (rule flush_pending'_len_zero_enc_sections_cache_inv[
+          OF inv abs cache_wf])
+    show ?thesis
+      apply (simp add: zero)
+      apply (rule runs_to_weaken[OF run])
+      by (auto simp: heap_bytes_word_def)
+  next
+    case one
+    have run:
+      "flush_pending' sec data data_cap inst inst_cap pending (1 :: 32 word) \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            enc_sections_inv t data inst addr sec' src_seg tgt_len
+              (data_bytes @ heap_bytes_word s pending 0 (1 :: 32 word))
+              (inst_bytes @ [ucast (1 + (1 :: 32 word))])
+              addr_bytes
+              (target @ heap_bytes_word s pending 0 (1 :: 32 word))
+              c_out \<and>
+            enc_cache_abs t c_out \<and>
+            enc_cache_wf c_out) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+      apply (rule flush_pending'_len_one_enc_sections_cache_inv[
+          OF inv abs cache_wf])
+                   using target_room one apply simp
+                  apply (rule sec_ok)
+                 apply (rule inst_byte_fits)
+                apply (rule inst_byte_ptr)
+               apply (rule inst_byte_dist)
+              apply (rule inst_byte_data_disj)
+             apply (rule inst_byte_addr_disj)
+            using inst_byte_pending_disj one apply simp
+           using data_fits one apply simp
+          using data_valid one apply simp
+         using pending_valid one apply simp
+        using data_pending_disj one apply simp
+       using data_prefix_disj one apply simp
+      using data_no_overflow data_inst_disj data_addr_disj one
+      by simp_all
+    show ?thesis
+      apply (simp add: one)
+      apply (rule runs_to_weaken[OF run])
+      by auto
+  next
+    case two
+    have run:
+      "flush_pending' sec data data_cap inst inst_cap pending (2 :: 32 word) \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            enc_sections_inv t data inst addr sec' src_seg tgt_len
+              (data_bytes @ heap_bytes_word s pending 0 (2 :: 32 word))
+              (inst_bytes @ [ucast (1 + (2 :: 32 word))])
+              addr_bytes
+              (target @ heap_bytes_word s pending 0 (2 :: 32 word))
+              c_out \<and>
+            enc_cache_abs t c_out \<and>
+            enc_cache_wf c_out) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+      apply (rule flush_pending'_len_two_enc_sections_cache_inv[
+          OF inv abs cache_wf])
+                    using target_room two apply simp
+                   apply (rule sec_ok)
+                  apply (rule inst_byte_fits)
+                 apply (rule inst_byte_ptr)
+                apply (rule inst_byte_dist)
+               apply (rule inst_byte_data_disj)
+              apply (rule inst_byte_addr_disj)
+             using inst_byte_pending_disj two apply simp
+            using data_fits two apply simp
+           using data_valid two apply simp
+          using pending_valid two apply simp
+         using data_pending_disj two apply simp
+        using data_inj two apply simp
+       using data_prefix_disj two apply simp
+      using data_no_overflow data_inst_disj data_addr_disj two
+      by simp_all
+    show ?thesis
+      apply (simp add: two)
+      apply (rule runs_to_weaken[OF run])
+      by auto
+  next
+    case three
+    have run:
+      "flush_pending' sec data data_cap inst inst_cap pending (3 :: 32 word) \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            enc_sections_inv t data inst addr sec' src_seg tgt_len
+              (data_bytes @ heap_bytes_word s pending 0 (3 :: 32 word))
+              (inst_bytes @ [ucast (1 + (3 :: 32 word))])
+              addr_bytes
+              (target @ heap_bytes_word s pending 0 (3 :: 32 word))
+              c_out \<and>
+            enc_cache_abs t c_out \<and>
+            enc_cache_wf c_out) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+      apply (rule flush_pending'_len_three_enc_sections_cache_inv[
+          OF inv abs cache_wf])
+                    using target_room three apply simp
+                   apply (rule sec_ok)
+                  apply (rule inst_byte_fits)
+                 apply (rule inst_byte_ptr)
+                apply (rule inst_byte_dist)
+               apply (rule inst_byte_data_disj)
+              apply (rule inst_byte_addr_disj)
+             using inst_byte_pending_disj three apply simp
+            using data_fits three apply simp
+           using data_valid three apply simp
+          using pending_valid three apply simp
+         using data_pending_disj three apply simp
+        using data_inj three apply simp
+       using data_prefix_disj three apply simp
+      using data_no_overflow data_inst_disj data_addr_disj three
+      by simp_all
+    show ?thesis
+      apply (simp add: three)
+      apply (rule runs_to_weaken[OF run])
+      by auto
+  qed
+qed
 
 lemma flush_pending'_short_enc_sections_cache_inv_step:
   assumes inv:
@@ -11199,7 +11401,11 @@ next
   case False
   show ?thesis
     by (rule flush_pending'_len_lt_four_enc_sections_cache_inv_step[
-        OF inv abs cache_wf len_le False pending_valid target_room sec_ok])
+        OF inv abs cache_wf len_le False pending_valid target_room sec_ok
+           inst_byte_fits inst_byte_ptr inst_byte_dist
+           inst_byte_data_disj inst_byte_addr_disj inst_byte_pending_disj
+           data_fits data_valid data_pending_disj data_inj
+           data_prefix_disj data_no_overflow data_inst_disj data_addr_disj])
 qed
 
 lemma flush_pending'_short_enc_sections_cache_inv_topdown:
