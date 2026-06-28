@@ -95,6 +95,8 @@ theorem vcdiff_encode'_refines_encode_spec:
   assumes "encoder_buffers_ok s src src_len tgt tgt_len out out_cap scratch"
           "heap_bytes s src src_len = src_bytes"
           "heap_bytes s tgt tgt_len = tgt_bytes"
+          "sections_fit_32 src_bytes tgt_bytes
+             (encode_window_full_spec src_bytes tgt_bytes)"
           "patch = encode_spec src_bytes tgt_bytes"
           "length patch <= unat out_cap"
   shows
@@ -106,7 +108,12 @@ theorem vcdiff_encode'_refines_encode_spec:
 
 An overflow/error theorem can be added later, but it should not be required for
 the first roundtrip result. For the initial correctness theorem, assume enough
-output capacity and valid scratch space.
+output capacity, valid scratch space, and inputs compatible with the C fast
+path. In particular, the C theorem is for the full-window encoder path where
+`sections_fit_32 src_bytes tgt_bytes (encode_window_full_spec src_bytes
+tgt_bytes)` holds. The pure `encode_spec` remains total by falling back to
+`encode_spec_run` when full-window sections do not fit, but that fallback is a
+spec-layer totality device and is not part of the C encoder refinement target.
 
 Composition theorem:
 
@@ -151,6 +158,13 @@ try_emit_add_copy_spec
 encode_window_full_spec
 encode_spec
 ```
+
+The public spec is intentionally total. For C refinement, however, we assume
+the input fits the C full-window path. Under `sections_fit_32 src tgt
+(encode_window_full_spec src tgt)`, `encode_spec src tgt` reduces to
+serialization of `encode_window_full_spec`; the `encode_spec_run` fallback is
+kept for totality and roundtrip reasoning, not as behavior that
+`vcdiff_encode'` must implement.
 
 ### 2. Decide the spec state representation
 
@@ -292,13 +306,15 @@ pure spec proof.
 
 ## Open questions
 
-1. The pure encoder spec currently remains total under explicit size bounds.
-   Do not change it to `Inl`/`Inr` unless error-path refinement becomes a
-   concrete blocker.
+1. Decision: keep the pure encoder spec total under explicit size bounds.  The
+   C refinement theorem assumes `sections_fit_32` and proves only the
+   full-window success path.  Do not change `encode_spec` to `Inl`/`Inr`
+   unless error-path refinement becomes a concrete blocker.
 2. Should the pure proof use a ghost instruction trace in addition to section
    bytes? Prefer yes if it substantially simplifies target-prefix proofs.
-3. How exact should overflow behavior be? Initial theorem can assume enough
-   capacity; later refinement can characterize overflow paths.
+3. How exact should overflow behavior be? Initial theorem assumes enough
+   capacity, scratch space, and section-size fit; later refinement can
+   characterize overflow paths.
 4. Should the spec model C's hash table layout exactly or expose an abstract
    index relation? Prefer exact enough for `find_best_match'` refinement, with
    abstraction lemmas for semantic match validity.  Current direction:

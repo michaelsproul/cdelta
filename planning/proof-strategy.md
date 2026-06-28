@@ -241,9 +241,18 @@ encoder spec on success:
 
     lemma vcdiff_encode_refine:
       "...preconditions... ⟹ patch = encode_spec src_bytes tgt_bytes ⟹
+       sections_fit_32 src_bytes tgt_bytes
+         (encode_window_full_spec src_bytes tgt_bytes) ⟹
        vcdiff_encode' out out_cap src src_len tgt tgt_len scratch ⦃s⦄
         ⦃λrv s'. rv = length patch
                ∧ heap_bytes s' out (length patch) = patch⦄"
+
+The C encoder theorem is intentionally scoped to compatible inputs on the
+full-window path.  The public pure `encode_spec` remains total through its
+`encode_spec_run` fallback, but the C entrypoint does not implement that
+fallback.  Refinement therefore assumes `sections_fit_32` and sufficient
+buffer capacity/scratch space, so `encode_spec` reduces to serialization of
+`encode_window_full_spec`.
 
 ### Composition: `Roundtrip.thy`
 Combines `vcdiff_decode_refine`, `vcdiff_encode_refine`, and
@@ -320,9 +329,12 @@ A.6.
 3. **Bounds**: explicit preconditions `src_len, tgt_len, patch_len < 2^32`
    (match C `unsigned int`). Tighten to `< 2^31` locally if Nat arithmetic
    gets in the way.
-4. **Spec executability**: yes — run `value` / `code_generator` tests on the
+4. **C encoder compatibility**: the C refinement theorem assumes the
+   full-window encoder path fits (`sections_fit_32`) and excludes the pure
+   `encode_spec_run` fallback path.
+5. **Spec executability**: yes — run `value` / `code_generator` tests on the
    xdelta3 corpus before investing proof effort.
-5. **Exclude `vcdiff_encode_add`** — legacy shim, not in scope.
+6. **Exclude `vcdiff_encode_add`** — legacy shim, not in scope.
 
 ## Open questions (to revisit when we hit them)
 

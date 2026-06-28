@@ -112,6 +112,13 @@ through low-level C helpers such as `flush_pending'`.
   the abandoned direct proof strategy and was not needed by serialization or
   the current helper-refinement work.  It can be recovered from git history if
   any local buffer facts are worth mining later.
+- The top-level encoder-correctness scaffold is now in
+  `proof/encoder-correctness/VcdiffEnc_Serialize.thy`.  The theorem
+  `vcdiff_encode'_writes_encode_spec_topdown` is wired through explicit
+  `sorry` phase lemmas for build-index, encode-window, serialization, and
+  monadic composition.  Its intended scope is the C-compatible full-window
+  success path, assuming `sections_fit_32 src_bytes tgt_bytes
+  (encode_window_full_spec src_bytes tgt_bytes)` and sufficient buffers.
 
 Remaining encoder-refinement proof debt:
 
@@ -142,13 +149,20 @@ spec_roundtrip:
 ```
 
 The C encoder theorem should state that, under buffer validity, disjointness,
-capacity, and size preconditions, a successful `vcdiff_encode'` call writes the
-same bytes as `encode_spec src tgt`:
+capacity, section-fit, and size preconditions, a successful `vcdiff_encode'`
+call writes the same bytes as `encode_spec src tgt`:
 
 ```isabelle
 vcdiff_encode' ... returns length patch
   ==> heap_bytes out (length patch) = patch
 ```
+
+This is deliberately a fast-path theorem for inputs compatible with the C
+implementation.  The pure spec keeps `encode_spec_run` as a fallback when
+`sections_fit_32` fails, but the C entrypoint does not implement that fallback;
+the refinement theorem therefore assumes section fit and uses the pure lemma
+that `encode_spec` reduces to serialization of `encode_window_full_spec` under
+that assumption.
 
 Then compose this with the existing decoder refinement theorem
 `vcdiff_decode'_spec_inl`. The C encoder proof should carry a simulation
