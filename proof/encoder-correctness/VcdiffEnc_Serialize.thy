@@ -43,6 +43,15 @@ lemma varint_encode_0[simp]:
   "varint_encode 0 = [0]"
   by (simp add: varint_encode_def)
 
+lemma varint_size_pos[simp]:
+  "0 < varint_size n"
+  using varint_encode_length varint_encode_nonempty
+  by (metis length_greater_0_conv)
+
+lemma one_le_varint_size_plus[simp]:
+  "Suc 0 \<le> varint_size n + m"
+  using varint_size_pos[of n] by linarith
+
 lemma heap_bytes_0[simp]:
   "heap_bytes s buf 0 = []"
   by (simp add: heap_bytes_def)
@@ -1288,10 +1297,534 @@ definition encoder_buffers_ok ::
      bufs_disjoint data (unat data_cap) inst (unat inst_cap) \<and>
      bufs_disjoint data (unat data_cap) addr (unat addr_cap) \<and>
      bufs_disjoint inst (unat inst_cap) src (unat src_len) \<and>
-     bufs_disjoint inst (unat inst_cap) tgt (unat tgt_len) \<and>
-     bufs_disjoint inst (unat inst_cap) addr (unat addr_cap) \<and>
-     bufs_disjoint addr (unat addr_cap) src (unat src_len) \<and>
-     bufs_disjoint addr (unat addr_cap) tgt (unat tgt_len)"
+	     bufs_disjoint inst (unat inst_cap) tgt (unat tgt_len) \<and>
+	     bufs_disjoint inst (unat inst_cap) addr (unat addr_cap) \<and>
+	     bufs_disjoint addr (unat addr_cap) src (unat src_len) \<and>
+	     bufs_disjoint addr (unat addr_cap) tgt (unat tgt_len)"
+
+lemma encoder_buffers_ok_heap_typing_eq:
+  assumes typing: "heap_typing t = heap_typing s"
+      and buffers:
+        "encoder_buffers_ok s out out_cap src src_len tgt tgt_len head_arr next_arr
+          pending pending_cap data data_cap inst inst_cap addr addr_cap"
+  shows "encoder_buffers_ok t out out_cap src src_len tgt tgt_len head_arr next_arr
+          pending pending_cap data data_cap inst inst_cap addr addr_cap"
+  using typing buffers
+  by (simp add: encoder_buffers_ok_def buf_valid_def)
+
+lemma word_sub_not_less_of_unat_add_le:
+  fixes pos len cap :: "32 word"
+  assumes range: "unat pos + unat len \<le> unat cap"
+  shows "\<not> cap - pos < len"
+  using range by unat_arith
+
+lemma unat_add_lt2p_of_le_unat32:
+  fixes pos len cap :: "32 word"
+  assumes range: "unat pos + unat len \<le> unat cap"
+  shows "unat pos + unat len < 2 ^ 32"
+proof -
+  have "unat cap < 2 ^ 32"
+    using unat_lt2p[of cap] by simp
+  thus ?thesis
+    using range by linarith
+qed
+
+lemma bufs_disjoint_word_range_rightD_word:
+  fixes pos len i :: "32 word"
+  assumes disj: "bufs_disjoint p pn q qn"
+      and k_lt: "k < pn"
+      and i_lt: "i < len"
+      and no_overflow: "unat pos + unat len < 2 ^ 32"
+      and range: "unat pos + unat len \<le> qn"
+  shows "p +\<^sub>p int k \<noteq> q +\<^sub>p uint (pos + i)"
+proof -
+  have i_nat_lt: "unat i < unat len"
+    using i_lt by (simp add: word_less_nat_alt)
+  have word_eq: "pos + of_nat (unat i) = pos + i"
+    by (simp add: word_unat.Rep_inverse)
+  show ?thesis
+    using bufs_disjoint_word_range_rightD[OF disj k_lt i_nat_lt no_overflow range]
+    by (simp add: word_eq)
+qed
+
+lemma bufs_disjoint_word_rangesD_word:
+  fixes p_pos p_len q_pos q_len i j :: "32 word"
+  assumes disj: "bufs_disjoint p pn q qn"
+      and i_lt: "i < p_len"
+      and j_lt: "j < q_len"
+      and p_no_overflow: "unat p_pos + unat p_len < 2 ^ 32"
+      and q_no_overflow: "unat q_pos + unat q_len < 2 ^ 32"
+      and p_range: "unat p_pos + unat p_len \<le> pn"
+      and q_range: "unat q_pos + unat q_len \<le> qn"
+  shows "p +\<^sub>p uint (p_pos + i) \<noteq> q +\<^sub>p uint (q_pos + j)"
+proof -
+  have i_nat_lt: "unat i < unat p_len"
+    using i_lt by (simp add: word_less_nat_alt)
+  have j_nat_lt: "unat j < unat q_len"
+    using j_lt by (simp add: word_less_nat_alt)
+  have p_word_eq: "p_pos + of_nat (unat i) = p_pos + i"
+    by (simp add: word_unat.Rep_inverse)
+  have q_word_eq: "q_pos + of_nat (unat j) = q_pos + j"
+    by (simp add: word_unat.Rep_inverse)
+  show ?thesis
+    using bufs_disjoint_word_rangesD[
+      OF disj i_nat_lt j_nat_lt p_no_overflow q_no_overflow p_range q_range]
+    by (simp add: p_word_eq q_word_eq)
+qed
+
+lemma serialize_byte_step_ok_from_encoder_buffers:
+  assumes buffers:
+        "encoder_buffers_ok s out out_cap src src_len tgt tgt_len head_arr next_arr
+          pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      and pos_lt: "unat pos < unat out_cap"
+      and data_range: "data_n \<le> unat data_cap"
+      and inst_range: "inst_n \<le> unat inst_cap"
+      and addr_range: "addr_n \<le> unat addr_cap"
+  shows "serialize_byte_step_ok s out out_cap pos data data_n inst inst_n addr addr_n"
+proof -
+  have out_valid: "buf_valid s out (unat out_cap)"
+    and out_dist: "ptr_range_distinct out (unat out_cap)"
+    and out_data: "bufs_disjoint out (unat out_cap) data (unat data_cap)"
+    and out_inst: "bufs_disjoint out (unat out_cap) inst (unat inst_cap)"
+    and out_addr: "bufs_disjoint out (unat out_cap) addr (unat addr_cap)"
+    using buffers by (simp_all add: encoder_buffers_ok_def)
+  show ?thesis
+    unfolding serialize_byte_step_ok_def
+  proof (intro conjI allI impI)
+    show "pos < out_cap"
+      using pos_lt by (simp add: word_less_nat_alt)
+    show "ptr_valid (heap_typing s) (out +\<^sub>p uint pos)"
+      by (rule buf_valid_uintD[OF out_valid pos_lt])
+    show "ptr_range_distinct out (Suc (unat pos))"
+      by (rule ptr_range_distinct_mono[OF out_dist]) (use pos_lt in simp)
+  next
+    fix i
+    assume i_lt: "i < data_n"
+    show "data +\<^sub>p int i \<noteq> out +\<^sub>p uint pos"
+    proof -
+      have data_out: "bufs_disjoint data (unat data_cap) out (unat out_cap)"
+        using out_data by (simp add: bufs_disjoint_sym)
+      show ?thesis
+        by (rule bufs_disjoint_word_point_rightD[OF data_out _ pos_lt])
+          (use i_lt data_range in simp)
+    qed
+  next
+    fix i
+    assume i_lt: "i < inst_n"
+    show "inst +\<^sub>p int i \<noteq> out +\<^sub>p uint pos"
+    proof -
+      have inst_out: "bufs_disjoint inst (unat inst_cap) out (unat out_cap)"
+        using out_inst by (simp add: bufs_disjoint_sym)
+      show ?thesis
+        by (rule bufs_disjoint_word_point_rightD[OF inst_out _ pos_lt])
+          (use i_lt inst_range in simp)
+    qed
+  next
+    fix i
+    assume i_lt: "i < addr_n"
+    show "addr +\<^sub>p int i \<noteq> out +\<^sub>p uint pos"
+    proof -
+      have addr_out: "bufs_disjoint addr (unat addr_cap) out (unat out_cap)"
+        using out_addr by (simp add: bufs_disjoint_sym)
+      show ?thesis
+        by (rule bufs_disjoint_word_point_rightD[OF addr_out _ pos_lt])
+          (use i_lt addr_range in simp)
+    qed
+  qed
+qed
+
+lemma serialize_varint_step_ok_from_encoder_buffers:
+  assumes buffers:
+        "encoder_buffers_ok s out out_cap src src_len tgt tgt_len head_arr next_arr
+          pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      and size: "varint_size' v s = Some n"
+      and out_range: "unat pos + unat n \<le> unat out_cap"
+      and data_range: "data_n \<le> unat data_cap"
+      and inst_range: "inst_n \<le> unat inst_cap"
+      and addr_range: "addr_n \<le> unat addr_cap"
+  shows "serialize_varint_step_ok s out out_cap pos v n data data_n inst inst_n addr addr_n"
+proof -
+  have out_valid: "buf_valid s out (unat out_cap)"
+    and out_dist: "ptr_range_distinct out (unat out_cap)"
+    and out_data: "bufs_disjoint out (unat out_cap) data (unat data_cap)"
+    and out_inst: "bufs_disjoint out (unat out_cap) inst (unat inst_cap)"
+    and out_addr: "bufs_disjoint out (unat out_cap) addr (unat addr_cap)"
+    using buffers by (simp_all add: encoder_buffers_ok_def)
+  have no_overflow: "unat pos + unat n < 2 ^ 32"
+    by (rule unat_add_lt2p_of_le_unat32[OF out_range])
+  have fits: "\<not> out_cap - pos < n"
+    by (rule word_sub_not_less_of_unat_add_le[OF out_range])
+  show ?thesis
+    unfolding serialize_varint_step_ok_def
+  proof (intro conjI allI impI)
+    show "varint_size' v s = Some n"
+      by (rule size)
+    show "\<not> out_cap - pos < n"
+      by (rule fits)
+  next
+    fix j
+    assume j_lt: "j < unat n"
+    show "ptr_valid (heap_typing s) (out +\<^sub>p uint (pos + of_nat j))"
+      by (rule buf_valid_word_rangeD[OF out_valid j_lt no_overflow out_range])
+  next
+    fix i j
+    assume i_lt: "i < unat n"
+      and j_lt: "j < unat n"
+      and neq: "i \<noteq> j"
+    show "out +\<^sub>p uint (pos + of_nat i) \<noteq> out +\<^sub>p uint (pos + of_nat j)"
+    proof
+      assume eq: "out +\<^sub>p uint (pos + of_nat i) =
+        out +\<^sub>p uint (pos + of_nat j)"
+      have "i = j"
+        by (rule ptr_range_distinct_word_range_inj[
+            OF out_dist no_overflow out_range i_lt j_lt eq])
+      thus False using neq by simp
+    qed
+  next
+    fix k i
+    assume k_lt: "k < unat pos"
+      and i_lt: "i < n"
+    show "out +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule ptr_range_distinct_word_prefix_disj[
+          OF out_dist no_overflow out_range k_lt i_lt])
+  next
+    show "unat pos + unat n < 2 ^ 32"
+      by (rule no_overflow)
+  next
+    fix k i
+    assume k_lt: "k < data_n"
+      and i_lt: "i < n"
+    have data_out: "bufs_disjoint data (unat data_cap) out (unat out_cap)"
+      using out_data by (simp add: bufs_disjoint_sym)
+    show "data +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+          OF data_out _ i_lt no_overflow out_range])
+        (use k_lt data_range in simp)
+  next
+    fix k i
+    assume k_lt: "k < inst_n"
+      and i_lt: "i < n"
+    have inst_out: "bufs_disjoint inst (unat inst_cap) out (unat out_cap)"
+      using out_inst by (simp add: bufs_disjoint_sym)
+    show "inst +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+          OF inst_out _ i_lt no_overflow out_range])
+        (use k_lt inst_range in simp)
+  next
+    fix k i
+    assume k_lt: "k < addr_n"
+      and i_lt: "i < n"
+    have addr_out: "bufs_disjoint addr (unat addr_cap) out (unat out_cap)"
+      using out_addr by (simp add: bufs_disjoint_sym)
+    show "addr +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+          OF addr_out _ i_lt no_overflow out_range])
+        (use k_lt addr_range in simp)
+  qed
+qed
+
+lemma serialize_data_copy_step_ok_from_encoder_buffers:
+  assumes buffers:
+        "encoder_buffers_ok s out out_cap src src_len tgt tgt_len head_arr next_arr
+          pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      and out_range: "unat pos + unat data_len \<le> unat out_cap"
+      and data_range: "unat data_len \<le> unat data_cap"
+      and inst_range: "inst_n \<le> unat inst_cap"
+      and addr_range: "addr_n \<le> unat addr_cap"
+  shows "serialize_copy_step_ok s out out_cap pos data data_len inst inst_n addr addr_n"
+proof -
+  have out_valid: "buf_valid s out (unat out_cap)"
+    and data_valid: "buf_valid s data (unat data_cap)"
+    and out_dist: "ptr_range_distinct out (unat out_cap)"
+    and out_data: "bufs_disjoint out (unat out_cap) data (unat data_cap)"
+    and out_inst: "bufs_disjoint out (unat out_cap) inst (unat inst_cap)"
+    and out_addr: "bufs_disjoint out (unat out_cap) addr (unat addr_cap)"
+    using buffers by (simp_all add: encoder_buffers_ok_def)
+  have out_no_overflow: "unat pos + unat data_len < 2 ^ 32"
+    by (rule unat_add_lt2p_of_le_unat32[OF out_range])
+  have data_no_overflow: "unat (0 :: 32 word) + unat data_len < 2 ^ 32"
+    using unat_lt2p[of data_len] by simp
+  have data_range0: "unat (0 :: 32 word) + unat data_len \<le> unat data_cap"
+    using data_range by simp
+  have fits: "\<not> out_cap - pos < data_len"
+    by (rule word_sub_not_less_of_unat_add_le[OF out_range])
+  show ?thesis
+    unfolding serialize_copy_step_ok_def
+  proof (intro conjI allI impI)
+    show "\<not> out_cap - pos < data_len"
+      by (rule fits)
+  next
+    fix j
+    assume j_lt: "j < unat data_len"
+    show "ptr_valid (heap_typing s) (out +\<^sub>p uint (pos + of_nat j))"
+      by (rule buf_valid_word_rangeD[OF out_valid j_lt out_no_overflow out_range])
+  next
+    fix j
+    assume j_lt: "j < unat data_len"
+    show "ptr_valid (heap_typing s) (data +\<^sub>p uint ((0::32 word) + of_nat j))"
+      by (rule buf_valid_word_rangeD[
+          where base = "0 :: 32 word" and len = data_len,
+          OF data_valid j_lt data_no_overflow data_range0])
+  next
+    fix i j
+    assume i_lt: "i < unat data_len"
+      and j_lt: "j < unat data_len"
+    show "out +\<^sub>p uint (pos + of_nat i) \<noteq>
+      data +\<^sub>p uint ((0::32 word) + of_nat j)"
+      by (rule bufs_disjoint_word_rangesD[
+          where p_pos = pos and p_len = data_len
+            and q_pos = "0 :: 32 word" and q_len = data_len,
+          OF out_data i_lt j_lt out_no_overflow data_no_overflow
+            out_range data_range0])
+  next
+    fix i j
+    assume i_lt: "i < unat data_len"
+      and j_lt: "j < unat data_len"
+      and neq: "i \<noteq> j"
+    show "out +\<^sub>p uint (pos + of_nat i) \<noteq>
+      out +\<^sub>p uint (pos + of_nat j)"
+    proof
+      assume eq: "out +\<^sub>p uint (pos + of_nat i) =
+        out +\<^sub>p uint (pos + of_nat j)"
+      have "i = j"
+        by (rule ptr_range_distinct_word_range_inj[
+            OF out_dist out_no_overflow out_range i_lt j_lt eq])
+      thus False using neq by simp
+    qed
+  next
+    fix k i
+    assume k_lt: "k < unat pos"
+      and i_lt: "i < data_len"
+    show "out +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule ptr_range_distinct_word_prefix_disj[
+          OF out_dist out_no_overflow out_range k_lt i_lt])
+  next
+    show "unat pos + unat data_len < 2 ^ 32"
+      by (rule out_no_overflow)
+  next
+    fix k i
+    assume k_lt: "k < inst_n"
+      and i_lt: "i < data_len"
+    have inst_out: "bufs_disjoint inst (unat inst_cap) out (unat out_cap)"
+      using out_inst by (simp add: bufs_disjoint_sym)
+    show "inst +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+          OF inst_out _ i_lt out_no_overflow out_range])
+        (use k_lt inst_range in simp)
+  next
+    fix k i
+    assume k_lt: "k < addr_n"
+      and i_lt: "i < data_len"
+    have addr_out: "bufs_disjoint addr (unat addr_cap) out (unat out_cap)"
+      using out_addr by (simp add: bufs_disjoint_sym)
+    show "addr +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+          OF addr_out _ i_lt out_no_overflow out_range])
+        (use k_lt addr_range in simp)
+  qed
+qed
+
+lemma serialize_inst_copy_step_ok_from_encoder_buffers:
+  assumes buffers:
+        "encoder_buffers_ok s out out_cap src src_len tgt tgt_len head_arr next_arr
+          pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      and out_range: "unat pos + unat inst_len \<le> unat out_cap"
+      and inst_range: "unat inst_len \<le> unat inst_cap"
+      and data_range: "data_n \<le> unat data_cap"
+      and addr_range: "addr_n \<le> unat addr_cap"
+  shows "serialize_copy_step_ok s out out_cap pos inst inst_len data data_n addr addr_n"
+proof -
+  have out_valid: "buf_valid s out (unat out_cap)"
+    and inst_valid: "buf_valid s inst (unat inst_cap)"
+    and out_dist: "ptr_range_distinct out (unat out_cap)"
+    and out_data: "bufs_disjoint out (unat out_cap) data (unat data_cap)"
+    and out_inst: "bufs_disjoint out (unat out_cap) inst (unat inst_cap)"
+    and out_addr: "bufs_disjoint out (unat out_cap) addr (unat addr_cap)"
+    using buffers by (simp_all add: encoder_buffers_ok_def)
+  have out_no_overflow: "unat pos + unat inst_len < 2 ^ 32"
+    by (rule unat_add_lt2p_of_le_unat32[OF out_range])
+  have inst_no_overflow: "unat (0 :: 32 word) + unat inst_len < 2 ^ 32"
+    using unat_lt2p[of inst_len] by simp
+  have inst_range0: "unat (0 :: 32 word) + unat inst_len \<le> unat inst_cap"
+    using inst_range by simp
+  have fits: "\<not> out_cap - pos < inst_len"
+    by (rule word_sub_not_less_of_unat_add_le[OF out_range])
+  show ?thesis
+    unfolding serialize_copy_step_ok_def
+  proof (intro conjI allI impI)
+    show "\<not> out_cap - pos < inst_len"
+      by (rule fits)
+  next
+    fix j
+    assume j_lt: "j < unat inst_len"
+    show "ptr_valid (heap_typing s) (out +\<^sub>p uint (pos + of_nat j))"
+      by (rule buf_valid_word_rangeD[OF out_valid j_lt out_no_overflow out_range])
+  next
+    fix j
+    assume j_lt: "j < unat inst_len"
+    show "ptr_valid (heap_typing s) (inst +\<^sub>p uint ((0::32 word) + of_nat j))"
+      by (rule buf_valid_word_rangeD[
+          where base = "0 :: 32 word" and len = inst_len,
+          OF inst_valid j_lt inst_no_overflow inst_range0])
+  next
+    fix i j
+    assume i_lt: "i < unat inst_len"
+      and j_lt: "j < unat inst_len"
+    show "out +\<^sub>p uint (pos + of_nat i) \<noteq>
+      inst +\<^sub>p uint ((0::32 word) + of_nat j)"
+      by (rule bufs_disjoint_word_rangesD[
+          where p_pos = pos and p_len = inst_len
+            and q_pos = "0 :: 32 word" and q_len = inst_len,
+          OF out_inst i_lt j_lt out_no_overflow inst_no_overflow
+            out_range inst_range0])
+  next
+    fix i j
+    assume i_lt: "i < unat inst_len"
+      and j_lt: "j < unat inst_len"
+      and neq: "i \<noteq> j"
+    show "out +\<^sub>p uint (pos + of_nat i) \<noteq>
+      out +\<^sub>p uint (pos + of_nat j)"
+    proof
+      assume eq: "out +\<^sub>p uint (pos + of_nat i) =
+        out +\<^sub>p uint (pos + of_nat j)"
+      have "i = j"
+        by (rule ptr_range_distinct_word_range_inj[
+            OF out_dist out_no_overflow out_range i_lt j_lt eq])
+      thus False using neq by simp
+    qed
+  next
+    fix k i
+    assume k_lt: "k < unat pos"
+      and i_lt: "i < inst_len"
+    show "out +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule ptr_range_distinct_word_prefix_disj[
+          OF out_dist out_no_overflow out_range k_lt i_lt])
+  next
+    show "unat pos + unat inst_len < 2 ^ 32"
+      by (rule out_no_overflow)
+  next
+    fix k i
+    assume k_lt: "k < data_n"
+      and i_lt: "i < inst_len"
+    have data_out: "bufs_disjoint data (unat data_cap) out (unat out_cap)"
+      using out_data by (simp add: bufs_disjoint_sym)
+    show "data +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+          OF data_out _ i_lt out_no_overflow out_range])
+        (use k_lt data_range in simp)
+  next
+    fix k i
+    assume k_lt: "k < addr_n"
+      and i_lt: "i < inst_len"
+    have addr_out: "bufs_disjoint addr (unat addr_cap) out (unat out_cap)"
+      using out_addr by (simp add: bufs_disjoint_sym)
+    show "addr +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+          OF addr_out _ i_lt out_no_overflow out_range])
+        (use k_lt addr_range in simp)
+  qed
+qed
+
+lemma serialize_addr_copy_step_ok_from_encoder_buffers:
+  assumes buffers:
+        "encoder_buffers_ok s out out_cap src src_len tgt tgt_len head_arr next_arr
+          pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      and out_range: "unat pos + unat addr_len \<le> unat out_cap"
+      and addr_range: "unat addr_len \<le> unat addr_cap"
+      and data_range: "data_n \<le> unat data_cap"
+      and inst_range: "inst_n \<le> unat inst_cap"
+  shows "serialize_copy_step_ok s out out_cap pos addr addr_len data data_n inst inst_n"
+proof -
+  have out_valid: "buf_valid s out (unat out_cap)"
+    and addr_valid: "buf_valid s addr (unat addr_cap)"
+    and out_dist: "ptr_range_distinct out (unat out_cap)"
+    and out_data: "bufs_disjoint out (unat out_cap) data (unat data_cap)"
+    and out_inst: "bufs_disjoint out (unat out_cap) inst (unat inst_cap)"
+    and out_addr: "bufs_disjoint out (unat out_cap) addr (unat addr_cap)"
+    using buffers by (simp_all add: encoder_buffers_ok_def)
+  have out_no_overflow: "unat pos + unat addr_len < 2 ^ 32"
+    by (rule unat_add_lt2p_of_le_unat32[OF out_range])
+  have addr_no_overflow: "unat (0 :: 32 word) + unat addr_len < 2 ^ 32"
+    using unat_lt2p[of addr_len] by simp
+  have addr_range0: "unat (0 :: 32 word) + unat addr_len \<le> unat addr_cap"
+    using addr_range by simp
+  have fits: "\<not> out_cap - pos < addr_len"
+    by (rule word_sub_not_less_of_unat_add_le[OF out_range])
+  show ?thesis
+    unfolding serialize_copy_step_ok_def
+  proof (intro conjI allI impI)
+    show "\<not> out_cap - pos < addr_len"
+      by (rule fits)
+  next
+    fix j
+    assume j_lt: "j < unat addr_len"
+    show "ptr_valid (heap_typing s) (out +\<^sub>p uint (pos + of_nat j))"
+      by (rule buf_valid_word_rangeD[OF out_valid j_lt out_no_overflow out_range])
+  next
+    fix j
+    assume j_lt: "j < unat addr_len"
+    show "ptr_valid (heap_typing s) (addr +\<^sub>p uint ((0::32 word) + of_nat j))"
+      by (rule buf_valid_word_rangeD[
+          where base = "0 :: 32 word" and len = addr_len,
+          OF addr_valid j_lt addr_no_overflow addr_range0])
+  next
+    fix i j
+    assume i_lt: "i < unat addr_len"
+      and j_lt: "j < unat addr_len"
+    show "out +\<^sub>p uint (pos + of_nat i) \<noteq>
+      addr +\<^sub>p uint ((0::32 word) + of_nat j)"
+      by (rule bufs_disjoint_word_rangesD[
+          where p_pos = pos and p_len = addr_len
+            and q_pos = "0 :: 32 word" and q_len = addr_len,
+          OF out_addr i_lt j_lt out_no_overflow addr_no_overflow
+            out_range addr_range0])
+  next
+    fix i j
+    assume i_lt: "i < unat addr_len"
+      and j_lt: "j < unat addr_len"
+      and neq: "i \<noteq> j"
+    show "out +\<^sub>p uint (pos + of_nat i) \<noteq>
+      out +\<^sub>p uint (pos + of_nat j)"
+    proof
+      assume eq: "out +\<^sub>p uint (pos + of_nat i) =
+        out +\<^sub>p uint (pos + of_nat j)"
+      have "i = j"
+        by (rule ptr_range_distinct_word_range_inj[
+            OF out_dist out_no_overflow out_range i_lt j_lt eq])
+      thus False using neq by simp
+    qed
+  next
+    fix k i
+    assume k_lt: "k < unat pos"
+      and i_lt: "i < addr_len"
+    show "out +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule ptr_range_distinct_word_prefix_disj[
+          OF out_dist out_no_overflow out_range k_lt i_lt])
+  next
+    show "unat pos + unat addr_len < 2 ^ 32"
+      by (rule out_no_overflow)
+  next
+    fix k i
+    assume k_lt: "k < data_n"
+      and i_lt: "i < addr_len"
+    have data_out: "bufs_disjoint data (unat data_cap) out (unat out_cap)"
+      using out_data by (simp add: bufs_disjoint_sym)
+    show "data +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+          OF data_out _ i_lt out_no_overflow out_range])
+        (use k_lt data_range in simp)
+  next
+    fix k i
+    assume k_lt: "k < inst_n"
+      and i_lt: "i < addr_len"
+    have inst_out: "bufs_disjoint inst (unat inst_cap) out (unat out_cap)"
+      using out_inst by (simp add: bufs_disjoint_sym)
+    show "inst +\<^sub>p int k \<noteq> out +\<^sub>p uint (pos + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+          OF inst_out _ i_lt out_no_overflow out_range])
+        (use k_lt inst_range in simp)
+  qed
+qed
 
 definition encoder_index_post ::
   "lifted_globals \<Rightarrow> lifted_globals \<Rightarrow>
@@ -1316,6 +1849,13 @@ definition encoder_window_post ::
        (efr_data (encode_window_full_spec src_bytes tgt_bytes))
        (efr_inst (encode_window_full_spec src_bytes tgt_bytes))
        (efr_addr (encode_window_full_spec src_bytes tgt_bytes))"
+
+definition encoder_window_caps_ok ::
+  "sections_t_C \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> bool" where
+  "encoder_window_caps_ok sec data_cap inst_cap addr_cap \<longleftrightarrow>
+     unat (sections_t_C.data_pos_C sec) \<le> unat data_cap \<and>
+     unat (sections_t_C.inst_pos_C sec) \<le> unat inst_cap \<and>
+     unat (sections_t_C.addr_pos_C sec) \<le> unat addr_cap"
 
 definition encoder_success_post ::
   "8 word ptr \<Rightarrow> byte list \<Rightarrow> byte list \<Rightarrow> 32 word \<Rightarrow>
@@ -1485,6 +2025,7 @@ lemma vcdiff_encode'_encode_window_phase_topdown:
            \<lbrace> \<lambda>r t. \<exists>sec.
                r = Result sec \<and>
                encoder_window_post t data inst addr sec src_bytes tgt_bytes \<and>
+               encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
                heap_bytes t src (unat src_len) = src_bytes \<and>
                heap_bytes t tgt (unat tgt_len) = tgt_bytes \<and>
                heap_typing t = heap_typing s \<rbrace>"
@@ -1505,8 +2046,11 @@ lemma vcdiff_encode'_serialize_phase_topdown:
         "length (encode_spec src_bytes tgt_bytes) \<le> unat out_cap"
       and encoded_len_word:
         "length (encode_spec src_bytes tgt_bytes) < 2 ^ 32"
+      and typing: "heap_typing s = heap_typing s0"
       and window:
         "encoder_window_post s data inst addr sec src_bytes tgt_bytes"
+      and window_caps:
+        "encoder_window_caps_ok sec data_cap inst_cap addr_cap"
   shows "serialize' out out_cap src_len tgt_len
             data (sections_t_C.data_pos_C sec)
             inst (sections_t_C.inst_pos_C sec)
@@ -1514,7 +2058,592 @@ lemma vcdiff_encode'_serialize_phase_topdown:
            \<lbrace> \<lambda>r t. \<exists>n.
                r = Result n \<and>
                encoder_success_post out src_bytes tgt_bytes n s t \<rbrace>"
-  sorry
+proof -
+  let ?r = "encode_window_full_spec src_bytes tgt_bytes"
+  let ?data_bytes = "efr_data ?r"
+  let ?inst_bytes = "efr_inst ?r"
+  let ?addr_bytes = "efr_addr ?r"
+  let ?data_len = "sections_t_C.data_pos_C sec"
+  let ?inst_len = "sections_t_C.inst_pos_C sec"
+  let ?addr_len = "sections_t_C.addr_pos_C sec"
+  have buffers_s:
+    "encoder_buffers_ok s out out_cap src src_len tgt tgt_len head_arr next_arr
+      pending pending_cap data data_cap inst inst_cap addr addr_cap"
+    by (rule encoder_buffers_ok_heap_typing_eq[OF typing buffers])
+  have input_len:
+    "unat src_len = length src_bytes"
+    "unat tgt_len = length tgt_bytes"
+    using input by (simp_all add: encoder_input_rel_def)
+  have window_parts:
+    "sections_t_C.err_C sec = ENC_OK"
+    "sections_fit_32 src_bytes tgt_bytes ?r"
+    "emitted_sections s data inst addr sec ?data_bytes ?inst_bytes ?addr_bytes"
+    using window by (simp_all add: encoder_window_post_def)
+  have emitted_heaps:
+    "heap_bytes s data (unat ?data_len) = ?data_bytes"
+    "heap_bytes s inst (unat ?inst_len) = ?inst_bytes"
+    "heap_bytes s addr (unat ?addr_len) = ?addr_bytes"
+    using emitted_sectionsD[OF window_parts(3)] by simp_all
+  have data_len: "unat ?data_len = length ?data_bytes"
+    using emitted_heaps(1) by (metis heap_bytes_length)
+  have inst_len: "unat ?inst_len = length ?inst_bytes"
+    using emitted_heaps(2) by (metis heap_bytes_length)
+  have addr_len: "unat ?addr_len = length ?addr_bytes"
+    using emitted_heaps(3) by (metis heap_bytes_length)
+  have data_len_rev: "length ?data_bytes = unat ?data_len"
+    using data_len by simp
+  have inst_len_rev: "length ?inst_bytes = unat ?inst_len"
+    using inst_len by simp
+  have addr_len_rev: "length ?addr_bytes = unat ?addr_len"
+    using addr_len by simp
+  have data_heap: "heap_bytes s data (length ?data_bytes) = ?data_bytes"
+    and inst_heap: "heap_bytes s inst (length ?inst_bytes) = ?inst_bytes"
+    and addr_heap: "heap_bytes s addr (length ?addr_bytes) = ?addr_bytes"
+    using emitted_heaps data_len inst_len addr_len by simp_all
+  have section_caps:
+    "length ?data_bytes \<le> unat data_cap"
+    "length ?inst_bytes \<le> unat inst_cap"
+    "length ?addr_bytes \<le> unat addr_cap"
+    using window_caps data_len inst_len addr_len
+    by (simp_all add: encoder_window_caps_ok_def)
+  obtain src_n where src_size: "varint_size' src_len s = Some src_n"
+    using varint_size'_some by blast
+  obtain tgt_n where tgt_size: "varint_size' tgt_len s = Some tgt_n"
+    using varint_size'_some by blast
+  obtain data_n where data_size: "varint_size' ?data_len s = Some data_n"
+    using varint_size'_some by blast
+  obtain inst_n where inst_size: "varint_size' ?inst_len s = Some inst_n"
+    using varint_size'_some by blast
+  obtain addr_n where addr_size: "varint_size' ?addr_len s = Some addr_n"
+    using varint_size'_some by blast
+  let ?dlen_nat =
+    "varint_size (length tgt_bytes) + 1 +
+     varint_size (length ?data_bytes) +
+     varint_size (length ?inst_bytes) +
+     varint_size (length ?addr_bytes) +
+     length ?data_bytes + length ?inst_bytes + length ?addr_bytes"
+  let ?dlen =
+    "tgt_n + 1 + data_n + inst_n + addr_n +
+     ?data_len + ?inst_len + ?addr_len"
+  have size_unats:
+    "unat tgt_n = varint_size (length tgt_bytes)"
+    "unat data_n = varint_size (length ?data_bytes)"
+    "unat inst_n = varint_size (length ?inst_bytes)"
+    "unat addr_n = varint_size (length ?addr_bytes)"
+    using varint_size'_unat_eq_varint_size[OF tgt_size]
+          varint_size'_unat_eq_varint_size[OF data_size]
+          varint_size'_unat_eq_varint_size[OF inst_size]
+          varint_size'_unat_eq_varint_size[OF addr_size]
+	          input_len data_len inst_len addr_len
+	    by simp_all
+  have src_size_unat:
+    "src_bytes \<noteq> [] \<Longrightarrow> unat src_n = varint_size (length src_bytes)"
+    using varint_size'_unat_eq_varint_size[OF src_size] input_len by simp
+  have size_le5:
+    "unat src_n \<le> 5"
+    "unat tgt_n \<le> 5"
+    "unat data_n \<le> 5"
+    "unat inst_n \<le> 5"
+    "unat addr_n \<le> 5"
+    using varint_size'_le5[OF src_size]
+          varint_size'_le5[OF tgt_size]
+          varint_size'_le5[OF data_size]
+          varint_size'_le5[OF inst_size]
+          varint_size'_le5[OF addr_size]
+    by simp_all
+  have dlen_bound: "?dlen_nat < 2 ^ 32"
+    using window_parts(2) by (simp add: sections_fit_32_def)
+  have dlen_unat: "unat ?dlen = ?dlen_nat"
+  proof -
+    let ?w1 = "tgt_n + (1 :: 32 word)"
+    let ?w2 = "?w1 + data_n"
+    let ?w3 = "?w2 + inst_n"
+    let ?w4 = "?w3 + addr_n"
+    let ?w5 = "?w4 + ?data_len"
+    let ?w6 = "?w5 + ?inst_len"
+    have total:
+      "unat tgt_n + 1 + unat data_n + unat inst_n + unat addr_n +
+       unat ?data_len + unat ?inst_len + unat ?addr_len < 2 ^ 32"
+      using dlen_bound size_unats data_len inst_len addr_len by simp
+    have w1_no_overflow: "unat tgt_n + unat (1 :: 32 word) < 2 ^ 32"
+      using total by simp
+    have w1_raw: "unat ?w1 = unat tgt_n + unat (1 :: 32 word)"
+      by (rule unat_word_add_no_overflow[
+          where a = tgt_n and b = "1 :: 32 word"])
+        (rule w1_no_overflow)
+    have w1: "unat ?w1 = unat tgt_n + 1"
+      using w1_raw by simp
+    have w2_add: "unat (?w1 + data_n) = unat ?w1 + unat data_n"
+      by (rule unat_word_add_no_overflow) (use total w1 in linarith)
+    have w2: "unat ?w2 = unat tgt_n + 1 + unat data_n"
+      using w1 w2_add by simp
+    have w3_add: "unat (?w2 + inst_n) = unat ?w2 + unat inst_n"
+      by (rule unat_word_add_no_overflow) (use total w2 in linarith)
+    have w3: "unat ?w3 = unat tgt_n + 1 + unat data_n + unat inst_n"
+      using w2 w3_add by simp
+    have w4_add: "unat (?w3 + addr_n) = unat ?w3 + unat addr_n"
+      by (rule unat_word_add_no_overflow) (use total w3 in linarith)
+    have w4: "unat ?w4 =
+        unat tgt_n + 1 + unat data_n + unat inst_n + unat addr_n"
+      using w3 w4_add by simp
+    have w5_add: "unat (?w4 + ?data_len) = unat ?w4 + unat ?data_len"
+      by (rule unat_word_add_no_overflow) (use total w4 in linarith)
+    have w5: "unat ?w5 =
+        unat tgt_n + 1 + unat data_n + unat inst_n + unat addr_n +
+        unat ?data_len"
+      using w4 w5_add by simp
+    have w6_add: "unat (?w5 + ?inst_len) = unat ?w5 + unat ?inst_len"
+      by (rule unat_word_add_no_overflow) (use total w5 in linarith)
+    have w6: "unat ?w6 =
+        unat tgt_n + 1 + unat data_n + unat inst_n + unat addr_n +
+        unat ?data_len + unat ?inst_len"
+      using w5 w6_add by simp
+    have w7_add: "unat (?w6 + ?addr_len) = unat ?w6 + unat ?addr_len"
+      by (rule unat_word_add_no_overflow) (use total w6 in linarith)
+    have "unat (?w6 + ?addr_len) =
+        unat tgt_n + 1 + unat data_n + unat inst_n + unat addr_n +
+        unat ?data_len + unat ?inst_len + unat ?addr_len"
+      using w6 w7_add by simp
+    thus ?thesis
+      using size_unats data_len inst_len addr_len by simp
+  qed
+  obtain dlen_n where dlen_size: "varint_size' ?dlen s = Some dlen_n"
+    using varint_size'_some by blast
+  have dlen_size_unat: "unat dlen_n = varint_size ?dlen_nat"
+    using varint_size'_unat_eq_varint_size[OF dlen_size] dlen_unat by simp
+  have dlen_size_le5: "unat dlen_n \<le> 5"
+    by (rule varint_size'_le5[OF dlen_size])
+  have dlen_bytes:
+    "varint_bytes32 ?dlen dlen_n = varint_encode ?dlen_nat"
+    using varint_bytes32_eq_varint_encode[OF dlen_size] dlen_unat by simp
+  have src_bytes:
+    "src_bytes \<noteq> [] \<Longrightarrow>
+      varint_bytes32 src_len src_n = varint_encode (length src_bytes)"
+    using varint_bytes32_eq_varint_encode[OF src_size] input_len by simp
+  have tgt_bytes:
+    "varint_bytes32 tgt_len tgt_n = varint_encode (length tgt_bytes)"
+    using varint_bytes32_eq_varint_encode[OF tgt_size] input_len by simp
+  have data_bytes:
+    "varint_bytes32 ?data_len data_n = varint_encode (length ?data_bytes)"
+    using varint_bytes32_eq_varint_encode[OF data_size] data_len by simp
+  have inst_bytes:
+    "varint_bytes32 ?inst_len inst_n = varint_encode (length ?inst_bytes)"
+    using varint_bytes32_eq_varint_encode[OF inst_size] inst_len by simp
+  have addr_bytes:
+    "varint_bytes32 ?addr_len addr_n = varint_encode (length ?addr_bytes)"
+    using varint_bytes32_eq_varint_encode[OF addr_size] addr_len by simp
+  have spec_eq:
+    "encode_spec src_bytes tgt_bytes =
+      serialize src_bytes tgt_bytes ?data_bytes ?inst_bytes ?addr_bytes"
+    by (rule encode_spec_fast_path_topdown[OF window_parts(2)])
+  have byte_step:
+    "\<And>pos data_n' inst_n' addr_n'. \<lbrakk>
+       unat pos < unat out_cap;
+       data_n' \<le> unat data_cap;
+       inst_n' \<le> unat inst_cap;
+       addr_n' \<le> unat addr_cap
+     \<rbrakk> \<Longrightarrow>
+      serialize_byte_step_ok s out out_cap pos data data_n'
+        inst inst_n' addr addr_n'"
+    by (rule serialize_byte_step_ok_from_encoder_buffers[OF buffers_s]; assumption)
+  have varint_step:
+    "\<And>pos v n data_n' inst_n' addr_n'. \<lbrakk>
+       varint_size' v s = Some n;
+       unat pos + unat n \<le> unat out_cap;
+       data_n' \<le> unat data_cap;
+       inst_n' \<le> unat inst_cap;
+       addr_n' \<le> unat addr_cap
+     \<rbrakk> \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap pos v n data data_n'
+        inst inst_n' addr addr_n'"
+    by (rule serialize_varint_step_ok_from_encoder_buffers[OF buffers_s]; assumption)
+  have data_copy_step:
+    "\<And>pos inst_n' addr_n'. \<lbrakk>
+       unat pos + unat ?data_len \<le> unat out_cap;
+       unat ?data_len \<le> unat data_cap;
+       inst_n' \<le> unat inst_cap;
+       addr_n' \<le> unat addr_cap
+     \<rbrakk> \<Longrightarrow>
+      serialize_copy_step_ok s out out_cap pos data ?data_len
+        inst inst_n' addr addr_n'"
+    by (rule serialize_data_copy_step_ok_from_encoder_buffers[OF buffers_s]; assumption)
+  have inst_copy_step:
+    "\<And>pos data_n' addr_n'. \<lbrakk>
+       unat pos + unat ?inst_len \<le> unat out_cap;
+       unat ?inst_len \<le> unat inst_cap;
+       data_n' \<le> unat data_cap;
+       addr_n' \<le> unat addr_cap
+     \<rbrakk> \<Longrightarrow>
+      serialize_copy_step_ok s out out_cap pos inst ?inst_len
+        data data_n' addr addr_n'"
+    by (rule serialize_inst_copy_step_ok_from_encoder_buffers[OF buffers_s]; assumption)
+  have addr_copy_step:
+    "\<And>pos data_n' inst_n'. \<lbrakk>
+       unat pos + unat ?addr_len \<le> unat out_cap;
+       unat ?addr_len \<le> unat addr_cap;
+       data_n' \<le> unat data_cap;
+       inst_n' \<le> unat inst_cap
+     \<rbrakk> \<Longrightarrow>
+      serialize_copy_step_ok s out out_cap pos addr ?addr_len
+        data data_n' inst inst_n'"
+    by (rule serialize_addr_copy_step_ok_from_encoder_buffers[OF buffers_s]; assumption)
+  have src_pos_range:
+    "unat ((6 :: 32 word) + src_n) + unat (1 :: 32 word) \<le> unat out_cap"
+  proof (cases "src_bytes = []")
+    case True
+    have src_len0: "src_len = 0"
+      using input_len(1) True by (simp add: unat_eq_0)
+    have src_n1: "src_n = 1"
+      using src_size src_len0 by simp
+    have pos_unat_raw:
+      "unat ((6 :: 32 word) + src_n) = unat (6 :: 32 word) + unat src_n"
+      by (rule unat_word_add_no_overflow)
+        (use size_le5(1) in simp)
+    have pos_unat: "unat ((6 :: 32 word) + src_n) = 6 + unat src_n"
+      using pos_unat_raw by simp
+    have min_len: "8 \<le> length (encode_spec src_bytes tgt_bytes)"
+      using spec_eq True by (simp add: serialize_def Let_def magic_bytes_def)
+    show ?thesis
+      using out_cap_ok min_len pos_unat src_n1 by simp
+  next
+    case False
+    have pos_unat_raw:
+      "unat ((6 :: 32 word) + src_n) = unat (6 :: 32 word) + unat src_n"
+      by (rule unat_word_add_no_overflow)
+        (use size_le5(1) in simp)
+    have pos_unat: "unat ((6 :: 32 word) + src_n) = 6 + unat src_n"
+      using pos_unat_raw by simp
+    show ?thesis
+      using out_cap_ok spec_eq src_size_unat[OF False] pos_unat False
+      by (simp add: serialize_def Let_def magic_bytes_def)
+  qed
+  have src_pos_step:
+    "\<And>data_n' inst_n' addr_n'. \<lbrakk>
+       data_n' \<le> unat data_cap;
+       inst_n' \<le> unat inst_cap;
+       addr_n' \<le> unat addr_cap
+     \<rbrakk> \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap ((6 :: 32 word) + src_n)
+        0 1 data data_n' inst inst_n' addr addr_n'"
+  proof -
+    fix data_n' inst_n' addr_n'
+    assume data_cap': "data_n' \<le> unat data_cap"
+      and inst_cap': "inst_n' \<le> unat inst_cap"
+      and addr_cap': "addr_n' \<le> unat addr_cap"
+    have range:
+      "unat ((6 :: 32 word) + src_n) + unat (1 :: 32 word) \<le> unat out_cap"
+      by (rule src_pos_range)
+    have range_suc: "Suc (unat ((6 :: 32 word) + src_n)) \<le> unat out_cap"
+      using range by simp
+    show "serialize_varint_step_ok s out out_cap ((6 :: 32 word) + src_n)
+        0 1 data data_n' inst inst_n' addr addr_n'"
+      by (rule varint_step)
+        (simp_all add: range range_suc data_cap' inst_cap' addr_cap')
+  qed
+  have out_cap_ge7: "7 \<le> unat out_cap"
+    using out_cap_ok spec_eq
+    by (simp add: serialize_def Let_def magic_bytes_def varint_encode_length)
+  have fixed_byte_step:
+    "\<And>pos. unat pos < 6 \<Longrightarrow>
+      serialize_byte_step_ok s out out_cap pos data (length ?data_bytes)
+        inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule byte_step) (use out_cap_ge7 section_caps in simp_all)
+  have no_dlen_step:
+    "src_bytes = [] \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap 6 ?dlen dlen_n
+        data (length ?data_bytes) inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule varint_step)
+      (use dlen_size out_cap_ok spec_eq dlen_size_unat section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have no_tgt_step:
+    "src_bytes = [] \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap ((6 :: 32 word) + dlen_n) tgt_len tgt_n
+        data (length ?data_bytes) inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule varint_step)
+      (use tgt_size out_cap_ok spec_eq dlen_size_unat size_unats dlen_size_le5
+        section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have no_delta_step:
+    "src_bytes = [] \<Longrightarrow>
+      serialize_byte_step_ok s out out_cap ((6 :: 32 word) + dlen_n + tgt_n)
+        data (length ?data_bytes) inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule byte_step)
+      (use out_cap_ok spec_eq dlen_size_unat size_unats dlen_size_le5
+        size_le5 section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have no_data_len_step:
+    "src_bytes = [] \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap ((7 :: 32 word) + (dlen_n + tgt_n))
+        ?data_len data_n data (length ?data_bytes)
+        inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule varint_step)
+      (use data_size out_cap_ok spec_eq dlen_size_unat size_unats dlen_size_le5
+        size_le5 section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have no_inst_len_step:
+    "src_bytes = [] \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap
+        ((7 :: 32 word) + (dlen_n + tgt_n) + data_n)
+        ?inst_len inst_n data (length ?data_bytes)
+        inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule varint_step)
+      (use inst_size out_cap_ok spec_eq dlen_size_unat size_unats dlen_size_le5
+        size_le5 section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have no_addr_len_step:
+    "src_bytes = [] \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap
+        ((7 :: 32 word) + (dlen_n + tgt_n) + data_n + inst_n)
+        ?addr_len addr_n data (length ?data_bytes)
+        inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule varint_step)
+      (use addr_size out_cap_ok spec_eq dlen_size_unat size_unats dlen_size_le5
+        size_le5 section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have no_data_copy_step:
+    "src_bytes = [] \<Longrightarrow>
+      serialize_copy_step_ok s out out_cap
+        ((7 :: 32 word) + (dlen_n + tgt_n) + data_n + inst_n + addr_n)
+        data ?data_len inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule data_copy_step)
+      (use out_cap_ok spec_eq dlen_size_unat size_unats dlen_size_le5
+        size_le5 data_len section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have no_inst_copy_step:
+    "src_bytes = [] \<Longrightarrow>
+      serialize_copy_step_ok s out out_cap
+        ((7 :: 32 word) + (dlen_n + tgt_n) + data_n + inst_n + addr_n + ?data_len)
+        inst ?inst_len data (length ?data_bytes) addr (length ?addr_bytes)"
+    by (rule inst_copy_step)
+      (use out_cap_ok spec_eq dlen_size_unat size_unats dlen_size_le5
+        size_le5 data_len inst_len section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have no_addr_copy_step:
+    "src_bytes = [] \<Longrightarrow>
+      serialize_copy_step_ok s out out_cap
+        ((7 :: 32 word) + (dlen_n + tgt_n) + data_n + inst_n + addr_n +
+          ?data_len + ?inst_len)
+        addr ?addr_len data (length ?data_bytes) inst (length ?inst_bytes)"
+    by (rule addr_copy_step)
+      (use out_cap_ok spec_eq dlen_size_unat size_unats dlen_size_le5
+        size_le5 data_len inst_len addr_len section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have src_desc_len_step:
+    "src_bytes \<noteq> [] \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap 6 src_len src_n
+        data (length ?data_bytes) inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule varint_step)
+      (use src_size out_cap_ok spec_eq src_size_unat section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have src_pos_step':
+    "src_bytes \<noteq> [] \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap ((6 :: 32 word) + src_n) 0 1
+        data (length ?data_bytes) inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule src_pos_step) (use section_caps in simp_all)
+  have src_dlen_step:
+    "src_bytes \<noteq> [] \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap ((7 :: 32 word) + src_n) ?dlen dlen_n
+        data (length ?data_bytes) inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule varint_step)
+      (use dlen_size out_cap_ok spec_eq src_size_unat dlen_size_unat size_le5
+        dlen_size_le5 section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have src_tgt_step:
+    "src_bytes \<noteq> [] \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap ((7 :: 32 word) + src_n + dlen_n)
+        tgt_len tgt_n data (length ?data_bytes)
+        inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule varint_step)
+      (use tgt_size out_cap_ok spec_eq src_size_unat dlen_size_unat size_unats
+        size_le5 dlen_size_le5 section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have src_delta_step:
+    "src_bytes \<noteq> [] \<Longrightarrow>
+      serialize_byte_step_ok s out out_cap ((7 :: 32 word) + src_n + dlen_n + tgt_n)
+        data (length ?data_bytes) inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule byte_step)
+      (use out_cap_ok spec_eq src_size_unat dlen_size_unat size_unats
+        size_le5 dlen_size_le5 section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have src_data_len_step:
+    "src_bytes \<noteq> [] \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap
+        ((8 :: 32 word) + (src_n + (dlen_n + tgt_n)))
+        ?data_len data_n data (length ?data_bytes)
+        inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule varint_step)
+      (use data_size out_cap_ok spec_eq src_size_unat dlen_size_unat size_unats
+        size_le5 dlen_size_le5 section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have src_inst_len_step:
+    "src_bytes \<noteq> [] \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap
+        ((8 :: 32 word) + (src_n + (dlen_n + tgt_n)) + data_n)
+        ?inst_len inst_n data (length ?data_bytes)
+        inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule varint_step)
+      (use inst_size out_cap_ok spec_eq src_size_unat dlen_size_unat size_unats
+        size_le5 dlen_size_le5 section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have src_addr_len_step:
+    "src_bytes \<noteq> [] \<Longrightarrow>
+      serialize_varint_step_ok s out out_cap
+        ((8 :: 32 word) + (src_n + (dlen_n + tgt_n)) + data_n + inst_n)
+        ?addr_len addr_n data (length ?data_bytes)
+        inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule varint_step)
+      (use addr_size out_cap_ok spec_eq src_size_unat dlen_size_unat size_unats
+        size_le5 dlen_size_le5 section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have src_data_copy_step:
+    "src_bytes \<noteq> [] \<Longrightarrow>
+      serialize_copy_step_ok s out out_cap
+        ((8 :: 32 word) + (src_n + (dlen_n + tgt_n)) + data_n + inst_n + addr_n)
+        data ?data_len inst (length ?inst_bytes) addr (length ?addr_bytes)"
+    by (rule data_copy_step)
+      (use out_cap_ok spec_eq src_size_unat dlen_size_unat size_unats
+        size_le5 dlen_size_le5 data_len section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have src_inst_copy_step:
+    "src_bytes \<noteq> [] \<Longrightarrow>
+      serialize_copy_step_ok s out out_cap
+        ((8 :: 32 word) + (src_n + (dlen_n + tgt_n)) + data_n + inst_n + addr_n +
+          ?data_len)
+        inst ?inst_len data (length ?data_bytes) addr (length ?addr_bytes)"
+    by (rule inst_copy_step)
+      (use out_cap_ok spec_eq src_size_unat dlen_size_unat size_unats
+        size_le5 dlen_size_le5 data_len inst_len section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have src_addr_copy_step:
+    "src_bytes \<noteq> [] \<Longrightarrow>
+      serialize_copy_step_ok s out out_cap
+        ((8 :: 32 word) + (src_n + (dlen_n + tgt_n)) + data_n + inst_n + addr_n +
+          ?data_len + ?inst_len)
+        addr ?addr_len data (length ?data_bytes) inst (length ?inst_bytes)"
+    by (rule addr_copy_step)
+      (use out_cap_ok spec_eq src_size_unat dlen_size_unat size_unats
+        size_le5 dlen_size_le5 data_len inst_len addr_len section_caps in
+        \<open>auto simp: serialize_def Let_def magic_bytes_def varint_encode_length
+          word_le_nat_alt unat_word_ariths\<close>)
+  have raw:
+    "serialize' out out_cap src_len tgt_len
+        data ?data_len inst ?inst_len addr ?addr_len \<bullet> s
+     \<lbrace> \<lambda>r t. r = Result
+          (if src_bytes = []
+           then (7 :: 32 word) + (dlen_n + tgt_n) + data_n + inst_n + addr_n +
+             ?data_len + ?inst_len + ?addr_len
+           else (8 :: 32 word) + (src_n + (dlen_n + tgt_n)) +
+             data_n + inst_n + addr_n + ?data_len + ?inst_len + ?addr_len) \<and>
+        heap_bytes t out
+          (unat
+            (if src_bytes = []
+             then (7 :: 32 word) + (dlen_n + tgt_n) + data_n + inst_n + addr_n +
+               ?data_len + ?inst_len + ?addr_len
+             else (8 :: 32 word) + (src_n + (dlen_n + tgt_n)) +
+               data_n + inst_n + addr_n + ?data_len + ?inst_len + ?addr_len)) =
+          serialize src_bytes tgt_bytes ?data_bytes ?inst_bytes ?addr_bytes \<and>
+        heap_typing t = heap_typing s \<rbrace>"
+    apply (rule serialize'_writes_serialize[
+      where src = src_bytes and tgt = tgt_bytes
+        and data_bytes = ?data_bytes and inst_bytes = ?inst_bytes
+        and addr_bytes = ?addr_bytes
+        and src_n = src_n and tgt_n = tgt_n and data_n = data_n
+        and inst_n = inst_n and addr_n = addr_n and dlen_n = dlen_n])
+                                      apply (rule input_len(1))
+                                     apply (rule input_len(2))
+                                    apply (rule data_len)
+                                   apply (rule inst_len)
+                                  apply (rule addr_len)
+                                 apply (rule data_heap)
+                                apply (rule inst_heap)
+                               apply (rule addr_heap)
+                              apply (rule src_size)
+                             apply (rule tgt_size)
+                            apply (rule data_size)
+                           apply (rule inst_size)
+                          apply (rule addr_size)
+                         apply (rule dlen_size)
+                        apply (rule dlen_unat)
+	                       apply (simp add: src_bytes)
+	                      apply (simp add: dlen_bytes)
+	                     apply (simp add: tgt_bytes)
+	                    apply (simp add: data_bytes)
+	                   apply (simp add: inst_bytes)
+	                  apply (simp add: addr_bytes)
+		                 apply (rule fixed_byte_step; simp)
+		                apply (rule fixed_byte_step; simp)
+		               apply (rule fixed_byte_step; simp)
+		              apply (rule fixed_byte_step; simp)
+		             apply (rule fixed_byte_step; simp)
+		            apply (rule fixed_byte_step; simp)
+			           apply (rule no_dlen_step; simp)
+			          apply (rule no_tgt_step; simp)
+			         apply (rule no_delta_step; simp)
+			        apply (rule no_data_len_step; simp)
+			       apply (rule no_inst_len_step; simp)
+			      apply (rule no_addr_len_step; simp)
+			     apply (rule no_data_copy_step; simp)
+			    apply (rule no_inst_copy_step; simp)
+			   apply (rule no_addr_copy_step; simp)
+			  apply (rule src_desc_len_step; simp)
+			 apply (rule src_pos_step'; simp)
+		apply (rule src_dlen_step; simp)
+	       apply (rule src_tgt_step; simp)
+	      apply (rule src_delta_step; simp)
+	     apply (rule src_data_len_step; simp)
+	    apply (rule src_inst_len_step; simp)
+	   apply (rule src_addr_len_step; simp)
+	  apply (rule src_data_copy_step; simp)
+	  apply (rule src_inst_copy_step; simp)
+	apply (rule src_addr_copy_step; simp)
+	    done
+  have p_end_unat:
+    "unat
+      (if src_bytes = []
+       then (7 :: 32 word) + (dlen_n + tgt_n) + data_n + inst_n + addr_n +
+         ?data_len + ?inst_len + ?addr_len
+       else (8 :: 32 word) + (src_n + (dlen_n + tgt_n)) +
+         data_n + inst_n + addr_n + ?data_len + ?inst_len + ?addr_len) =
+     length (serialize src_bytes tgt_bytes ?data_bytes ?inst_bytes ?addr_bytes)"
+  proof (cases "src_bytes = []")
+    case True
+    show ?thesis
+      using True spec_eq encoded_len_word dlen_size_unat size_unats
+        data_len inst_len addr_len dlen_size_le5 size_le5
+      by (simp add: serialize_def Let_def magic_bytes_def varint_encode_length
+        word_le_nat_alt unat_word_ariths)
+  next
+    case False
+    show ?thesis
+      using False spec_eq encoded_len_word src_size_unat[OF False]
+        dlen_size_unat size_unats data_len inst_len addr_len
+        dlen_size_le5 size_le5
+      by (simp add: serialize_def Let_def magic_bytes_def varint_encode_length
+        word_le_nat_alt unat_word_ariths)
+  qed
+  show ?thesis
+    apply (rule runs_to_weaken[OF raw])
+    using spec_eq encoded_len_word p_end_unat
+    by (auto simp: encoder_success_post_def)
+qed
 
 lemma vcdiff_encode'_compose_phases_topdown:
   fixes out src tgt pending data inst addr :: "8 word ptr"
@@ -1554,12 +2683,16 @@ lemma vcdiff_encode'_compose_phases_topdown:
            \<lbrace> \<lambda>r t. \<exists>sec.
                r = Result sec \<and>
                encoder_window_post t data inst addr sec src_bytes tgt_bytes \<and>
+               encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
                heap_bytes t src (unat src_len) = src_bytes \<and>
                heap_bytes t tgt (unat tgt_len) = tgt_bytes \<and>
                heap_typing t = heap_typing s_index \<rbrace>"
       and serialize_phase:
-        "\<And>s_window sec. encoder_window_post s_window data inst addr sec
-             src_bytes tgt_bytes \<Longrightarrow>
+        "\<And>s_window sec. \<lbrakk>
+           encoder_window_post s_window data inst addr sec src_bytes tgt_bytes;
+           encoder_window_caps_ok sec data_cap inst_cap addr_cap;
+           heap_typing s_window = heap_typing s
+         \<rbrakk> \<Longrightarrow>
            serialize' out out_cap src_len tgt_len
              data (sections_t_C.data_pos_C sec)
              inst (sections_t_C.inst_pos_C sec)
@@ -1599,6 +2732,8 @@ proof -
         apply (simp add: encoder_window_post_def)
         apply (rule runs_to_weaken[OF serialize_phase])
          apply (simp add: encoder_window_post_def)
+        apply simp
+        apply (simp add: encoder_index_post_def)
         using success_from_window
         by auto
       done
@@ -1670,6 +2805,7 @@ proof -
      \<lbrace> \<lambda>r t. \<exists>sec.
          r = Result sec \<and>
          encoder_window_post t data inst addr sec src_bytes tgt_bytes \<and>
+         encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
          heap_bytes t src (unat src_len) = src_bytes \<and>
          heap_bytes t tgt (unat tgt_len) = tgt_bytes \<and>
          heap_typing t = heap_typing s_index \<rbrace>"
@@ -1683,6 +2819,7 @@ proof -
      \<lbrace> \<lambda>r t. \<exists>sec.
          r = Result sec \<and>
          encoder_window_post t data inst addr sec src_bytes tgt_bytes \<and>
+         encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
          heap_bytes t src (unat src_len) = src_bytes \<and>
          heap_bytes t tgt (unat tgt_len) = tgt_bytes \<and>
          heap_typing t = heap_typing s_index \<rbrace>"
@@ -1690,8 +2827,11 @@ proof -
           OF input buffers index fit])
   qed
   have serialize_phase:
-    "\<And>s_window sec. encoder_window_post s_window data inst addr sec
-       src_bytes tgt_bytes \<Longrightarrow>
+    "\<And>s_window sec. \<lbrakk>
+       encoder_window_post s_window data inst addr sec src_bytes tgt_bytes;
+       encoder_window_caps_ok sec data_cap inst_cap addr_cap;
+       heap_typing s_window = heap_typing s
+     \<rbrakk> \<Longrightarrow>
      serialize' out out_cap src_len tgt_len
        data (sections_t_C.data_pos_C sec)
        inst (sections_t_C.inst_pos_C sec)
@@ -1703,6 +2843,9 @@ proof -
     fix s_window sec
     assume window:
       "encoder_window_post s_window data inst addr sec src_bytes tgt_bytes"
+    assume window_caps:
+      "encoder_window_caps_ok sec data_cap inst_cap addr_cap"
+    assume typing: "heap_typing s_window = heap_typing s"
     show "serialize' out out_cap src_len tgt_len
        data (sections_t_C.data_pos_C sec)
        inst (sections_t_C.inst_pos_C sec)
@@ -1711,7 +2854,7 @@ proof -
          r = Result n \<and>
          encoder_success_post out src_bytes tgt_bytes n s_window t \<rbrace>"
       by (rule vcdiff_encode'_serialize_phase_topdown[
-          OF input buffers fit out_cap_ok encoded_len_word window])
+          OF input buffers fit out_cap_ok encoded_len_word typing window window_caps])
   qed
   show ?thesis
     by (rule vcdiff_encode'_compose_phases_topdown[
