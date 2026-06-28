@@ -1345,11 +1345,125 @@ lemma vcdiff_encode'_build_index_phase_topdown:
         "encoder_buffers_ok s out out_cap src src_len tgt tgt_len head_arr next_arr
           pending pending_cap data data_cap inst inst_cap addr addr_cap"
       and src_len_word: "unat src_len < unat (no_entry32 :: 32 word)"
+      and head_valid:
+        "\<And>h. h < hash_size \<Longrightarrow>
+          ptr_valid (heap_typing s) (head_arr +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p. p < unat src_len \<Longrightarrow>
+          ptr_valid (heap_typing s) (next_arr +\<^sub>p int p)"
+      and head_no_alias:
+        "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+          head_arr +\<^sub>p int h \<noteq> head_arr +\<^sub>p int bucket"
+      and next_no_alias:
+        "\<And>q p. \<lbrakk>q < unat src_len; p < unat src_len; q \<noteq> p\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+      and next_head_disjoint:
+        "\<And>h p. \<lbrakk>h < hash_size; p < unat src_len\<rbrakk> \<Longrightarrow>
+          head_arr +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+      and head_next_disjoint:
+        "\<And>q bucket. \<lbrakk>q < unat src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> head_arr +\<^sub>p int bucket"
   shows "build_index' src src_len head_arr next_arr \<bullet> s
            \<lbrace> \<lambda>r t. r = Result () \<and>
                encoder_index_post s t src src_len tgt tgt_len head_arr next_arr
                  src_bytes tgt_bytes \<rbrace>"
-  sorry
+proof -
+  have src_ok: "buf_valid s src (unat src_len)"
+    using buffers by (simp add: encoder_buffers_ok_def)
+  have tgt_ok: "buf_valid s tgt (unat tgt_len)"
+    using buffers by (simp add: encoder_buffers_ok_def)
+  have tp_le: "(0 :: 32 word) \<le> tgt_len"
+    by simp
+  have raw:
+    "build_index' src src_len head_arr next_arr \<bullet> s
+      \<lbrace> \<lambda>r t. r = Result () \<and>
+          source_index_heap_rel t
+            (heap_bytes s src (unat src_len)) head_arr next_arr \<and>
+          source_index_heap_nexts_wf t
+            (heap_bytes s src (unat src_len)) next_arr \<and>
+          source_index_heap_chains_closed t
+            (heap_bytes s src (unat src_len)) head_arr next_arr \<and>
+          heap_typing t = heap_typing s \<and>
+          heap_bytes t src (unat src_len) =
+            heap_bytes s src (unat src_len) \<and>
+          heap_bytes t tgt (unat tgt_len) =
+            heap_bytes s tgt (unat tgt_len) \<and>
+          buf_valid t tgt (unat tgt_len) \<and>
+          (\<forall>m. find_best_match' src src_len tgt tgt_len (0 :: 32 word) head_arr next_arr t =
+                Some m \<longrightarrow>
+              (m = (let best = find_best_match_spec
+                  (heap_bytes s src (unat src_len))
+                  (heap_bytes s tgt (unat tgt_len)) (unat (0 :: 32 word))
+                  (build_index_spec (heap_bytes s src (unat src_len)))
+                in match_t_C (of_nat (em_pos best)) (of_nat (em_len best)))
+              \<and> match_valid
+                (heap_bytes s src (unat src_len))
+                (heap_bytes s tgt (unat tgt_len))
+                (unat (0 :: 32 word)) (unat (match_t_C.pos_C m))
+                (unat (match_t_C.len_C m)))) \<rbrace>"
+  proof (rule build_index'_find_best_match'_spec_and_valid_preserves_tgt_buf_valid[
+      where src = src and tgt = tgt and src_len = src_len
+        and tgt_len = tgt_len and tp = "0 :: 32 word" and head = head_arr
+        and next_arr = next_arr and s = s])
+    show "unat src_len < unat (no_entry32 :: 32 word)"
+      by (rule src_len_word)
+    show "buf_valid s src (unat src_len)"
+      by (rule src_ok)
+    show "buf_valid s tgt (unat tgt_len)"
+      by (rule tgt_ok)
+    show "(0 :: 32 word) \<le> tgt_len"
+      by (rule tp_le)
+  next
+    fix h st'
+    assume typing: "heap_typing st' = heap_typing s"
+      and h_lt: "h < hash_size"
+    have ptr: "ptr_valid (heap_typing s) (head_arr +\<^sub>p int h)"
+      by (rule head_valid[OF h_lt])
+    show "IS_VALID(32 word) st' (head_arr +\<^sub>p int h)"
+      using ptr typing by simp
+  next
+    fix p st'
+    assume typing: "heap_typing st' = heap_typing s"
+      and p_lt: "p < unat src_len"
+    have ptr: "ptr_valid (heap_typing s) (next_arr +\<^sub>p int p)"
+      by (rule next_valid[OF p_lt])
+    show "IS_VALID(32 word) st' (next_arr +\<^sub>p int p)"
+      using ptr typing by simp
+  next
+    fix h bucket
+    assume h_lt: "h < hash_size"
+      and bucket_lt: "bucket < hash_size"
+      and neq: "h \<noteq> bucket"
+    show "head_arr +\<^sub>p int h \<noteq> head_arr +\<^sub>p int bucket"
+      by (rule head_no_alias[where h = h and bucket = bucket,
+          OF h_lt bucket_lt neq])
+  next
+    fix q p
+    assume q_lt: "q < unat src_len"
+      and p_lt: "p < unat src_len"
+      and neq: "q \<noteq> p"
+    show "next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+      by (rule next_no_alias[where q = q and p = p, OF q_lt p_lt neq])
+  next
+    fix h p
+    assume h_lt: "h < hash_size"
+      and p_lt: "p < unat src_len"
+    show "head_arr +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+      by (rule next_head_disjoint[where h = h and p = p, OF h_lt p_lt])
+  next
+    fix q bucket
+    assume q_lt: "q < unat src_len"
+      and bucket_lt: "bucket < hash_size"
+    show "next_arr +\<^sub>p int q \<noteq> head_arr +\<^sub>p int bucket"
+      by (rule head_next_disjoint[where q = q and bucket = bucket,
+          OF q_lt bucket_lt])
+  qed
+  show ?thesis
+    apply (rule runs_to_weaken[OF raw])
+    using input
+    apply (auto simp: encoder_input_rel_def encoder_index_post_def)
+    done
+qed
 
 lemma vcdiff_encode'_encode_window_phase_topdown:
   fixes src tgt data inst addr pending :: "8 word ptr"
@@ -1471,6 +1585,24 @@ theorem vcdiff_encode'_writes_encode_spec_topdown:
           pending pending_cap data data_cap inst inst_cap addr addr_cap"
       and pending_cap_ok: "unat tgt_len \<le> unat pending_cap"
       and src_len_word: "unat src_len < unat (no_entry32 :: 32 word)"
+      and head_valid:
+        "\<And>h. h < hash_size \<Longrightarrow>
+          ptr_valid (heap_typing s) (head_arr +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p. p < unat src_len \<Longrightarrow>
+          ptr_valid (heap_typing s) (next_arr +\<^sub>p int p)"
+      and head_no_alias:
+        "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
+          head_arr +\<^sub>p int h \<noteq> head_arr +\<^sub>p int bucket"
+      and next_no_alias:
+        "\<And>q p. \<lbrakk>q < unat src_len; p < unat src_len; q \<noteq> p\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> next_arr +\<^sub>p int p"
+      and next_head_disjoint:
+        "\<And>h p. \<lbrakk>h < hash_size; p < unat src_len\<rbrakk> \<Longrightarrow>
+          head_arr +\<^sub>p int h \<noteq> next_arr +\<^sub>p int p"
+      and head_next_disjoint:
+        "\<And>q bucket. \<lbrakk>q < unat src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
+          next_arr +\<^sub>p int q \<noteq> head_arr +\<^sub>p int bucket"
       and fit:
         "sections_fit_32 src_bytes tgt_bytes
           (encode_window_full_spec src_bytes tgt_bytes)"
@@ -1497,7 +1629,8 @@ proof -
            encoder_index_post s t src src_len tgt tgt_len head_arr next_arr
              src_bytes tgt_bytes \<rbrace>"
     by (rule vcdiff_encode'_build_index_phase_topdown[
-        OF input buffers src_len_word])
+        OF input buffers src_len_word head_valid next_valid head_no_alias
+          next_no_alias next_head_disjoint head_next_disjoint])
   have window_phase:
     "\<And>s_index. encoder_index_post s s_index src src_len tgt tgt_len
        head_arr next_arr src_bytes tgt_bytes \<Longrightarrow>
