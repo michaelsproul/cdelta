@@ -16536,7 +16536,141 @@ lemma try_emit_add_copy'_mode_le5_success_enc_cache_abs:
                 enc_cache_abs t (cache_update c_out (unat copy_addr)) \<and>
                 enc_cache_wf (cache_update c_out (unat copy_addr))) \<and>
               heap_typing t = heap_typing s \<rbrace>"
-  sorry
+proof -
+  have csz_ge: "(4 :: 32 word) \<le> csz"
+    using copy_ge unfolding csz_def
+    by (auto simp: word_less_nat_alt word_le_nat_alt)
+  have csz_le: "csz \<le> (6 :: 32 word)"
+    using copy_ge unfolding csz_def
+    by (auto simp: word_less_nat_alt word_le_nat_alt)
+  have mode_lt: "mode_t_C.mode_C m < (6 :: 32 word)"
+    using mode_le by (simp add: word_less_nat_alt word_le_nat_alt)
+  have op_nz:
+    "op \<noteq> (0 :: 32 word)"
+    using pend_ge pend_le mode_le csz_ge csz_le
+    unfolding op_def
+    by (auto simp: word_less_nat_alt word_le_nat_alt
+                   word_neq_0_conv unat_word_ariths)
+  have op_nz_gt6_expr:
+    "(0xA2 + (mode_t_C.mode_C m * 0xC + pend_len * 3) :: 32 word) \<noteq> 0"
+  proof -
+    have mode_nat: "unat (mode_t_C.mode_C m) \<le> 5"
+      using mode_le by (simp add: word_le_nat_alt)
+    have pend_nat: "1 \<le> unat pend_len" "unat pend_len \<le> 4"
+      using pend_ge pend_le by (simp_all add: word_le_nat_alt)
+    have expr_unat:
+      "unat (0xA2 + (mode_t_C.mode_C m * 0xC + pend_len * 3) :: 32 word) =
+       162 + (unat (mode_t_C.mode_C m) * 12 + unat pend_len * 3)"
+      using mode_nat pend_nat
+      by (simp add: unat_word_ariths)
+    show ?thesis
+      using expr_unat pend_nat by auto
+  qed
+  have op_nz_le6_expr:
+    "\<not> (6 :: 32 word) < copy_len \<Longrightarrow>
+      (0x9C + (mode_t_C.mode_C m * 0xC + (pend_len * 3 + copy_len)) ::
+        32 word) \<noteq> 0"
+  proof -
+    assume copy_le6: "\<not> (6 :: 32 word) < copy_len"
+    have mode_nat: "unat (mode_t_C.mode_C m) \<le> 5"
+      using mode_le by (simp add: word_le_nat_alt)
+    have pend_nat: "1 \<le> unat pend_len" "unat pend_len \<le> 4"
+      using pend_ge pend_le by (simp_all add: word_le_nat_alt)
+    have copy_nat: "4 \<le> unat copy_len" "unat copy_len \<le> 6"
+      using copy_ge copy_le6
+      by (simp_all add: word_le_nat_alt word_less_nat_alt)
+    have expr_unat:
+      "unat (0x9C + (mode_t_C.mode_C m * 0xC + (pend_len * 3 + copy_len)) ::
+          32 word) =
+       156 + (unat (mode_t_C.mode_C m) * 12 +
+          (unat pend_len * 3 + unat copy_len))"
+      using mode_nat pend_nat copy_nat
+      by (simp add: unat_word_ariths)
+    show ?thesis
+      using expr_unat pend_nat copy_nat by auto
+  qed
+  note gets_the_best_mode'_result[runs_to_vcg]
+  note add_copy_opcode'_mode_le5[runs_to_vcg]
+  show ?thesis
+    unfolding try_emit_add_copy'_def csz_def op_def
+    using bm pend_ge pend_le copy_ge mode_le csz_ge csz_le op_nz sec_ok
+    apply runs_to_vcg
+    apply (auto simp: word_less_nat_alt word_le_nat_alt)
+    apply runs_to_vcg
+    apply (simp_all add: word_less_nat_alt word_le_nat_alt
+                         word_neq_0_conv unat_word_ariths)
+    using op_nz_gt6_expr apply simp
+       apply (rule runs_to_weaken[
+         OF write_byte'_success_preserves_enc_cache_abs])
+          apply (rule abs)
+         apply (rule inst_byte_fits)
+        apply (rule inst_byte_ptr)
+      apply clarsimp
+      apply runs_to_vcg
+      apply (rule runs_to_weaken[
+        OF write_bytes'_success_preserves_enc_cache_abs])
+         apply assumption
+        apply (rule data_fits)
+       apply clarsimp
+       using data_valid apply blast
+      apply clarsimp
+      using pending_valid apply blast
+     apply clarsimp
+     apply runs_to_vcg
+     apply (rule runs_to_weaken)
+      apply (rule emit_address'_success_varint_preserves_enc_cache_abs
+        [where n = an])
+          apply assumption
+         apply (rule mode_lt)
+        subgoal for t cur
+          using addr_size varint_size'_state_independent
+            [of "mode_t_C.arg_C m" cur s] by simp
+      apply (rule addr_varint_fits)
+      using addr_varint_valid apply auto
+    apply runs_to_vcg
+    apply (rule runs_to_weaken[
+      OF cache_update'_enc_cache_abs_wf[where buf = inst and n = 0]])
+      apply assumption
+     apply (rule cache_wf)
+    apply (clarsimp simp: csz_def op_def)
+    apply runs_to_vcg
+    apply (simp_all add: word_less_nat_alt word_le_nat_alt
+                         word_neq_0_conv unat_word_ariths)
+    using op_nz_le6_expr apply (auto simp: word_less_nat_alt)
+       apply (rule runs_to_weaken[
+         OF write_byte'_success_preserves_enc_cache_abs])
+          apply (rule abs)
+         apply (rule inst_byte_fits)
+        apply (rule inst_byte_ptr)
+      apply clarsimp
+      apply runs_to_vcg
+      apply (rule runs_to_weaken[
+        OF write_bytes'_success_preserves_enc_cache_abs])
+         apply assumption
+        apply (rule data_fits)
+       apply clarsimp
+       using data_valid apply blast
+      apply clarsimp
+      using pending_valid apply blast
+     apply clarsimp
+     apply runs_to_vcg
+     apply (rule runs_to_weaken)
+      apply (rule emit_address'_success_varint_preserves_enc_cache_abs
+        [where n = an])
+          apply assumption
+         apply (rule mode_lt)
+        subgoal for t cur
+          using addr_size varint_size'_state_independent
+            [of "mode_t_C.arg_C m" cur s] by simp
+      apply (rule addr_varint_fits)
+      using addr_varint_valid apply auto
+    apply runs_to_vcg
+    apply (rule runs_to_weaken[
+      OF cache_update'_enc_cache_abs_wf[where buf = inst and n = 0]])
+      apply assumption
+     apply (rule cache_wf)
+    by (clarsimp simp: csz_def op_def)
+qed
 
 lemma try_emit_add_copy'_mode_le5_success_enc_sections_cache_inv:
   fixes csz op pend_len copy_len :: "32 word"
