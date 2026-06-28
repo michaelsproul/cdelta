@@ -11000,6 +11000,31 @@ proof -
     by auto
 qed
 
+lemma flush_pending'_len_lt_four_enc_sections_cache_inv_step:
+  assumes inv:
+        "enc_sections_inv s data inst addr sec src_seg tgt_len
+          data_bytes inst_bytes addr_bytes target c_out"
+      and abs: "enc_cache_abs s c_out"
+      and cache_wf: "enc_cache_wf c_out"
+      and len_le: "len \<le> (4 :: 32 word)"
+      and len_ne_four: "len \<noteq> (4 :: 32 word)"
+      and pending_valid: "\<forall>j < unat len.
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+      and target_room: "length target + unat len \<le> tgt_len"
+      and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+  shows "flush_pending' sec data data_cap inst inst_cap pending len \<bullet> s
+           \<lbrace> \<lambda>r t.
+              (\<exists>sec' data_bytes' inst_bytes' addr_bytes'.
+                r = Result sec' \<and>
+                enc_sections_inv t data inst addr sec' src_seg tgt_len
+                  data_bytes' inst_bytes' addr_bytes'
+                  (target @ heap_bytes_word s pending 0 len) c_out \<and>
+                enc_cache_abs t c_out \<and>
+                enc_cache_wf c_out) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+  sorry
+
 lemma flush_pending'_short_enc_sections_cache_inv_step:
   assumes inv:
         "enc_sections_inv s data inst addr sec src_seg tgt_len
@@ -11094,7 +11119,88 @@ lemma flush_pending'_short_enc_sections_cache_inv_step:
                 enc_cache_abs t c_out \<and>
                 enc_cache_wf c_out) \<and>
               heap_typing t = heap_typing s \<rbrace>"
-  sorry
+proof (cases "len = (4 :: 32 word)")
+  case True
+  have pending_valid4:
+    "\<forall>j < unat (4 :: 32 word).
+        ptr_valid (heap_typing s)
+          (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+    using pending_valid True by simp
+  have target_room4:
+    "length target + unat (4 :: 32 word) \<le> tgt_len"
+    using target_room True by simp
+  have inst_byte_pending_disj4:
+    "\<forall>i < unat (4 :: 32 word).
+       pending +\<^sub>p uint ((0 :: 32 word) + of_nat i) \<noteq>
+       inst +\<^sub>p uint (sections_t_C.inst_pos_C sec)"
+    using inst_byte_pending_disj True by simp
+  have data_fits4:
+    "\<not> data_cap - sections_t_C.data_pos_C sec < (4 :: 32 word)"
+    using data_fits True by simp
+  have data_valid4:
+    "\<forall>j < unat (4 :: 32 word).
+      ptr_valid (heap_typing s)
+        (data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j))"
+    using data_valid True by simp
+  have data_pending_disj4:
+    "\<forall>i < unat (4 :: 32 word). \<forall>j < unat (4 :: 32 word).
+      data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+      pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)"
+    using data_pending_disj True by simp
+  have data_inj4:
+    "\<forall>i < unat (4 :: 32 word). \<forall>j < unat (4 :: 32 word).
+      i \<noteq> j \<longrightarrow>
+      data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat i) \<noteq>
+      data +\<^sub>p uint (sections_t_C.data_pos_C sec + of_nat j)"
+    using data_inj True by simp
+  have data_prefix_disj4:
+    "\<forall>k < unat (sections_t_C.data_pos_C sec). \<forall>i.
+      i < (4 :: 32 word) \<longrightarrow>
+      data +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+    using data_prefix_disj True by simp
+  have data_no_overflow4:
+    "unat (sections_t_C.data_pos_C sec) + unat (4 :: 32 word) < 2 ^ 32"
+    using data_no_overflow True by simp
+  have data_inst_disj4:
+    "\<forall>k < unat (sections_t_C.inst_pos_C sec + 1). \<forall>i.
+      i < (4 :: 32 word) \<longrightarrow>
+      inst +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+    using data_inst_disj True by simp
+  have data_addr_disj4:
+    "\<forall>k < unat (sections_t_C.addr_pos_C sec). \<forall>i.
+      i < (4 :: 32 word) \<longrightarrow>
+      addr +\<^sub>p int k \<noteq> data +\<^sub>p uint (sections_t_C.data_pos_C sec + i)"
+    using data_addr_disj True by simp
+  have four:
+    "flush_pending' sec data data_cap inst inst_cap pending (4 :: 32 word) \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec' data_bytes' inst_bytes' addr_bytes'.
+            r = Result sec' \<and>
+            enc_sections_inv t data inst addr sec' src_seg tgt_len
+              data_bytes' inst_bytes' addr_bytes'
+              (target @ heap_bytes_word s pending 0 (4 :: 32 word)) c_out \<and>
+            enc_cache_abs t c_out \<and>
+            enc_cache_wf c_out) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+    by (rule flush_pending'_len_four_enc_sections_cache_inv_topdown[
+        OF inv abs cache_wf pending_valid4 size target_room4 sec_ok
+           inst_byte_fits inst_byte_ptr inst_byte_dist
+           inst_byte_data_disj inst_byte_addr_disj inst_byte_pending_disj4
+           inst_varint_fits inst_varint_valid inst_varint_inj
+           inst_varint_prefix_disj inst_varint_no_overflow
+           inst_varint_data_disj inst_varint_addr_disj
+           data_fits4 data_valid4 data_pending_disj4 data_inj4
+           data_prefix_disj4 data_no_overflow4 data_inst_disj4 data_addr_disj4
+           data_byte_fits data_byte_ptr data_byte_dist
+           data_byte_inst_disj data_byte_addr_disj])
+  show ?thesis
+    using True four by simp
+next
+  case False
+  show ?thesis
+    by (rule flush_pending'_len_lt_four_enc_sections_cache_inv_step[
+        OF inv abs cache_wf len_le False pending_valid target_room sec_ok])
+qed
 
 lemma flush_pending'_short_enc_sections_cache_inv_topdown:
   assumes inv:
