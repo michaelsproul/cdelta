@@ -15651,7 +15651,56 @@ lemma try_emit_add_copy'_mode_gt5_success_enc_cache_abs:
                 enc_cache_abs t (cache_update c_out (unat copy_addr)) \<and>
                 enc_cache_wf (cache_update c_out (unat copy_addr))) \<and>
               heap_typing t = heap_typing s \<rbrace>"
-  sorry
+proof -
+  have op_nz:
+    "(0xD2 + (mode_t_C.mode_C m * 4 + pend_len) :: 32 word) \<noteq> 0"
+    using pend_ge pend_le mode_gt mode_le
+    by (auto simp: word_less_nat_alt word_le_nat_alt
+                   word_neq_0_conv unat_word_ariths)
+  have mode_ge: "\<not> mode_t_C.mode_C m < (6 :: 32 word)"
+    using mode_gt by (simp add: word_less_nat_alt)
+  note gets_the_best_mode'_result[runs_to_vcg]
+  note add_copy_opcode'_mode_gt5[runs_to_vcg]
+  show ?thesis
+    unfolding try_emit_add_copy'_def op_def
+    using bm pend_ge pend_le copy_eq mode_gt mode_le sec_ok
+    apply runs_to_vcg
+    apply (auto simp: word_less_nat_alt word_le_nat_alt)
+    apply runs_to_vcg
+    apply (simp_all add: word_less_nat_alt word_le_nat_alt
+                              word_neq_0_conv unat_word_ariths)
+    using op_nz apply simp
+        apply (rule runs_to_weaken[
+          OF write_byte'_success_preserves_enc_cache_abs])
+           apply (rule abs)
+          apply (rule inst_byte_fits)
+         apply (rule inst_byte_ptr)
+       apply clarsimp
+       apply runs_to_vcg
+       apply (rule runs_to_weaken[
+         OF write_bytes'_success_preserves_enc_cache_abs])
+          apply assumption
+         apply (rule data_fits)
+        apply clarsimp
+        using data_valid apply blast
+       apply clarsimp
+       using pending_valid apply blast
+      apply clarsimp
+      apply runs_to_vcg
+      apply (rule runs_to_weaken[
+        OF emit_address'_success_byte_preserves_enc_cache_abs])
+         apply assumption
+        apply (rule mode_ge)
+       apply (rule addr_byte_fits)
+      apply (simp add: addr_byte_ptr)
+     apply clarsimp
+     apply runs_to_vcg
+     apply (rule runs_to_weaken[
+       OF cache_update'_enc_cache_abs_wf[where buf = inst and n = 0]])
+       apply assumption
+      apply (rule cache_wf)
+    using copy_eq by auto
+qed
 
 lemma try_emit_add_copy'_mode_gt5_success_enc_sections_cache_inv:
   fixes op pend_len :: "32 word"
