@@ -10857,10 +10857,171 @@ lemma flush_pending'_len_four_enc_sections_cache_inv_cases:
                   addr_bytes
                   (target @ heap_bytes_word s pending 0 (4 :: 32 word))
                   c_out \<and>
-                enc_cache_abs t c_out \<and>
-                enc_cache_wf c_out)) \<and>
-              heap_typing t = heap_typing s \<rbrace>"
-  sorry
+	                enc_cache_abs t c_out \<and>
+	                enc_cache_wf c_out)) \<and>
+	              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  let ?b0 = "heap_w8 s pending"
+  consider
+      (run) "\<forall>j < unat (4 :: 32 word).
+        heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) = ?b0"
+    | (break1)
+        "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 1)) \<noteq> ?b0"
+    | (break2)
+        "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 1)) = ?b0"
+        "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 2)) \<noteq> ?b0"
+    | (break3)
+        "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 1)) = ?b0"
+        "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 2)) = ?b0"
+        "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 3)) \<noteq> ?b0"
+  proof (cases "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 1)) = ?b0")
+    case False
+    then show ?thesis
+      by (rule break1)
+  next
+    case eq1: True
+    show ?thesis
+    proof (cases "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 2)) = ?b0")
+      case False
+      then show ?thesis
+        by (rule break2[OF eq1])
+    next
+      case eq2: True
+      show ?thesis
+      proof (cases "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat 3)) = ?b0")
+        case False
+        then show ?thesis
+          by (rule break3[OF eq1 eq2])
+      next
+        case eq3: True
+        have all_eq:
+          "\<forall>j < unat (4 :: 32 word).
+            heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) = ?b0"
+        proof (intro allI impI)
+          fix j
+          assume "j < unat (4 :: 32 word)"
+          then have "j = 0 \<or> j = 1 \<or> j = 2 \<or> j = 3"
+            by auto
+          then show
+            "heap_w8 s (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j)) = ?b0"
+            using eq1 eq2 eq3 by auto
+        qed
+        then show ?thesis
+          by (rule run)
+      qed
+    qed
+  qed
+  then show ?thesis
+  proof cases
+    case run
+    have pending_replicate:
+      "heap_bytes_word s pending 0 (4 :: 32 word) =
+       replicate (unat (4 :: 32 word)) ?b0"
+      by (rule heap_bytes_word_replicateI) (use run in auto)
+    have exec:
+      "flush_pending' sec data data_cap inst inst_cap pending (4 :: 32 word) \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            enc_sections_inv t data inst addr sec' src_seg tgt_len
+              (data_bytes @ [?b0])
+              (inst_bytes @ [0] @ varint_bytes32 (4 :: 32 word) n)
+              addr_bytes
+              (target @ replicate (unat (4 :: 32 word)) ?b0)
+              c_out \<and>
+            enc_cache_abs t c_out \<and>
+            enc_cache_wf c_out) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+      by (rule flush_pending'_len_four_run_enc_sections_cache_inv[
+          OF inv abs cache_wf run pending_valid size target_room sec_ok
+             inst_byte_fits inst_byte_ptr inst_byte_dist
+             inst_byte_data_disj inst_byte_addr_disj
+             inst_varint_fits inst_varint_valid inst_varint_inj
+             inst_varint_prefix_disj inst_varint_no_overflow
+             inst_varint_data_disj inst_varint_addr_disj
+             data_byte_fits data_byte_ptr data_byte_dist
+             data_byte_inst_disj data_byte_addr_disj])
+    show ?thesis
+      apply (rule runs_to_weaken[OF exec])
+      using pending_replicate by auto
+  next
+    case break1
+    have exec:
+      "flush_pending' sec data data_cap inst inst_cap pending (4 :: 32 word) \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            enc_sections_inv t data inst addr sec' src_seg tgt_len
+              (data_bytes @ heap_bytes_word s pending 0 (4 :: 32 word))
+              (inst_bytes @ [ucast (1 + (4 :: 32 word))])
+              addr_bytes
+              (target @ heap_bytes_word s pending 0 (4 :: 32 word))
+              c_out \<and>
+            enc_cache_abs t c_out \<and>
+            enc_cache_wf c_out) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+      by (rule flush_pending'_len_four_add_break1_enc_sections_cache_inv[
+          OF inv abs cache_wf break1 pending_valid target_room sec_ok
+             inst_byte_fits inst_byte_ptr inst_byte_dist
+             inst_byte_data_disj inst_byte_addr_disj inst_byte_pending_disj
+             data_fits data_valid data_pending_disj data_inj
+             data_prefix_disj data_no_overflow data_inst_disj data_addr_disj])
+    show ?thesis
+      apply (rule runs_to_weaken[OF exec])
+      by auto
+  next
+    case break2
+    have exec:
+      "flush_pending' sec data data_cap inst inst_cap pending (4 :: 32 word) \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            enc_sections_inv t data inst addr sec' src_seg tgt_len
+              (data_bytes @ heap_bytes_word s pending 0 (4 :: 32 word))
+              (inst_bytes @ [ucast (1 + (4 :: 32 word))])
+              addr_bytes
+              (target @ heap_bytes_word s pending 0 (4 :: 32 word))
+              c_out \<and>
+            enc_cache_abs t c_out \<and>
+            enc_cache_wf c_out) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+      by (rule flush_pending'_len_four_add_break2_enc_sections_cache_inv[
+          OF inv abs cache_wf break2(1) break2(2) pending_valid
+             target_room sec_ok inst_byte_fits inst_byte_ptr inst_byte_dist
+             inst_byte_data_disj inst_byte_addr_disj inst_byte_pending_disj
+             data_fits data_valid data_pending_disj data_inj
+             data_prefix_disj data_no_overflow data_inst_disj data_addr_disj])
+    show ?thesis
+      apply (rule runs_to_weaken[OF exec])
+      by auto
+  next
+    case break3
+    have exec:
+      "flush_pending' sec data data_cap inst inst_cap pending (4 :: 32 word) \<bullet> s
+       \<lbrace> \<lambda>r t.
+          (\<exists>sec'.
+            r = Result sec' \<and>
+            enc_sections_inv t data inst addr sec' src_seg tgt_len
+              (data_bytes @ heap_bytes_word s pending 0 (4 :: 32 word))
+              (inst_bytes @ [ucast (1 + (4 :: 32 word))])
+              addr_bytes
+              (target @ heap_bytes_word s pending 0 (4 :: 32 word))
+              c_out \<and>
+            enc_cache_abs t c_out \<and>
+            enc_cache_wf c_out) \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+      by (rule flush_pending'_len_four_add_break3_enc_sections_cache_inv[
+          OF inv abs cache_wf break3(1) break3(2) break3(3)
+             pending_valid target_room sec_ok inst_byte_fits inst_byte_ptr
+             inst_byte_dist inst_byte_data_disj inst_byte_addr_disj
+             inst_byte_pending_disj data_fits data_valid data_pending_disj
+             data_inj data_prefix_disj data_no_overflow data_inst_disj
+             data_addr_disj])
+    show ?thesis
+      apply (rule runs_to_weaken[OF exec])
+      by auto
+  qed
+qed
 
 lemma flush_pending'_len_four_enc_sections_cache_inv_topdown:
   assumes inv:
