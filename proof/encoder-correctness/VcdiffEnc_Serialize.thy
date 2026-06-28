@@ -1572,7 +1572,38 @@ lemma vcdiff_encode'_compose_phases_topdown:
            \<lbrace> \<lambda>r t. \<exists>n.
                r = Result n \<and>
                encoder_success_post out src_bytes tgt_bytes n s t \<rbrace>"
-  sorry
+proof -
+  have cap_ok: "\<not> pending_cap < tgt_len"
+    using pending_cap_ok by (simp add: word_less_nat_alt)
+  have success_from_window:
+    "\<And>s_index s_window n t.
+      encoder_index_post s s_index src src_len tgt tgt_len head_arr next_arr
+        src_bytes tgt_bytes \<Longrightarrow>
+      heap_typing s_window = heap_typing s_index \<Longrightarrow>
+      encoder_success_post out src_bytes tgt_bytes n s_window t \<Longrightarrow>
+      encoder_success_post out src_bytes tgt_bytes n s t"
+    by (auto simp: encoder_index_post_def encoder_success_post_def)
+  show ?thesis
+    unfolding vcdiff_encode'_def
+    apply (simp add: cap_ok)
+    apply (rule runs_to_bind)
+     apply (rule runs_to_weaken[OF build_phase])
+     apply simp
+    subgoal for s_index
+      apply (rule runs_to_bind)
+       apply (rule runs_to_weaken[OF window_phase])
+        apply assumption
+       apply simp
+      apply clarsimp
+      subgoal for s_window sec
+        apply (simp add: encoder_window_post_def)
+        apply (rule runs_to_weaken[OF serialize_phase])
+         apply (simp add: encoder_window_post_def)
+        using success_from_window
+        by auto
+      done
+    done
+qed
 
 theorem vcdiff_encode'_writes_encode_spec_topdown:
   fixes out src tgt pending data inst addr :: "8 word ptr"
