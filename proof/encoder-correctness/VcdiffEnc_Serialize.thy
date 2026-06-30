@@ -2191,7 +2191,45 @@ lemma encoder_index_post_encode_window_match_rel:
       src_bytes tgt_bytes"
   shows "encode_window_match_rel s src src_len tgt tgt_len head_arr next_arr
       src_bytes tgt_bytes"
-  sorry
+proof -
+  have rel: "source_index_heap_rel s src_bytes head_arr next_arr"
+    using index by (simp add: encoder_index_post_def)
+  have nexts_wf: "source_index_heap_nexts_wf s src_bytes next_arr"
+    using index by (simp add: encoder_index_post_def)
+  have closed: "source_index_heap_chains_closed s src_bytes head_arr next_arr"
+    using index by (simp add: encoder_index_post_def)
+  have src_bytes_eq: "src_bytes = heap_bytes s src (unat src_len)"
+    using index by (simp add: encoder_index_post_def)
+  have tgt_bytes_eq: "tgt_bytes = heap_bytes s tgt (unat tgt_len)"
+    using index by (simp add: encoder_index_post_def)
+  have typing: "heap_typing s = heap_typing s0"
+    using index by (simp add: encoder_index_post_def)
+  have tgt_ok0: "buf_valid s0 tgt (unat tgt_len)"
+    using buffers by (simp add: encoder_buffers_ok_def)
+  have tgt_ok: "buf_valid s tgt (unat tgt_len)"
+    using tgt_ok0 typing by (simp add: buf_valid_def)
+  show ?thesis
+    unfolding encode_window_match_rel_def
+  proof (intro allI impI conjI)
+    fix tp m
+    assume tp_le: "tp \<le> tgt_len"
+      and result:
+        "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+          Some m"
+    show "m = (let best =
+              find_best_match_spec src_bytes tgt_bytes (unat tp)
+                (build_index_spec src_bytes)
+            in match_t_C (of_nat (em_pos best)) (of_nat (em_len best)))"
+      unfolding Let_def
+      by (rule find_best_match'_eq_find_best_match_spec_bytes[
+          OF src_bytes_eq tgt_bytes_eq rel closed nexts_wf tp_le tgt_ok
+             result])
+    show "match_valid src_bytes tgt_bytes (unat tp)
+      (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
+      by (rule find_best_match'_match_valid_heap_bytes_source_index_bytes[
+          OF src_bytes_eq tgt_bytes_eq rel nexts_wf tp_le result])
+  qed
+qed
 
 lemma encode_window_initial_loop_rel:
   assumes input:
