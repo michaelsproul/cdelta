@@ -2005,6 +2005,356 @@ proof -
     done
 qed
 
+definition encode_window_final_spec_state ::
+  "byte list \<Rightarrow> byte list \<Rightarrow> enc_full_state" where
+  "encode_window_final_spec_state src_bytes tgt_bytes =
+     encode_window_full_loop (length tgt_bytes + 1) src_bytes tgt_bytes
+       (build_index_spec src_bytes) enc_full_init"
+
+definition encode_window_loop_buffers_ok ::
+  "lifted_globals \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow> bool" where
+  "encode_window_loop_buffers_ok s src src_len tgt tgt_len
+      pending pending_cap data data_cap inst inst_cap addr addr_cap \<longleftrightarrow>
+     buf_valid s src (unat src_len) \<and>
+     buf_valid s tgt (unat tgt_len) \<and>
+     buf_valid s pending (unat pending_cap) \<and>
+     buf_valid s data (unat data_cap) \<and>
+     buf_valid s inst (unat inst_cap) \<and>
+     buf_valid s addr (unat addr_cap) \<and>
+     ptr_range_distinct src (unat src_len) \<and>
+     ptr_range_distinct tgt (unat tgt_len) \<and>
+     ptr_range_distinct pending (unat pending_cap) \<and>
+     ptr_range_distinct data (unat data_cap) \<and>
+     ptr_range_distinct inst (unat inst_cap) \<and>
+     ptr_range_distinct addr (unat addr_cap) \<and>
+     unat tgt_len \<le> unat pending_cap \<and>
+     unat tgt_len + 64 \<le> unat data_cap \<and>
+     unat tgt_len + 64 \<le> unat inst_cap \<and>
+     unat tgt_len + 64 \<le> unat addr_cap \<and>
+     bufs_disjoint pending (unat pending_cap) src (unat src_len) \<and>
+     bufs_disjoint pending (unat pending_cap) tgt (unat tgt_len) \<and>
+     bufs_disjoint pending (unat pending_cap) data (unat data_cap) \<and>
+     bufs_disjoint pending (unat pending_cap) inst (unat inst_cap) \<and>
+     bufs_disjoint pending (unat pending_cap) addr (unat addr_cap) \<and>
+     bufs_disjoint data (unat data_cap) src (unat src_len) \<and>
+     bufs_disjoint data (unat data_cap) tgt (unat tgt_len) \<and>
+     bufs_disjoint data (unat data_cap) inst (unat inst_cap) \<and>
+     bufs_disjoint data (unat data_cap) addr (unat addr_cap) \<and>
+     bufs_disjoint inst (unat inst_cap) src (unat src_len) \<and>
+     bufs_disjoint inst (unat inst_cap) tgt (unat tgt_len) \<and>
+     bufs_disjoint inst (unat inst_cap) addr (unat addr_cap) \<and>
+     bufs_disjoint addr (unat addr_cap) src (unat src_len) \<and>
+     bufs_disjoint addr (unat addr_cap) tgt (unat tgt_len)"
+
+lemma encoder_buffers_ok_encode_window_loop_buffers_ok:
+  assumes buffers:
+    "encoder_buffers_ok s out out_cap src src_len tgt tgt_len head_arr next_arr
+      pending pending_cap data data_cap inst inst_cap addr addr_cap"
+  shows "encode_window_loop_buffers_ok s src src_len tgt tgt_len
+      pending pending_cap data data_cap inst inst_cap addr addr_cap"
+  using buffers
+  by (simp add: encoder_buffers_ok_def encode_window_loop_buffers_ok_def)
+
+definition encode_window_match_rel ::
+  "lifted_globals \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   32 word ptr \<Rightarrow> 32 word ptr \<Rightarrow>
+   byte list \<Rightarrow> byte list \<Rightarrow> bool" where
+  "encode_window_match_rel s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes \<longleftrightarrow>
+     (\<forall>tp m. tp \<le> tgt_len \<longrightarrow>
+        find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+          Some m \<longrightarrow>
+        m = (let best =
+               find_best_match_spec src_bytes tgt_bytes (unat tp)
+                 (build_index_spec src_bytes)
+             in match_t_C (of_nat (em_pos best)) (of_nat (em_len best))) \<and>
+        match_valid src_bytes tgt_bytes (unat tp)
+          (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m)))"
+
+definition encode_window_loop_rel ::
+  "lifted_globals \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   8 word ptr \<Rightarrow> 32 word \<Rightarrow>
+   sections_t_C \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow>
+   byte list \<Rightarrow> byte list \<Rightarrow> enc_full_state \<Rightarrow> bool" where
+  "encode_window_loop_rel s src src_len tgt tgt_len
+      data data_cap inst inst_cap addr addr_cap pending pending_cap
+      sec tp pend_len src_bytes tgt_bytes spec_st \<longleftrightarrow>
+     heap_bytes s src (unat src_len) = src_bytes \<and>
+     heap_bytes s tgt (unat tgt_len) = tgt_bytes \<and>
+     length src_bytes = unat src_len \<and>
+     length tgt_bytes = unat tgt_len \<and>
+     heap_bytes_word s pending (0 :: 32 word) pend_len =
+       enc_pending spec_st \<and>
+     length (enc_pending spec_st) = unat pend_len \<and>
+     enc_tp spec_st = unat tp \<and>
+     enc_flushed spec_st + length (enc_pending spec_st) = enc_tp spec_st \<and>
+     enc_sections_state_rel s data inst addr sec spec_st \<and>
+     sections_t_C.err_C sec = ENC_OK \<and>
+     unat pend_len \<le> unat pending_cap \<and>
+     unat (sections_t_C.data_pos_C sec) \<le> unat data_cap \<and>
+     unat (sections_t_C.inst_pos_C sec) \<le> unat inst_cap \<and>
+     unat (sections_t_C.addr_pos_C sec) \<le> unat addr_cap"
+
+lemma encoder_index_post_encode_window_match_rel:
+  assumes buffers:
+    "encoder_buffers_ok s0 out out_cap src src_len tgt tgt_len head_arr next_arr
+      pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      and index:
+    "encoder_index_post s0 s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
+  shows "encode_window_match_rel s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
+  sorry
+
+lemma encode_window_initial_loop_rel:
+  assumes input:
+    "encoder_input_rel s0 src src_len tgt tgt_len src_bytes tgt_bytes"
+      and buffers:
+    "encode_window_loop_buffers_ok s src src_len tgt tgt_len
+      pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      and sec_zero:
+    "sections_t_C.data_pos_C sec = 0"
+    "sections_t_C.inst_pos_C sec = 0"
+    "sections_t_C.addr_pos_C sec = 0"
+    "sections_t_C.err_C sec = ENC_OK"
+      and bytes:
+    "heap_bytes s src (unat src_len) = src_bytes"
+    "heap_bytes s tgt (unat tgt_len) = tgt_bytes"
+    "length src_bytes = unat src_len"
+    "length tgt_bytes = unat tgt_len"
+  shows "encode_window_loop_rel s src src_len tgt tgt_len
+      data data_cap inst inst_cap addr addr_cap pending pending_cap
+      sec 0 0 src_bytes tgt_bytes enc_full_init"
+  sorry
+
+lemma encode_window_pending_byte_step_topdown:
+  assumes rel:
+    "encode_window_loop_rel s src src_len tgt tgt_len
+      data data_cap inst inst_cap addr addr_cap pending pending_cap
+      sec tp pend_len src_bytes tgt_bytes spec_st"
+      and tp_lt: "tp < tgt_len"
+      and short: "match_t_C.len_C m < (of_nat min_match :: 32 word)"
+      and match:
+    "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+      Some m"
+  shows "\<exists>spec_st'.
+      spec_st' = buffer_pending_byte_spec (tgt_bytes ! unat tp) spec_st \<and>
+      enc_tp spec_st' = Suc (enc_tp spec_st)"
+  sorry
+
+lemma encode_window_try_fused_copy_step_topdown:
+  assumes rel:
+    "encode_window_loop_rel s src src_len tgt tgt_len
+      data data_cap inst inst_cap addr addr_cap pending pending_cap
+      sec tp pend_len src_bytes tgt_bytes spec_st"
+      and match_len: "(of_nat min_match :: 32 word) \<le> match_t_C.len_C m"
+      and fused:
+    "try_emit_add_copy_spec (length src_bytes)
+      (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m)) spec_st =
+      Some spec_st'"
+  shows "\<exists>sec' t.
+      enc_sections_state_rel t data inst addr sec' spec_st' \<and>
+      sections_t_C.err_C sec' = ENC_OK"
+  sorry
+
+lemma encode_window_flush_then_copy_step_topdown:
+  assumes rel:
+    "encode_window_loop_rel s src src_len tgt tgt_len
+      data data_cap inst inst_cap addr addr_cap pending pending_cap
+      sec tp pend_len src_bytes tgt_bytes spec_st"
+      and match_len: "(of_nat min_match :: 32 word) \<le> match_t_C.len_C m"
+      and fused_none:
+    "try_emit_add_copy_spec (length src_bytes)
+      (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m)) spec_st =
+      None"
+  shows "\<exists>sec' t.
+      enc_sections_state_rel t data inst addr sec'
+        (flush_then_emit_copy_spec (length src_bytes)
+          (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m)) spec_st) \<and>
+      sections_t_C.err_C sec' = ENC_OK"
+  sorry
+
+lemma encode_window_match_step_topdown:
+  assumes rel:
+    "encode_window_loop_rel s src src_len tgt tgt_len
+      data data_cap inst inst_cap addr addr_cap pending pending_cap
+      sec tp pend_len src_bytes tgt_bytes spec_st"
+      and match_rel:
+    "encode_window_match_rel s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
+      and tp_lt: "tp < tgt_len"
+      and match:
+    "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+      Some m"
+      and match_len: "(of_nat min_match :: 32 word) \<le> match_t_C.len_C m"
+  shows "\<exists>spec_st'. enc_tp spec_st < enc_tp spec_st'"
+proof -
+  have fused_case:
+    "\<And>spec_st'. try_emit_add_copy_spec (length src_bytes)
+        (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m)) spec_st =
+        Some spec_st' \<Longrightarrow>
+      \<exists>sec' t.
+        enc_sections_state_rel t data inst addr sec' spec_st' \<and>
+        sections_t_C.err_C sec' = ENC_OK"
+    by (rule encode_window_try_fused_copy_step_topdown[OF rel match_len])
+  have fallback_case:
+    "try_emit_add_copy_spec (length src_bytes)
+        (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m)) spec_st =
+        None \<Longrightarrow>
+      \<exists>sec' t.
+        enc_sections_state_rel t data inst addr sec'
+          (flush_then_emit_copy_spec (length src_bytes)
+            (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m)) spec_st) \<and>
+        sections_t_C.err_C sec' = ENC_OK"
+    by (rule encode_window_flush_then_copy_step_topdown[OF rel match_len])
+  show ?thesis
+  sorry
+qed
+
+lemma encode_window_loop_body_topdown:
+  assumes rel:
+    "encode_window_loop_rel s src src_len tgt tgt_len
+      data data_cap inst inst_cap addr addr_cap pending pending_cap
+      sec tp pend_len src_bytes tgt_bytes spec_st"
+      and match_rel:
+    "encode_window_match_rel s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
+      and tp_lt: "tp < tgt_len"
+  shows "\<exists>spec_st'. enc_tp spec_st < enc_tp spec_st'"
+proof -
+  have pending_case:
+    "\<And>m. \<lbrakk>
+      match_t_C.len_C m < (of_nat min_match :: 32 word);
+      find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+        Some m
+    \<rbrakk> \<Longrightarrow>
+      \<exists>spec_st'.
+        spec_st' = buffer_pending_byte_spec (tgt_bytes ! unat tp) spec_st \<and>
+        enc_tp spec_st' = Suc (enc_tp spec_st)"
+    by (rule encode_window_pending_byte_step_topdown[OF rel tp_lt])
+  have match_case:
+    "\<And>m. \<lbrakk>
+      find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+        Some m;
+      (of_nat min_match :: 32 word) \<le> match_t_C.len_C m
+    \<rbrakk> \<Longrightarrow> \<exists>spec_st'. enc_tp spec_st < enc_tp spec_st'"
+    by (rule encode_window_match_step_topdown[OF rel match_rel tp_lt])
+  show ?thesis
+  sorry
+qed
+
+lemma encode_window_while_loop_topdown:
+  fixes src tgt data inst addr pending :: "8 word ptr"
+    and src_len tgt_len data_cap inst_cap addr_cap pending_cap :: "32 word"
+    and head_arr next_arr :: "32 word ptr"
+  assumes input:
+    "encoder_input_rel s0 src src_len tgt tgt_len src_bytes tgt_bytes"
+      and buffers:
+    "encoder_buffers_ok s0 out out_cap src src_len tgt tgt_len head_arr next_arr
+      pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      and index:
+    "encoder_index_post s0 s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
+      and fit:
+    "sections_fit_32 src_bytes tgt_bytes
+      (encode_window_full_spec src_bytes tgt_bytes)"
+  shows "\<exists>spec_st.
+      spec_st = encode_window_final_spec_state src_bytes tgt_bytes"
+proof -
+  have match_rel:
+    "encode_window_match_rel s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
+    by (rule encoder_index_post_encode_window_match_rel[OF buffers index])
+  have loop_buffers0:
+    "encode_window_loop_buffers_ok s0 src src_len tgt tgt_len
+      pending pending_cap data data_cap inst inst_cap addr addr_cap"
+    by (rule encoder_buffers_ok_encode_window_loop_buffers_ok[OF buffers])
+  have body_progress:
+    "\<And>sec tp pend_len spec_st. \<lbrakk>
+      encode_window_loop_rel s src src_len tgt tgt_len
+        data data_cap inst inst_cap addr addr_cap pending pending_cap
+        sec tp pend_len src_bytes tgt_bytes spec_st;
+      tp < tgt_len
+    \<rbrakk> \<Longrightarrow> \<exists>spec_st'. enc_tp spec_st < enc_tp spec_st'"
+    by (rule encode_window_loop_body_topdown[OF _ match_rel])
+  show ?thesis
+  sorry
+qed
+
+lemma encode_window_final_flush_topdown:
+  fixes src tgt data inst addr pending :: "8 word ptr"
+    and src_len tgt_len data_cap inst_cap addr_cap pending_cap :: "32 word"
+    and head_arr next_arr :: "32 word ptr"
+  assumes input:
+    "encoder_input_rel s0 src src_len tgt tgt_len src_bytes tgt_bytes"
+      and buffers:
+    "encoder_buffers_ok s0 out out_cap src src_len tgt tgt_len head_arr next_arr
+      pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      and index:
+    "encoder_index_post s0 s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
+      and fit:
+    "sections_fit_32 src_bytes tgt_bytes
+      (encode_window_full_spec src_bytes tgt_bytes)"
+  shows "\<exists>spec_st.
+      spec_st = encode_window_final_spec_state src_bytes tgt_bytes"
+proof -
+  have loop_done:
+    "\<exists>spec_st.
+      spec_st = encode_window_final_spec_state src_bytes tgt_bytes"
+    by (rule encode_window_while_loop_topdown[OF input buffers index fit])
+  show ?thesis
+  sorry
+qed
+
+lemma encode_window_phase_core_topdown:
+  fixes src tgt data inst addr pending :: "8 word ptr"
+    and src_len tgt_len data_cap inst_cap addr_cap pending_cap :: "32 word"
+    and head_arr next_arr :: "32 word ptr"
+  assumes input:
+        "encoder_input_rel s0 src src_len tgt tgt_len src_bytes tgt_bytes"
+      and buffers:
+        "encoder_buffers_ok s0 out out_cap src src_len tgt tgt_len head_arr next_arr
+          pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      and index:
+        "encoder_index_post s0 s src src_len tgt tgt_len head_arr next_arr
+          src_bytes tgt_bytes"
+      and fit:
+        "sections_fit_32 src_bytes tgt_bytes
+          (encode_window_full_spec src_bytes tgt_bytes)"
+  shows "encode_window' src src_len tgt tgt_len head_arr next_arr
+            data data_cap inst inst_cap addr addr_cap pending pending_cap \<bullet> s
+           \<lbrace> \<lambda>r t. \<exists>sec spec_st.
+               r = Result sec \<and>
+               spec_st = encode_window_final_spec_state src_bytes tgt_bytes \<and>
+               enc_sections_state_rel t data inst addr sec spec_st \<and>
+               sections_t_C.err_C sec = ENC_OK \<and>
+               encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
+               heap_bytes t src (unat src_len) = src_bytes \<and>
+               heap_bytes t tgt (unat tgt_len) = tgt_bytes \<and>
+               heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have final_spec:
+    "\<exists>spec_st.
+      spec_st = encode_window_final_spec_state src_bytes tgt_bytes"
+    by (rule encode_window_final_flush_topdown[OF input buffers index fit])
+  show ?thesis
+  sorry
+qed
+
 lemma vcdiff_encode'_encode_window_phase_topdown:
   fixes src tgt data inst addr pending :: "8 word ptr"
     and src_len tgt_len data_cap inst_cap addr_cap pending_cap :: "32 word"
@@ -2029,7 +2379,50 @@ lemma vcdiff_encode'_encode_window_phase_topdown:
                heap_bytes t src (unat src_len) = src_bytes \<and>
                heap_bytes t tgt (unat tgt_len) = tgt_bytes \<and>
                heap_typing t = heap_typing s \<rbrace>"
-  sorry
+proof (rule runs_to_weaken[
+    OF encode_window_phase_core_topdown[
+      OF input buffers index fit]])
+  fix r t
+  assume post:
+    "\<exists>sec spec_st.
+      r = Result sec \<and>
+      spec_st = encode_window_final_spec_state src_bytes tgt_bytes \<and>
+      enc_sections_state_rel t data inst addr sec spec_st \<and>
+      sections_t_C.err_C sec = ENC_OK \<and>
+      encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
+      heap_bytes t src (unat src_len) = src_bytes \<and>
+      heap_bytes t tgt (unat tgt_len) = tgt_bytes \<and>
+      heap_typing t = heap_typing s"
+  then obtain sec spec_st where
+      r_def: "r = Result sec"
+    and spec_st:
+      "spec_st = encode_window_final_spec_state src_bytes tgt_bytes"
+    and rel: "enc_sections_state_rel t data inst addr sec spec_st"
+    and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+    and caps: "encoder_window_caps_ok sec data_cap inst_cap addr_cap"
+    and src_heap: "heap_bytes t src (unat src_len) = src_bytes"
+    and tgt_heap: "heap_bytes t tgt (unat tgt_len) = tgt_bytes"
+    and typing: "heap_typing t = heap_typing s"
+    by blast
+  have emitted:
+    "emitted_sections t data inst addr sec
+      (efr_data (encode_window_full_spec src_bytes tgt_bytes))
+      (efr_inst (encode_window_full_spec src_bytes tgt_bytes))
+      (efr_addr (encode_window_full_spec src_bytes tgt_bytes))"
+    using rel spec_st
+    by (simp add: enc_sections_state_rel_def
+      encode_window_final_spec_state_def encode_window_full_spec_def
+      enc_full_result_of_state_def Let_def)
+  show "\<exists>sec.
+      r = Result sec \<and>
+      encoder_window_post t data inst addr sec src_bytes tgt_bytes \<and>
+      encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
+      heap_bytes t src (unat src_len) = src_bytes \<and>
+      heap_bytes t tgt (unat tgt_len) = tgt_bytes \<and>
+      heap_typing t = heap_typing s"
+    using r_def fit sec_ok emitted caps src_heap tgt_heap typing
+    by (auto simp: encoder_window_post_def)
+qed
 
 lemma vcdiff_encode'_serialize_phase_topdown:
   fixes out data inst addr :: "8 word ptr"

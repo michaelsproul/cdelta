@@ -120,6 +120,30 @@ through low-level C helpers such as `flush_pending'`.
   success path, assuming `sections_fit_32 src_bytes tgt_bytes
   (encode_window_full_spec src_bytes tgt_bytes)` and sufficient buffers.
 
+## 2026-06-30 encode-window proof plan
+
+The remaining active hole is the `encode_window'` phase.  The proof should
+continue the updated C-shaped refinement strategy, not the obsolete
+`section_decodes` window-loop proof.  The target is a simulation from the
+AutoCorres monad to the pure encoder state machine:
+
+- C section buffers are related to `enc_full_state` by
+  `enc_sections_state_rel`.
+- The loop cursor `tp`, pending buffer `[0..pend_len)`, section cursors,
+  source/target heap slices, source-index arrays, cache state, and capacity
+  facts are carried by a window-loop relation.
+- Match lookup is packaged as an all-`tp` relation derived from
+  `encoder_index_post`, `source_index_heap_rel`, and the existing
+  `find_best_match'` refinement lemmas.
+- The pending-byte, fused ADD+COPY, flush-then-COPY, loop, and final-flush
+  facts should be stated top-down as named lemmas.  Temporary `sorry`s are
+  acceptable only when those lemmas are wired into the exported
+  `vcdiff_encode'_encode_window_phase_topdown` theorem.
+- The final bridge to `encoder_window_post` unfolds
+  `encode_window_full_spec`/`enc_full_result_of_state` and extracts
+  `emitted_sections` from `enc_sections_state_rel`.  The theorem remains a
+  fast-path theorem under `sections_fit_32` and C-compatible buffers.
+
 Remaining encoder-refinement proof debt:
 
 - Package a caller-friendly `flush_pending'` wrapper that derives the current
