@@ -2250,7 +2250,15 @@ lemma encode_window_initial_loop_rel:
   shows "encode_window_loop_rel s src src_len tgt tgt_len
       data data_cap inst inst_cap addr addr_cap pending pending_cap
       sec 0 0 src_bytes tgt_bytes enc_full_init"
-  sorry
+proof -
+  have sections:
+    "enc_sections_state_rel s data inst addr sec enc_full_init"
+    by (rule enc_sections_state_rel_empty[OF sec_zero(1-3)])
+  show ?thesis
+    unfolding encode_window_loop_rel_def
+    using bytes sec_zero sections
+    by (simp add: enc_full_init_def heap_bytes_word_def)
+qed
 
 lemma encode_window_pending_byte_step_topdown:
   assumes rel:
