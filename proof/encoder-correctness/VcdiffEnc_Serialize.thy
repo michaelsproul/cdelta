@@ -2717,6 +2717,9 @@ lemma encode_window_loop_body_topdown:
       pending pending_cap data data_cap inst inst_cap addr addr_cap"
       and pend_lt: "pend_len < pending_cap"
       and tp_lt: "tp < tgt_len"
+      and match_result:
+    "\<exists>m. find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+      Some m"
   shows "encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
             data data_cap inst inst_cap addr addr_cap pending pending_cap
             (pend_len, sec, tp) \<bullet> s
@@ -2774,7 +2777,67 @@ proof -
                  unat tgt_len - unat tp) \<rbrace>"
     by (rule encode_window_match_step_topdown[OF rel match_rel tp_lt])
   show ?thesis
-  sorry
+  proof -
+    obtain m where m_result:
+      "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+        Some m"
+      using match_result by blast
+    show ?thesis
+    proof (cases "match_t_C.len_C m < (of_nat min_match :: 32 word)")
+      case True
+      show ?thesis
+      proof (rule runs_to_weaken[OF pending_case[OF True m_result]])
+        fix r t
+        assume post:
+          "\<exists>sec' tp' pend_len' spec_st'.
+            r = Result (pend_len', sec', tp') \<and>
+            spec_st' = buffer_pending_byte_spec (tgt_bytes ! unat tp)
+              spec_st \<and>
+            encode_window_loop_rel t src src_len tgt tgt_len
+              data data_cap inst inst_cap addr addr_cap pending pending_cap
+              sec' tp' pend_len' src_bytes tgt_bytes spec_st' \<and>
+            (((pend_len', sec', tp'), t), ((pend_len, sec, tp), s)) \<in>
+              measure
+                (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
+                   unat tgt_len - unat tp)"
+        then obtain sec' tp' pend_len' spec_st' where
+          r_eq: "r = Result (pend_len', sec', tp')"
+          and spec_eq:
+            "spec_st' = buffer_pending_byte_spec (tgt_bytes ! unat tp)
+              spec_st"
+          and rel':
+            "encode_window_loop_rel t src src_len tgt tgt_len
+              data data_cap inst inst_cap addr addr_cap pending pending_cap
+              sec' tp' pend_len' src_bytes tgt_bytes spec_st'"
+          and meas:
+            "(((pend_len', sec', tp'), t), ((pend_len, sec, tp), s)) \<in>
+              measure
+                (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
+                   unat tgt_len - unat tp)"
+          by blast
+        have progress: "enc_tp spec_st < enc_tp spec_st'"
+          using spec_eq by (simp add: buffer_pending_byte_spec_def)
+        show "\<exists>sec' tp' pend_len' spec_st'.
+          r = Result (pend_len', sec', tp') \<and>
+          encode_window_loop_rel t src src_len tgt tgt_len
+            data data_cap inst inst_cap addr addr_cap pending pending_cap
+            sec' tp' pend_len' src_bytes tgt_bytes spec_st' \<and>
+          enc_tp spec_st < enc_tp spec_st' \<and>
+          (((pend_len', sec', tp'), t), ((pend_len, sec, tp), s)) \<in>
+            measure
+              (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
+                 unat tgt_len - unat tp)"
+          using r_eq rel' progress meas by blast
+      qed
+    next
+      case False
+      have match_len:
+        "(of_nat min_match :: 32 word) \<le> match_t_C.len_C m"
+        using False by simp
+      show ?thesis
+        by (rule match_case[OF m_result match_len])
+    qed
+  qed
 qed
 
 lemma encode_window_while_loop_topdown:
@@ -2827,7 +2890,9 @@ proof -
       encode_window_loop_buffers_ok s src src_len tgt tgt_len
         pending pending_cap data data_cap inst inst_cap addr addr_cap;
       pend_len < pending_cap;
-      tp < tgt_len
+      tp < tgt_len;
+      \<exists>m. find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+        Some m
     \<rbrakk> \<Longrightarrow>
       encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
         data data_cap inst inst_cap addr addr_cap pending pending_cap
