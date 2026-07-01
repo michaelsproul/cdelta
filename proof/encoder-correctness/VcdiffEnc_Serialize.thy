@@ -1882,6 +1882,89 @@ definition encoder_index_post ::
      heap_bytes t tgt (unat tgt_len) = tgt_bytes \<and>
      heap_typing t = heap_typing s"
 
+lemma near_reset_loop_preserves_encoder_index_post:
+  assumes index:
+    "encoder_index_post s0 s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
+  shows "(whileLoop (\<lambda>idx st. idx < (4 :: 32 word))
+      (\<lambda>idx. do {
+          modify (near_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+    \<lbrace> \<lambda>r t. r = Result (4 :: 32 word) \<and>
+          encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+            src_bytes tgt_bytes \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+     where R = "measure (\<lambda>((idx :: 32 word), _). 4 - unat idx)"
+       and I = "\<lambda>idx st. unat idx \<le> 4 \<and>
+              encoder_index_post s0 st src src_len tgt tgt_len head_arr
+                next_arr src_bytes tgt_bytes"])
+  subgoal by simp
+  subgoal using index by simp
+  subgoal for idx st
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (subst word_unat_eq_iff)
+    apply simp
+    done
+  subgoal for idx st
+    apply runs_to_vcg
+    apply (auto simp: word_less_nat_alt unat_word_ariths(1)
+      encoder_index_post_def source_index_heap_rel_def
+      source_index_heap_nexts_wf_def source_index_heap_chains_closed_def
+      heap_w32_list_def)
+    done
+  done
+
+lemma same_reset_loop_preserves_encoder_index_post:
+  assumes index:
+    "encoder_index_post s0 s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
+  shows "(whileLoop (\<lambda>idx st. idx < (0x300 :: 32 word))
+      (\<lambda>idx. do {
+          modify (same_arr_''_update (\<lambda>a. Arrays.update a (unat idx) 0));
+          return (idx + 1)
+        }) (0 :: 32 word) :: (32 word, lifted_globals) res_monad) \<bullet> s
+    \<lbrace> \<lambda>r t. r = Result (0x300 :: 32 word) \<and>
+          encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+            src_bytes tgt_bytes \<rbrace>"
+  apply (rule runs_to_whileLoop_res'[
+     where R = "measure (\<lambda>((idx :: 32 word), _). 768 - unat idx)"
+       and I = "\<lambda>idx st. unat idx \<le> 768 \<and>
+              encoder_index_post s0 st src src_len tgt tgt_len head_arr
+                next_arr src_bytes tgt_bytes"])
+  subgoal by simp
+  subgoal using index by simp
+  subgoal for idx st
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (subst word_unat_eq_iff)
+    apply simp
+    done
+  subgoal for idx st
+    apply runs_to_vcg
+    apply (auto simp: word_less_nat_alt unat_word_ariths(1)
+      encoder_index_post_def source_index_heap_rel_def
+      source_index_heap_nexts_wf_def source_index_heap_chains_closed_def
+      heap_w32_list_def)
+    done
+  done
+
+lemma cache_reset'_preserves_encoder_index_post:
+  assumes index:
+    "encoder_index_post s0 s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
+  shows "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+          encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+            src_bytes tgt_bytes \<rbrace>"
+  unfolding cache_reset'_def
+  supply near_reset_loop_preserves_encoder_index_post[runs_to_vcg]
+  supply same_reset_loop_preserves_encoder_index_post[runs_to_vcg]
+  apply runs_to_vcg
+  using index
+  by (auto simp: encoder_index_post_def source_index_heap_rel_def
+      source_index_heap_nexts_wf_def source_index_heap_chains_closed_def
+      heap_w32_list_def)
+
 definition encoder_window_post ::
   "lifted_globals \<Rightarrow> 8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow> 8 word ptr \<Rightarrow>
    sections_t_C \<Rightarrow> byte list \<Rightarrow> byte list \<Rightarrow> bool" where
@@ -2178,34 +2261,30 @@ definition encode_window_c_loop_body ::
               return (pend_len + 1, sec, tp + 1)
             })))
         (do {
-           here \<leftarrow> return (src_len + tp);
            f \<leftarrow> liftE
                 (try_emit_add_copy' sec data data_cap inst inst_cap
                   addr addr_cap pending pend_len
-                  (match_t_C.pos_C m) here (match_t_C.len_C m));
+                  (match_t_C.pos_C m) (src_len + tp) (match_t_C.len_C m));
            unless (sections_t_C.err_C (fused_t_C.s_C f) = 0)
             (throw (fused_t_C.s_C f));
            condition (\<lambda>s. fused_t_C.fused_C f \<noteq> 0)
              (do {
-                consumed \<leftarrow> return (fused_t_C.fused_C f);
-                sec \<leftarrow> return (fused_t_C.s_C f);
-                tp \<leftarrow> return (tp + consumed);
                 (sec, tp) \<leftarrow>
-                  condition (\<lambda>s. consumed < match_t_C.len_C m)
+                  condition (\<lambda>s. fused_t_C.fused_C f < match_t_C.len_C m)
                     (do {
-                       rem \<leftarrow> return (match_t_C.len_C m - consumed);
                        sec \<leftarrow> liftE
-                         (emit_copy' sec inst inst_cap addr addr_cap
-                           (match_t_C.pos_C m + consumed)
-                           (src_len + tp) rem);
+                         (emit_copy' (fused_t_C.s_C f) inst inst_cap
+                           addr addr_cap
+                           (match_t_C.pos_C m + fused_t_C.fused_C f)
+                           (src_len + (tp + fused_t_C.fused_C f))
+                           (match_t_C.len_C m - fused_t_C.fused_C f));
                        unless (sections_t_C.err_C sec = 0) (throw sec);
-                       return (sec, tp + rem)
+                       return (sec, tp + match_t_C.len_C m)
                      })
-                    (return (sec, tp));
+                    (return (fused_t_C.s_C f, tp + fused_t_C.fused_C f));
                 return (0, sec, tp)
               })
              (do {
-                (pend_len, sec, tp) \<leftarrow> return (pend_len, sec, tp);
                 (pend_len, sec) \<leftarrow>
                   condition (\<lambda>s. 0 < pend_len)
                     (do {
@@ -2218,7 +2297,7 @@ definition encode_window_c_loop_body ::
                     (return (pend_len, sec));
                 sec \<leftarrow> liftE
                   (emit_copy' sec inst inst_cap addr addr_cap
-                    (match_t_C.pos_C m) here (match_t_C.len_C m));
+                    (match_t_C.pos_C m) (src_len + tp) (match_t_C.len_C m));
                 unless (sections_t_C.err_C sec = 0) (throw sec);
                 return (pend_len, sec, tp + match_t_C.len_C m)
               })
@@ -2872,7 +2951,9 @@ lemma encode_window_while_loop_topdown:
                 data data_cap inst inst_cap addr addr_cap pending pending_cap
                 sec tp pend_len src_bytes tgt_bytes spec_st \<and>
               flush_pending_spec (length src_bytes) spec_st =
-                encode_window_final_spec_state src_bytes tgt_bytes \<rbrace>"
+                encode_window_final_spec_state src_bytes tgt_bytes \<and>
+              encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+                src_bytes tgt_bytes \<rbrace>"
 proof -
   have match_rel:
     "encode_window_match_rel s src src_len tgt tgt_len head_arr next_arr
@@ -2941,7 +3022,7 @@ lemma encode_window_final_flush_topdown:
               (return sec)) >>= throw) ::
           (sections_t_C, sections_t_C, lifted_globals) exn_monad) \<bullet> s
          \<lbrace> \<lambda>r t. \<exists>sec'.
-              r = Result sec' \<and>
+              r = Exn sec' \<and>
               enc_sections_state_rel t data inst addr sec'
                 (encode_window_final_spec_state src_bytes tgt_bytes) \<and>
               sections_t_C.err_C sec' = ENC_OK \<and>
@@ -2995,8 +3076,131 @@ proof -
     "encode_window_loop_buffers_ok s0 src src_len tgt tgt_len
       pending pending_cap data data_cap inst inst_cap addr addr_cap"
     by (rule encoder_buffers_ok_encode_window_loop_buffers_ok[OF buffers])
+  have src_heap_s:
+    "heap_bytes s src (unat src_len) = src_bytes"
+    using index by (simp add: encoder_index_post_def)
+  have tgt_heap_s:
+    "heap_bytes s tgt (unat tgt_len) = tgt_bytes"
+    using index by (simp add: encoder_index_post_def)
+  have typing_s:
+    "heap_typing s = heap_typing s0"
+    using index by (simp add: encoder_index_post_def)
+  have input_lens:
+    "length src_bytes = unat src_len"
+    "length tgt_bytes = unat tgt_len"
+    using input by (simp_all add: encoder_input_rel_def)
+  let ?sec0 = "sections_t_C 0 0 0 ENC_OK"
+  have reset_src:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           enc_cache_abs t cache_init \<and>
+           enc_cache_wf cache_init \<and>
+           heap_typing t = heap_typing s \<and>
+           heap_bytes t src (unat src_len) = heap_bytes s src (unat src_len) \<rbrace>"
+    by (rule cache_reset'_enc_cache_abs)
+  have reset_tgt:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           enc_cache_abs t cache_init \<and>
+           enc_cache_wf cache_init \<and>
+           heap_typing t = heap_typing s \<and>
+           heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len) \<rbrace>"
+    by (rule cache_reset'_enc_cache_abs)
+  have reset_bytes:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           enc_cache_abs t cache_init \<and>
+           enc_cache_wf cache_init \<and>
+           heap_typing t = heap_typing s \<and>
+           heap_bytes t src (unat src_len) = heap_bytes s src (unat src_len) \<and>
+           heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len) \<rbrace>"
+    using reset_src reset_tgt
+    by (simp add: runs_to_conj)
+  have reset_index:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+          encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+            src_bytes tgt_bytes \<rbrace>"
+    by (rule cache_reset'_preserves_encoder_index_post[OF index])
+  have reset:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           enc_cache_abs t cache_init \<and>
+           enc_cache_wf cache_init \<and>
+           heap_typing t = heap_typing s \<and>
+           heap_bytes t src (unat src_len) = heap_bytes s src (unat src_len) \<and>
+           heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len) \<and>
+           encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+             src_bytes tgt_bytes \<rbrace>"
+    using reset_bytes reset_index
+    by (simp add: runs_to_conj)
   show ?thesis
-  sorry
+    unfolding encode_window'_def
+    apply (simp add: Let_def)
+    apply (rule runs_to_bind)
+     apply (rule runs_to_weaken[OF reset])
+    apply clarsimp
+    subgoal premises reset_post for s_reset
+    proof -
+      have typing_reset:
+        "heap_typing s_reset = heap_typing s0"
+        using reset_post typing_s by simp
+      have buffers_reset:
+        "encoder_buffers_ok s_reset out out_cap src src_len tgt tgt_len
+          head_arr next_arr pending pending_cap data data_cap inst inst_cap
+          addr addr_cap"
+        by (rule encoder_buffers_ok_heap_typing_eq[
+            OF typing_reset buffers])
+      have loop_buffers_reset:
+        "encode_window_loop_buffers_ok s_reset src src_len tgt tgt_len
+          pending pending_cap data data_cap inst inst_cap addr addr_cap"
+        by (rule encoder_buffers_ok_encode_window_loop_buffers_ok[
+            OF buffers_reset])
+      have index_reset:
+        "encoder_index_post s0 s_reset src src_len tgt tgt_len head_arr
+          next_arr src_bytes tgt_bytes"
+        using reset_post by simp
+      have init_rel:
+        "encode_window_loop_rel s_reset src src_len tgt tgt_len
+          data data_cap inst inst_cap addr addr_cap pending pending_cap
+          ?sec0 0 0 src_bytes tgt_bytes enc_full_init"
+        by (rule encode_window_initial_loop_rel[
+            OF input loop_buffers_reset])
+           (use reset_post src_heap_s tgt_heap_s input_lens in simp_all)
+      have while_run:
+        "(whileLoop (\<lambda>(pend_len, sec, tp) s. tp < tgt_len)
+           (encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
+             data data_cap inst inst_cap addr addr_cap pending pending_cap)
+           (0, ?sec0, 0) ::
+          (sections_t_C, 32 word \<times> sections_t_C \<times> 32 word,
+           lifted_globals) exn_monad) \<bullet> s_reset
+         \<lbrace> \<lambda>r t. \<exists>pend_len sec tp spec_st.
+              r = Result (pend_len, sec, tp) \<and>
+              \<not> tp < tgt_len \<and>
+              encode_window_loop_rel t src src_len tgt tgt_len
+                data data_cap inst inst_cap addr addr_cap pending pending_cap
+                sec tp pend_len src_bytes tgt_bytes spec_st \<and>
+              flush_pending_spec (length src_bytes) spec_st =
+                encode_window_final_spec_state src_bytes tgt_bytes \<and>
+              encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+                src_bytes tgt_bytes \<rbrace>"
+        by (rule encode_window_while_loop_topdown[
+            OF input buffers index_reset fit init_rel])
+      show ?thesis
+        apply (rule runs_to_finally)
+        apply (rule runs_to_bind_exception[split_tuple g arity: 3])
+         apply (rule runs_to_weaken[
+           OF while_run[
+             unfolded encode_window_c_loop_body_def,
+             simplified Spec_Monad.return_bind]])
+         apply clarsimp
+        apply (rule runs_to_weaken[
+          OF encode_window_final_flush_topdown[
+            OF input buffers _ fit _ _ _]])
+        using typing_s
+        by (auto simp: encoder_index_post_def)
+    qed
+    done
 qed
 
 lemma vcdiff_encode'_encode_window_phase_topdown:

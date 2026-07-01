@@ -890,6 +890,18 @@ lemma heap_bytes_same_arr_update[simp]:
   "heap_bytes (same_arr_''_update f s) buf n = heap_bytes s buf n"
   by (simp add: heap_bytes_def)
 
+lemma heap_w32_near_arr_update[simp]:
+  "heap_w32 (near_arr_''_update f s) p = heap_w32 s p"
+  by simp
+
+lemma heap_w32_near_ptr_update[simp]:
+  "heap_w32 (near_ptr_''_update f s) p = heap_w32 s p"
+  by simp
+
+lemma heap_w32_same_arr_update[simp]:
+  "heap_w32 (same_arr_''_update f s) p = heap_w32 s p"
+  by simp
+
 lemma write_byte'_success_preserves_enc_cache_abs:
   assumes abs: "enc_cache_abs s c"
       and pos_lt: "pos < cap"
