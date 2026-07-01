@@ -1355,6 +1355,34 @@ lemma encoder_buffers_ok_heap_typing_eq:
   using typing buffers
   by (simp add: encoder_buffers_ok_def buf_valid_def)
 
+lemma encoder_buffers_ok_pending_ptr_valid:
+  fixes s0 t :: lifted_globals
+    and len :: "32 word"
+  assumes buffers:
+        "encoder_buffers_ok s0 out out_cap src src_len tgt tgt_len head_arr next_arr
+          pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      and typing: "heap_typing t = heap_typing s0"
+      and len_le: "unat len \<le> unat pending_cap"
+  shows "\<forall>j < unat len.
+      ptr_valid (heap_typing t)
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+proof (intro allI impI)
+  fix j
+  assume j_lt: "j < unat len"
+  have pending_ok0: "buf_valid s0 pending (unat pending_cap)"
+    using buffers by (simp add: encoder_buffers_ok_def)
+  have pending_ok: "buf_valid t pending (unat pending_cap)"
+    using pending_ok0 typing by (simp add: buf_valid_def)
+  have no_overflow: "unat (0 :: 32 word) + unat len < 2 ^ 32"
+    using unat_lt2p[of len] by simp
+  have range: "unat (0 :: 32 word) + unat len \<le> unat pending_cap"
+    using len_le by simp
+  show "ptr_valid (heap_typing t)
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+    by (rule buf_valid_word_rangeD[
+        OF pending_ok j_lt no_overflow range])
+qed
+
 lemma word_sub_not_less_of_unat_add_le:
   fixes pos len cap :: "32 word"
   assumes range: "unat pos + unat len \<le> unat cap"
