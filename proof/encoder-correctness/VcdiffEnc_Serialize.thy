@@ -2232,7 +2232,9 @@ definition encode_window_loop_rel ::
      unat pend_len \<le> unat pending_cap \<and>
      unat (sections_t_C.data_pos_C sec) \<le> unat data_cap \<and>
      unat (sections_t_C.inst_pos_C sec) \<le> unat inst_cap \<and>
-     unat (sections_t_C.addr_pos_C sec) \<le> unat addr_cap"
+     unat (sections_t_C.addr_pos_C sec) \<le> unat addr_cap \<and>
+     enc_cache_abs s (enc_cache spec_st) \<and>
+     enc_cache_wf (enc_cache spec_st)"
 
 definition encode_window_c_loop_body ::
   "8 word ptr \<Rightarrow> 32 word \<Rightarrow> 8 word ptr \<Rightarrow> 32 word \<Rightarrow>
@@ -2422,6 +2424,9 @@ lemma encode_window_initial_loop_rel:
     "heap_bytes s tgt (unat tgt_len) = tgt_bytes"
     "length src_bytes = unat src_len"
     "length tgt_bytes = unat tgt_len"
+      and cache:
+    "enc_cache_abs s (enc_cache enc_full_init)"
+    "enc_cache_wf (enc_cache enc_full_init)"
   shows "encode_window_loop_rel s src src_len tgt tgt_len
       data data_cap inst inst_cap addr addr_cap pending pending_cap
       sec 0 0 src_bytes tgt_bytes enc_full_init"
@@ -2431,7 +2436,7 @@ proof -
     by (rule enc_sections_state_rel_empty[OF sec_zero(1-3)])
   show ?thesis
     unfolding encode_window_loop_rel_def
-    using bytes sec_zero sections
+    using bytes sec_zero sections cache
     by (simp add: enc_full_init_def heap_bytes_word_def)
 qed
 
@@ -3166,7 +3171,8 @@ proof -
           ?sec0 0 0 src_bytes tgt_bytes enc_full_init"
         by (rule encode_window_initial_loop_rel[
             OF input loop_buffers_reset])
-           (use reset_post src_heap_s tgt_heap_s input_lens in simp_all)
+           (use reset_post src_heap_s tgt_heap_s input_lens in
+              \<open>simp_all add: enc_full_init_def\<close>)
       have while_run:
         "(whileLoop (\<lambda>(pend_len, sec, tp) s. tp < tgt_len)
            (encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
