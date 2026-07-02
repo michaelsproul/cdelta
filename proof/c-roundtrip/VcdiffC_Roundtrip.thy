@@ -64,7 +64,103 @@ proof -
     using dec_patch dec_src roundtrip by simp
 qed
 
+lemma serialize_parse_window_source_bounds:
+  assumes src_bound: "length src < 2 ^ 32"
+      and parsed_header: "parse_header (serialize src tgt data inst addr) = Inl rest"
+      and parsed_window: "parse_window rest = Inl (win, tail)"
+  shows
+    "pw_src_seg_off win \<le> length src \<and>
+     pw_src_seg_len win \<le> length src - pw_src_seg_off win"
+proof -
+  let ?dlen = "varint_size (length tgt) + 1
+      + varint_size (length data)
+      + varint_size (length inst)
+      + varint_size (length addr)
+      + length data + length inst + length addr"
+  let ?after =
+    "varint_encode ?dlen
+     @ varint_encode (length tgt)
+     @ [0x00]
+     @ varint_encode (length data)
+     @ varint_encode (length inst)
+     @ varint_encode (length addr)
+     @ data @ inst @ addr"
+  have rest_eq:
+    "rest =
+      (if length src > 0
+       then (0x01 :: byte) #
+         (varint_encode (length src) @ varint_encode 0 @ ?after)
+       else (0x00 :: byte) # ?after)"
+    using parsed_header
+    by (auto simp: serialize_def parse_header_def magic_bytes_def Let_def)
+  have src_decode:
+    "varint_decode (varint_encode (length src) @ xs) =
+      Some (length src, xs)" for xs
+    using src_bound by (rule varint_decode_encode)
+  have zero_decode:
+    "varint_decode (varint_encode 0 @ xs) = Some (0, xs)" for xs
+    using varint_decode_encode[of 0 xs] by simp
+  show ?thesis
+  proof (cases "length src > 0")
+    case True
+    have fields:
+      "pw_src_seg_len win = length src"
+      "pw_src_seg_off win = 0"
+      using parsed_window rest_eq True src_decode zero_decode
+      by (auto simp: parse_window_def pop_byte_def Let_def
+          split: option.splits if_splits)
+    then show ?thesis by simp
+  next
+    case False
+    have fields:
+      "pw_src_seg_len win = 0"
+      "pw_src_seg_off win = 0"
+      using parsed_window rest_eq False
+      by (auto simp: parse_window_def pop_byte_def Let_def
+          split: option.splits if_splits)
+    then show ?thesis by simp
+  qed
+qed
+
+lemma encode_spec_parse_window_source_bounds:
+  assumes src_bound: "length src < 2 ^ 32"
+      and parsed_header: "parse_header (encode_spec src tgt) = Inl rest"
+      and parsed_window: "parse_window rest = Inl (win, tail)"
+  shows
+    "pw_src_seg_off win \<le> length src \<and>
+     pw_src_seg_len win \<le> length src - pw_src_seg_off win"
+proof -
+  let ?full = "encode_window_full_spec src tgt"
+  show ?thesis
+  proof (cases "sections_fit_32 src tgt ?full")
+    case True
+    then have enc_eq:
+      "encode_spec src tgt =
+        serialize src tgt (efr_data ?full) (efr_inst ?full) (efr_addr ?full)"
+      by (simp add: encode_spec_alt Let_def)
+    show ?thesis
+      by (rule serialize_parse_window_source_bounds[
+          OF src_bound _ parsed_window])
+        (use parsed_header enc_eq in simp)
+  next
+    case False
+    obtain data inst addr cache where enc_window:
+      "encode_window (generate_instructions src tgt) (length src) =
+        (data, inst, addr, cache)"
+      by (cases "encode_window (generate_instructions src tgt) (length src)") auto
+    have enc_eq:
+      "encode_spec src tgt = serialize src tgt data inst addr"
+      using False enc_window
+      by (simp add: encode_spec_alt encode_spec_run_alt Let_def)
+    show ?thesis
+      by (rule serialize_parse_window_source_bounds[
+          OF src_bound _ parsed_window])
+        (use parsed_header enc_eq in simp)
+  qed
+qed
+
 lemma encode_spec_source_windows_in_bounds:
+  fixes src_len :: "32 word"
   assumes enc_success:
     "enc.encoder_success_post enc_out src_bytes tgt_bytes enc_n enc_s enc_t"
       and dec_input:
@@ -78,7 +174,36 @@ lemma encode_spec_source_windows_in_bounds:
        parse_window rest = Inl (win, tail) \<Longrightarrow>
        pw_src_seg_off win \<le> unat src_len \<and>
        pw_src_seg_len win \<le> unat src_len - pw_src_seg_off win"
-  sorry
+proof -
+  have enc_n_len:
+    "unat enc_n = length (encode_spec src_bytes tgt_bytes)"
+    using enc_success by (simp add: enc.encoder_success_post_def)
+  have enc_patch:
+    "enc.heap_bytes enc_t enc_out (unat enc_n) =
+      encode_spec src_bytes tgt_bytes"
+    using enc_success enc_n_len by (simp add: enc.encoder_success_post_def)
+  have dec_patch:
+    "dec.heap_bytes dec_s dec_patch (unat enc_n) =
+      encode_spec src_bytes tgt_bytes"
+    using dec_input enc_patch
+    by (simp add: decoder_input_from_encoder_output_def)
+  have src_bound: "length src_bytes < 2 ^ 32"
+    using src_len_eq unat_lt2p[of src_len] by simp
+  fix rest win tail
+  assume parsed_header:
+    "parse_header (dec.heap_bytes dec_s dec_patch (unat enc_n)) =
+      Inl rest"
+    and parsed_window: "parse_window rest = Inl (win, tail)"
+  have bounds:
+    "pw_src_seg_off win \<le> length src_bytes \<and>
+     pw_src_seg_len win \<le> length src_bytes - pw_src_seg_off win"
+    by (rule encode_spec_parse_window_source_bounds[OF src_bound])
+      (use parsed_header parsed_window dec_patch in simp_all)
+  show
+    "pw_src_seg_off win \<le> unat src_len \<and>
+     pw_src_seg_len win \<le> unat src_len - pw_src_seg_off win"
+    using bounds src_len_eq by simp
+qed
 
 lemma encode_spec_source_target_window_fits:
   assumes enc_success:
