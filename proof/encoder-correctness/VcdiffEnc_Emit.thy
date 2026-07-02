@@ -8303,6 +8303,14 @@ lemma runs_to_liftE_bind_throw_result:
   apply (rule runs_to_weaken[OF f])
   by auto
 
+lemma runs_to_liftE_bind_throw_exn_result:
+  assumes f: "f \<bullet> s \<lbrace>\<lambda>Res v t. P v t\<rbrace>"
+  shows "(liftE f >>= throw) \<bullet> s
+           \<lbrace>\<lambda>r t. \<exists>v. r = Exn v \<and> P v t\<rbrace>"
+  apply runs_to_vcg
+  apply (rule runs_to_weaken[OF f])
+  by auto
+
 lemma flush_pending'_len_one_enc_sections_cache_inv:
   assumes inv:
         "enc_sections_inv s data inst addr sec src_seg tgt_len
@@ -13149,11 +13157,12 @@ definition flush_pending_outer_emit_pre ::
           0 0 spec_st \<longrightarrow>
         flush_pending_outer_tail data data_cap inst inst_cap pending len
           add_start sec_cur \<bullet> t
-        \<lbrace> \<lambda>Res sec' u.
-             enc_sections_state_rel u data inst addr sec'
-               (flush_pending_outer_tail_state src_len s0 pending len
-                 add_start loop_st) \<and>
-             heap_typing u = heap_typing s0 \<rbrace>))"
+	        \<lbrace> \<lambda>Res sec' u.
+	             enc_sections_state_rel u data inst addr sec'
+	               (flush_pending_outer_tail_state src_len s0 pending len
+	                 add_start loop_st) \<and>
+	             sections_t_C.err_C sec' = ENC_OK \<and>
+	             heap_typing u = heap_typing s0 \<rbrace>))"
 
 lemma flush_pending_outer_emit_preI:
   assumes run:
@@ -13193,11 +13202,12 @@ lemma flush_pending_outer_emit_preI:
         \<rbrakk> \<Longrightarrow>
           flush_pending_outer_tail data data_cap inst inst_cap pending len
             add_start sec_cur \<bullet> t
-          \<lbrace> \<lambda>Res sec' u.
-               enc_sections_state_rel u data inst addr sec'
-                 (flush_pending_outer_tail_state src_len s0 pending len
-                   add_start loop_st) \<and>
-               heap_typing u = heap_typing s0 \<rbrace>"
+	          \<lbrace> \<lambda>Res sec' u.
+	               enc_sections_state_rel u data inst addr sec'
+	                 (flush_pending_outer_tail_state src_len s0 pending len
+	                   add_start loop_st) \<and>
+	               sections_t_C.err_C sec' = ENC_OK \<and>
+	               heap_typing u = heap_typing s0 \<rbrace>"
   shows "flush_pending_outer_emit_pre src_len s0 data data_cap inst inst_cap
           addr pending len spec_st add_start i sec_cur t"
   using run tail
@@ -13811,11 +13821,12 @@ lemma flush_pending_outer_tail_finishes_inv:
           addr pending len spec_st add_start len sec_cur t"
   shows "flush_pending_outer_tail data data_cap inst inst_cap pending len
             add_start sec_cur \<bullet> t
-         \<lbrace> \<lambda>Res sec' u.
-              enc_sections_state_rel u data inst addr sec'
-                (flush_pending_loop_spec src_len
-                  (heap_bytes_word s0 pending 0 len) 0 0 spec_st) \<and>
-              heap_typing u = heap_typing s0 \<rbrace>"
+	         \<lbrace> \<lambda>Res sec' u.
+	              enc_sections_state_rel u data inst addr sec'
+	                (flush_pending_loop_spec src_len
+	                  (heap_bytes_word s0 pending 0 len) 0 0 spec_st) \<and>
+	              sections_t_C.err_C sec' = ENC_OK \<and>
+	              heap_typing u = heap_typing s0 \<rbrace>"
 proof -
   obtain loop_st where
       add_start_le_len: "add_start \<le> len"
@@ -13830,11 +13841,12 @@ proof -
   have tail:
     "flush_pending_outer_tail data data_cap inst inst_cap pending len
         add_start sec_cur \<bullet> t
-     \<lbrace> \<lambda>Res sec' u.
-          enc_sections_state_rel u data inst addr sec'
-            (flush_pending_outer_tail_state src_len s0 pending len
-              add_start loop_st) \<and>
-          heap_typing u = heap_typing s0 \<rbrace>"
+	     \<lbrace> \<lambda>Res sec' u.
+	          enc_sections_state_rel u data inst addr sec'
+	            (flush_pending_outer_tail_state src_len s0 pending len
+	              add_start loop_st) \<and>
+	          sections_t_C.err_C sec' = ENC_OK \<and>
+	          heap_typing u = heap_typing s0 \<rbrace>"
     using emit_pre rel eq
     by (auto simp: flush_pending_outer_emit_pre_def)
   have exit:
@@ -13873,11 +13885,12 @@ lemma flush_pending'_enc_sections_state_rel_loop_spec_topdown:
   shows "flush_pending' sec data data_cap inst inst_cap pending len \<bullet> s
          \<lbrace> \<lambda>r t.
               \<exists>sec'.
-                r = Result sec' \<and>
-                enc_sections_state_rel t data inst addr sec'
-                  (flush_pending_loop_spec src_len
-                    (heap_bytes_word s pending 0 len) 0 0 spec_st) \<and>
-                heap_typing t = heap_typing s \<rbrace>"
+	                r = Result sec' \<and>
+	                enc_sections_state_rel t data inst addr sec'
+	                  (flush_pending_loop_spec src_len
+	                    (heap_bytes_word s pending 0 len) 0 0 spec_st) \<and>
+	                sections_t_C.err_C sec' = ENC_OK \<and>
+	                heap_typing t = heap_typing s \<rbrace>"
 proof -
   have inv0:
     "flush_pending_outer_loop_inv src_len s data inst addr pending len
@@ -13917,10 +13930,11 @@ proof -
         "flush_pending_outer_tail data data_cap inst inst_cap pending len
             add_start sec' \<bullet> t
          \<lbrace> \<lambda>Res sec'' u.
-              enc_sections_state_rel u data inst addr sec''
-                (flush_pending_loop_spec src_len
-                  (heap_bytes_word s pending 0 len) 0 0 spec_st) \<and>
-              heap_typing u = heap_typing s \<rbrace>"
+	              enc_sections_state_rel u data inst addr sec''
+	                (flush_pending_loop_spec src_len
+	                  (heap_bytes_word s pending 0 len) 0 0 spec_st) \<and>
+	              sections_t_C.err_C sec'' = ENC_OK \<and>
+	              heap_typing u = heap_typing s \<rbrace>"
         by (rule flush_pending_outer_tail_finishes_inv[OF inv])
            (rule emit_pre[OF inv order_refl])
       show ?thesis
@@ -13928,11 +13942,12 @@ proof -
         apply (rule runs_to_weaken[
           OF runs_to_liftE_bind_throw_result[
             OF tail[unfolded flush_pending_outer_tail_def],
-            where Q = "\<lambda>sec'' u.
-              enc_sections_state_rel u data inst addr sec''
-                (flush_pending_loop_spec src_len
-                  (heap_bytes_word s pending 0 len) 0 0 spec_st) \<and>
-              heap_typing u = heap_typing s"]])
+	            where Q = "\<lambda>sec'' u.
+	              enc_sections_state_rel u data inst addr sec''
+	                (flush_pending_loop_spec src_len
+	                  (heap_bytes_word s pending 0 len) 0 0 spec_st) \<and>
+	              sections_t_C.err_C sec'' = ENC_OK \<and>
+	              heap_typing u = heap_typing s"]])
         apply auto
         done
     qed
@@ -13957,10 +13972,11 @@ lemma flush_pending'_enc_sections_state_rel_topdown:
   shows "flush_pending' sec data data_cap inst inst_cap pending len \<bullet> s
          \<lbrace> \<lambda>r t.
               \<exists>sec'.
-                r = Result sec' \<and>
-                enc_sections_state_rel t data inst addr sec'
-                  (flush_pending_spec src_len spec_st) \<and>
-                heap_typing t = heap_typing s \<rbrace>"
+	                r = Result sec' \<and>
+	                enc_sections_state_rel t data inst addr sec'
+	                  (flush_pending_spec src_len spec_st) \<and>
+	                sections_t_C.err_C sec' = ENC_OK \<and>
+	                heap_typing t = heap_typing s \<rbrace>"
   apply (rule runs_to_weaken[
     OF flush_pending'_enc_sections_state_rel_loop_spec_topdown[
       OF rel sec_ok pending_valid emit_pre]])
@@ -14017,18 +14033,20 @@ lemma flush_pending'_enc_sections_state_rel_branch_pre:
         \<rbrakk> \<Longrightarrow>
           flush_pending_outer_tail data data_cap inst inst_cap pending len
             add_start sec_cur \<bullet> t
-          \<lbrace> \<lambda>Res sec' u.
-               enc_sections_state_rel u data inst addr sec'
-                 (flush_pending_outer_tail_state src_len s pending len
-                   add_start loop_st) \<and>
-               heap_typing u = heap_typing s \<rbrace>"
+	          \<lbrace> \<lambda>Res sec' u.
+	               enc_sections_state_rel u data inst addr sec'
+	                 (flush_pending_outer_tail_state src_len s pending len
+	                   add_start loop_st) \<and>
+	               sections_t_C.err_C sec' = ENC_OK \<and>
+	               heap_typing u = heap_typing s \<rbrace>"
   shows "flush_pending' sec data data_cap inst inst_cap pending len \<bullet> s
          \<lbrace> \<lambda>r t.
               \<exists>sec'.
-                r = Result sec' \<and>
-                enc_sections_state_rel t data inst addr sec'
-                  (flush_pending_spec src_len spec_st) \<and>
-                heap_typing t = heap_typing s \<rbrace>"
+	                r = Result sec' \<and>
+	                enc_sections_state_rel t data inst addr sec'
+	                  (flush_pending_spec src_len spec_st) \<and>
+	                sections_t_C.err_C sec' = ENC_OK \<and>
+	                heap_typing t = heap_typing s \<rbrace>"
   apply (rule flush_pending'_enc_sections_state_rel_topdown[
     OF rel pending_eq sec_ok pending_valid])
   subgoal for add_start i sec_cur t
