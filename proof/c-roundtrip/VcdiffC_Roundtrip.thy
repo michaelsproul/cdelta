@@ -506,11 +506,11 @@ lemma vcdiff_encode'_writes_encode_spec_roundtrip_context:
     "unat enc_src_len < unat (no_entry32 :: 32 word)"
       and head_valid:
     "\<And>h. h < hash_size \<Longrightarrow>
-       ptr_valid (VcdiffEnc.lifted_globals.heap_typing enc_s)
+       vcdiff_enc.ptr_valid (VcdiffEnc.lifted_globals.heap_typing enc_s)
          (enc_head_arr +\<^sub>p int h)"
       and next_valid:
     "\<And>p. p < unat enc_src_len \<Longrightarrow>
-       ptr_valid (VcdiffEnc.lifted_globals.heap_typing enc_s)
+       vcdiff_enc.ptr_valid (VcdiffEnc.lifted_globals.heap_typing enc_s)
          (enc_next_arr +\<^sub>p int p)"
       and head_no_alias:
     "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
@@ -541,7 +541,21 @@ lemma vcdiff_encode'_writes_encode_spec_roundtrip_context:
             r = Result enc_n \<and>
             enc.encoder_success_post enc_out src_bytes tgt_bytes enc_n enc_s
               enc_t \<rbrace>"
-  sorry
+  apply (rule enc.vcdiff_encode'_writes_encode_spec_topdown)
+              apply (rule input)
+             apply (rule buffers)
+            apply (rule pending_cap_ok)
+           apply (rule src_len_word)
+          apply (blast intro: head_valid)
+         apply (blast intro: next_valid)
+        apply (metis head_no_alias)
+       apply (metis next_no_alias)
+      apply (metis next_head_disjoint)
+     apply (metis head_next_disjoint)
+    apply (rule fit)
+   apply (rule enc_out_cap_ok)
+  apply (rule encoded_len_word)
+  done
 
 theorem vcdiff_encode'_then_decode_roundtrip_topdown:
   fixes enc_out enc_src enc_tgt enc_pending enc_data enc_inst enc_addr ::
@@ -564,11 +578,11 @@ theorem vcdiff_encode'_then_decode_roundtrip_topdown:
     "unat enc_src_len < unat (no_entry32 :: 32 word)"
       and head_valid:
     "\<And>h. h < hash_size \<Longrightarrow>
-       ptr_valid (VcdiffEnc.lifted_globals.heap_typing enc_s)
+       vcdiff_enc.ptr_valid (VcdiffEnc.lifted_globals.heap_typing enc_s)
          (enc_head_arr +\<^sub>p int h)"
       and next_valid:
     "\<And>p. p < unat enc_src_len \<Longrightarrow>
-       ptr_valid (VcdiffEnc.lifted_globals.heap_typing enc_s)
+       vcdiff_enc.ptr_valid (VcdiffEnc.lifted_globals.heap_typing enc_s)
          (enc_next_arr +\<^sub>p int p)"
       and head_no_alias:
     "\<And>h bucket. \<lbrakk>h < hash_size; bucket < hash_size; h \<noteq> bucket\<rbrakk> \<Longrightarrow>
