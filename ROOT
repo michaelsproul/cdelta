@@ -73,3 +73,10 @@ session CdeltaRefine in "proof/decoder-refine" = CdeltaRefineBase +
   options [timeout = 1800, quick_and_dirty = true]
   theories
     VcdiffDec_Refine
+
+session CdeltaCRoundtrip in "proof/c-roundtrip" = CdeltaRefine +
+  options [timeout = 1800, quick_and_dirty = true]
+  sessions
+    CdeltaEncoderCorrectness
+  theories
+    VcdiffC_Roundtrip
