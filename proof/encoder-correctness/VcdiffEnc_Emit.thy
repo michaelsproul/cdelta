@@ -14791,21 +14791,57 @@ proof -
     apply (rule runs_to_bind_exception)
     apply (rule runs_to_weaken[OF scan])
     apply clarsimp
-    subgoal for j
-      apply (rule flush_pending_outer_after_scan_preserves_inv_frame[
-        OF inv P_t _ _ _ b_eq_s0])
-         apply assumption
-        apply assumption
-       apply assumption
-      apply (rule run_pre)
-            apply assumption
-           apply assumption
-          apply assumption
-         apply assumption
-        apply assumption
-       apply assumption
-      apply assumption
-      done
+    subgoal premises scan_post for j
+    proof -
+      have i_lt_j': "i < j"
+        using scan_post by blast
+      have j_le_len': "j \<le> len"
+        using scan_post by blast
+      have run_end':
+        "pending_run_end (heap_bytes_word s0 pending 0 len) (unat i) =
+          unat j"
+        using scan_post by blast
+      have run_pre':
+        "\<And>loop_st. \<lbrakk>
+          enc_sections_state_rel t data inst addr sec_cur loop_st;
+          flush_pending_loop_spec src_len
+            (heap_bytes_word s0 pending 0 len) (unat add_start) (unat i)
+            loop_st =
+          flush_pending_loop_spec src_len
+            (heap_bytes_word s0 pending 0 len) 0 0 spec_st;
+          (4 :: 32 word) \<le> j - i
+        \<rbrakk> \<Longrightarrow>
+          flush_pending_outer_run_branch data data_cap inst inst_cap pending
+            add_start i j b sec_cur \<bullet> t
+          \<lbrace> \<lambda>r u.
+               \<exists>sec'.
+                 r = Result (j, j, sec') \<and>
+                 sections_t_C.err_C sec' = ENC_OK \<and>
+                 heap_bytes_word u pending 0 len =
+                   heap_bytes_word s0 pending 0 len \<and>
+                 heap_typing u = heap_typing s0 \<and>
+                 enc_sections_state_rel u data inst addr sec'
+                   (flush_pending_outer_run_state src_len s0 pending
+                     add_start i j b loop_st) \<and>
+                 P u \<rbrace>"
+        by (rule run_pre[OF i_lt_j' j_le_len' run_end' b_eq_s0])
+      have after:
+        "condition (\<lambda>st. (4 :: 32 word) \<le> j - i)
+            (flush_pending_outer_run_branch data data_cap inst inst_cap
+              pending add_start i j b sec_cur)
+            (return (add_start, j, sec_cur)) \<bullet> t
+         \<lbrace> \<lambda>r u.
+              \<exists>add_start' i' sec_cur'.
+                r = Result (add_start', i', sec_cur') \<and>
+                i < i' \<and> i' \<le> len \<and>
+                flush_pending_outer_loop_inv src_len s0 data inst addr
+                  pending len spec_st add_start' i' sec_cur' u \<and>
+                P u \<rbrace>"
+        by (rule flush_pending_outer_after_scan_preserves_inv_frame[
+          OF inv P_t i_lt_j' j_le_len' run_end' b_eq_s0 run_pre'])
+      show ?thesis
+        by (rule after)
+    qed
     done
 qed
 
@@ -14886,74 +14922,52 @@ lemma flush_pending_outer_scan_tail_preserves_inv_do_frame:
                   pending len spec_st add_start' i' sec_cur' u \<and>
                 P u \<rbrace>"
 proof -
-  obtain pending_frame where
-      pending_frame:
-        "heap_bytes_word t pending 0 len =
-         heap_bytes_word s0 pending 0 len"
-    using inv by (auto simp: flush_pending_outer_loop_inv_def)
-  have b_eq_s0: "b = heap_w8 s0 (pending +\<^sub>p uint i)"
-    using b_eq_t heap_bytes_word_frame_heap_w8_zero[
-      OF pending_frame i_lt_len] by simp
-  have scan:
-    "((do {
-        ret \<leftarrow> liftE
-          ((do {
-             x \<leftarrow> guard
-               (\<lambda>st. i + 1 < len \<longrightarrow>
-                 IS_VALID(8 word) st (pending +\<^sub>p uint (i + 1)));
-             gets
-               (\<lambda>st. if i + 1 < len \<and>
-                 heap_w8 st (pending +\<^sub>p uint (i + 1)) = b
-                then (1 :: int) else 0)
-           }) :: (int, lifted_globals) res_monad);
-        liftE
-          ((whileLoop
-            (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
-            (\<lambda>(j, ret). do {
-               x \<leftarrow> guard
-                 (\<lambda>st. j + 1 < len \<longrightarrow>
-                   IS_VALID(8 word) st
-                     (pending +\<^sub>p uint (j + 1)));
-               ret \<leftarrow> gets
-                 (\<lambda>st. j + 1 < len \<and>
-                   heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
-               return (j + 1, if ret then 1 else 0)
-            })
-            (i + 1, ret)) :: (32 word \<times> int, lifted_globals) res_monad)
-      }) :: (sections_t_C, 32 word \<times> int, lifted_globals) exn_monad) \<bullet> t
-     \<lbrace> \<lambda>r u.
-          \<exists>j. r = Result (j, 0) \<and> u = t \<and>
-            i < j \<and> j \<le> len \<and>
-            pending_run_end (heap_bytes_word s0 pending 0 len) (unat i) =
-              unat j \<rbrace>"
-    apply (rule runs_to_weaken[
-      OF flush_pending'_scan_tail_from_liftE_split_pending_run_end[
-        where s = t and pending = pending and len = len and i = i
-          and b = b]])
-       apply (rule i_lt_len)
-      using b_eq_t apply simp
-     apply (rule pending_valid_t)
-    using pending_frame by auto
-  show ?thesis
-    apply (rule runs_to_bind_exception)
-     apply (rule runs_to_weaken[OF scan])
-    apply clarsimp
-    subgoal for j
-      apply (rule flush_pending_outer_after_scan_preserves_inv_frame[
-        OF inv P_t _ _ _ b_eq_s0])
-         apply assumption
-        apply assumption
-       apply assumption
-      apply (rule run_pre)
-            apply assumption
-           apply assumption
-          apply assumption
-         apply assumption
-        apply assumption
-       apply assumption
-      apply assumption
-      done
+  have scan_frame:
+    "(((do {
+             ret \<leftarrow> liftE
+               ((do {
+                  x \<leftarrow> guard
+                    (\<lambda>st. i + 1 < len \<longrightarrow>
+                      IS_VALID(8 word) st (pending +\<^sub>p uint (i + 1)));
+                  gets
+                    (\<lambda>st. if i + 1 < len \<and>
+                      heap_w8 st (pending +\<^sub>p uint (i + 1)) = b
+                     then (1 :: int) else 0)
+                }) :: (int, lifted_globals) res_monad);
+             liftE
+               ((whileLoop
+                 (\<lambda>(j :: 32 word, ret :: int) st. ret \<noteq> 0)
+                 (\<lambda>(j, ret). do {
+                    x \<leftarrow> guard
+                      (\<lambda>st. j + 1 < len \<longrightarrow>
+                        IS_VALID(8 word) st
+                          (pending +\<^sub>p uint (j + 1)));
+                    ret \<leftarrow> gets
+                      (\<lambda>st. j + 1 < len \<and>
+                        heap_w8 st (pending +\<^sub>p uint (j + 1)) = b);
+                    return (j + 1, if ret then 1 else 0)
+                 })
+                 (i + 1, ret)) :: (32 word \<times> int, lifted_globals) res_monad)
+           }) :: (sections_t_C, 32 word \<times> int, lifted_globals) exn_monad) >>=
+           (\<lambda>(j, ret). condition (\<lambda>st. (4 :: 32 word) \<le> j - i)
+              (flush_pending_outer_run_branch data data_cap inst inst_cap
+                pending add_start i j b sec_cur)
+              (return (add_start, j, sec_cur)))) \<bullet> t
+         \<lbrace> \<lambda>r u.
+              \<exists>add_start' i' sec_cur'.
+                r = Result (add_start', i', sec_cur') \<and>
+                i < i' \<and> i' \<le> len \<and>
+                flush_pending_outer_loop_inv src_len s0 data inst addr
+                  pending len spec_st add_start' i' sec_cur' u \<and>
+                P u \<rbrace>"
+    apply (rule flush_pending_outer_scan_tail_preserves_inv_frame[
+      where P = P and b = b,
+      OF inv P_t i_lt_len b_eq_t pending_valid_t])
+    subgoal for j b loop_st
+      by (rule run_pre) auto
     done
+  show ?thesis
+    using scan_frame by (simp only: bind_assoc)
 qed
 
 lemma flush_pending_outer_read_scan_tail_preserves_inv_frame:
@@ -15043,8 +15057,11 @@ proof -
      apply (rule runs_to_weaken[OF get_b])
     apply clarsimp
     apply (rule flush_pending_outer_scan_tail_preserves_inv_do_frame[
-      OF inv P_t i_lt_len _ pending_valid_t run_pre])
-    apply simp
+      where P = P and b = "heap_w8 t (pending +\<^sub>p uint i)",
+      OF inv P_t i_lt_len _ pending_valid_t])
+     apply simp
+    subgoal for j b loop_st
+      by (rule run_pre) auto
     done
 qed
 
@@ -15116,7 +15133,10 @@ proof -
      apply (rule runs_to_weaken[OF guard_i])
     apply clarsimp
     apply (rule flush_pending_outer_read_scan_tail_preserves_inv_frame[
-      OF inv P_t i_lt_len pending_valid_t run_pre])
+      where P = P,
+      OF inv P_t i_lt_len pending_valid_t])
+    subgoal for j b loop_st
+      by (rule run_pre) auto
     done
 qed
 
@@ -15187,12 +15207,13 @@ lemma flush_pending_outer_loop_preserves_inv_frame:
   subgoal for a t
     apply (cases a)
     apply clarsimp
-    subgoal for add_start i sec_cur
-      apply (rule runs_to_weaken)
-       apply (rule flush_pending_outer_body_preserves_inv_frame)
-           apply assumption
-          apply assumption
-         apply assumption
+	    subgoal for add_start i sec_cur
+	      apply (rule runs_to_weaken)
+       apply (rule flush_pending_outer_body_preserves_inv_frame[
+         where P = P])
+	           apply assumption
+	          apply assumption
+	         apply assumption
         apply (rule pending_valid)
        apply (rule run_pre)
                 apply assumption
@@ -15318,6 +15339,7 @@ proof -
               pending len spec_st add_start len sec' t \<and>
             P t \<rbrace>"
   proof (rule flush_pending_outer_loop_preserves_inv_frame[
+      where P = P,
       OF inv0 P0 pending_valid])
     fix add_start i sec_cur t j b loop_st
     assume inv:
@@ -15422,13 +15444,10 @@ proof -
               sections_t_C.err_C sec'' = ENC_OK \<and>
               heap_typing u = heap_typing s \<and>
               P u"]])
-        using tail_state_eq by auto
+        using tail_state_eq flush_pending_loop_spec_eq_flush_pending_spec[
+          OF pending_eq] by auto
     qed
     done
-  then show ?thesis
-    apply (rule runs_to_weaken)
-    using flush_pending_loop_spec_eq_flush_pending_spec[OF pending_eq]
-    by auto
 qed
 
 lemma flush_pending'_replicate_run_inner_loop_from_exn:
