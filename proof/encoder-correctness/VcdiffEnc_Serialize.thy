@@ -8558,6 +8558,159 @@ proof -
   qed
 qed
 
+lemma encode_window_match_rel_short_spec:
+  assumes rel:
+    "encode_window_loop_budget_rel s src src_len tgt tgt_len
+      data data_cap inst inst_cap addr addr_cap pending pending_cap
+      sec tp pend_len src_bytes tgt_bytes spec_st"
+      and match_rel:
+    "encode_window_match_rel s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
+      and tp_lt: "tp < tgt_len"
+      and match:
+    "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+      Some m"
+      and short: "match_t_C.len_C m < (of_nat min_match :: 32 word)"
+  shows "em_len (find_best_match_spec src_bytes tgt_bytes (enc_tp spec_st)
+          (build_index_spec src_bytes)) < min_match"
+proof -
+  let ?best =
+    "find_best_match_spec src_bytes tgt_bytes (unat tp)
+      (build_index_spec src_bytes)"
+  have tp_eq: "enc_tp spec_st = unat tp"
+    using rel by (simp add: encode_window_loop_budget_rel_def)
+  have tgt_len_eq: "length tgt_bytes = unat tgt_len"
+    using rel by (simp add: encode_window_loop_budget_rel_def)
+  have tp_le: "tp \<le> tgt_len"
+    using tp_lt by simp
+  have rel_match:
+    "m = (let best =
+             find_best_match_spec src_bytes tgt_bytes (unat tp)
+               (build_index_spec src_bytes)
+           in match_t_C (of_nat (em_pos best)) (of_nat (em_len best))) \<and>
+     match_valid src_bytes tgt_bytes (unat tp)
+       (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m))"
+    using match_rel tp_le match
+    unfolding encode_window_match_rel_def by blast
+  have m_eq:
+    "m = match_t_C (of_nat (em_pos ?best)) (of_nat (em_len ?best))"
+    using rel_match by (simp add: Let_def)
+  show ?thesis
+  proof (rule ccontr)
+    assume not_short:
+      "\<not> em_len (find_best_match_spec src_bytes tgt_bytes
+        (enc_tp spec_st) (build_index_spec src_bytes)) < min_match"
+    have best_not_short: "\<not> em_len ?best < min_match"
+      using not_short tp_eq by simp
+    then have min_le: "min_match \<le> em_len ?best"
+      by simp
+    have sound:
+      "em_pos ?best + em_len ?best \<le> length src_bytes \<and>
+       unat tp + em_len ?best \<le> length tgt_bytes \<and>
+       (\<forall>k < em_len ?best.
+          src_bytes ! (em_pos ?best + k) = tgt_bytes ! (unat tp + k))"
+      by (rule find_best_match_spec_sound[OF refl min_le])
+    have best_len32: "em_len ?best < 2 ^ 32"
+    proof -
+      have "em_len ?best \<le> unat tp + em_len ?best"
+        by simp
+      also have "... \<le> length tgt_bytes"
+        using sound by simp
+      also have "... = unat tgt_len"
+        using tgt_len_eq by simp
+      also have "... < 2 ^ 32"
+        using unat_lt2p[of tgt_len] by simp
+      finally show ?thesis .
+    qed
+    have c_len: "unat (match_t_C.len_C m) = em_len ?best"
+      using m_eq best_len32 by (simp add: unat_of_nat)
+    have c_short: "unat (match_t_C.len_C m) < min_match"
+      using short by (simp add: min_match_def word_less_nat_alt)
+    show False
+      using min_le c_len c_short by linarith
+  qed
+qed
+
+lemma encode_window_section_budget_buffer_pending_byte:
+  assumes budget:
+    "encode_window_section_budget src_bytes tgt_bytes
+      data_cap inst_cap addr_cap spec_st"
+      and tp_lt: "enc_tp spec_st < length tgt_bytes"
+      and short:
+    "em_len (find_best_match_spec src_bytes tgt_bytes (enc_tp spec_st)
+      (build_index_spec src_bytes)) < min_match"
+  shows "encode_window_section_budget src_bytes tgt_bytes
+      data_cap inst_cap addr_cap
+      (buffer_pending_byte_spec (tgt_bytes ! enc_tp spec_st) spec_st)"
+proof -
+  let ?idx = "build_index_spec src_bytes"
+  let ?spec' =
+    "buffer_pending_byte_spec (tgt_bytes ! enc_tp spec_st) spec_st"
+  have reaches0:
+    "encode_window_spec_reaches_final src_bytes tgt_bytes spec_st"
+    using budget by (simp add: encode_window_section_budget_def)
+  have step:
+    "encode_window_full_loop (length tgt_bytes + 1 - enc_tp spec_st)
+       src_bytes tgt_bytes ?idx spec_st =
+     encode_window_full_loop (length tgt_bytes + 1 - enc_tp ?spec')
+       src_bytes tgt_bytes ?idx ?spec'"
+  proof -
+    have fuel:
+      "length tgt_bytes + 1 - enc_tp spec_st =
+       Suc (length tgt_bytes - enc_tp spec_st)"
+      using tp_lt by simp
+    have fuel':
+      "length tgt_bytes + 1 - enc_tp ?spec' =
+       length tgt_bytes - enc_tp spec_st"
+      using tp_lt by (simp add: buffer_pending_byte_spec_def)
+    have step':
+      "encode_window_full_step src_bytes tgt_bytes ?idx spec_st = ?spec'"
+      using short by (simp add: encode_window_full_step_def Let_def)
+    show ?thesis
+    proof -
+      have not_done: "\<not> enc_tp spec_st \<ge> length tgt_bytes"
+        using tp_lt by simp
+      have "encode_window_full_loop (length tgt_bytes + 1 - enc_tp spec_st)
+              src_bytes tgt_bytes ?idx spec_st =
+            encode_window_full_loop
+              (Suc (length tgt_bytes - enc_tp spec_st))
+              src_bytes tgt_bytes ?idx spec_st"
+        by (simp only: fuel)
+      also have "... =
+            encode_window_full_loop (length tgt_bytes - enc_tp spec_st)
+              src_bytes tgt_bytes ?idx
+              (encode_window_full_step src_bytes tgt_bytes ?idx spec_st)"
+        by (simp only: encode_window_full_loop_Suc not_done if_False)
+      also have "... =
+            encode_window_full_loop (length tgt_bytes - enc_tp spec_st)
+              src_bytes tgt_bytes ?idx ?spec'"
+        by (simp only: step')
+      also have "... =
+            encode_window_full_loop (length tgt_bytes + 1 - enc_tp ?spec')
+              src_bytes tgt_bytes ?idx ?spec'"
+        by (simp only: fuel')
+      finally show ?thesis .
+    qed
+  qed
+  have reaches':
+    "encode_window_spec_reaches_final src_bytes tgt_bytes ?spec'"
+    using reaches0 step
+    by (simp add: encode_window_spec_reaches_final_def)
+  have prefix':
+    "encode_window_section_prefix_budget src_bytes tgt_bytes ?spec'"
+    using budget
+    by (simp add: encode_window_section_budget_def
+        encode_window_section_prefix_budget_def
+        buffer_pending_byte_spec_def)
+  have caps:
+    "encoder_final_section_caps_ok src_bytes tgt_bytes
+      data_cap inst_cap addr_cap"
+    using budget by (simp add: encode_window_section_budget_def)
+  show ?thesis
+    using reaches' prefix' caps
+    by (simp add: encode_window_section_budget_def)
+qed
+
 lemma encode_window_pending_byte_step_topdown_budget:
   assumes rel:
     "encode_window_loop_budget_rel s src src_len tgt tgt_len
@@ -8566,6 +8719,9 @@ lemma encode_window_pending_byte_step_topdown_budget:
       and buffers:
     "encode_window_loop_buffers_ok s src src_len tgt tgt_len
       pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      and match_rel:
+    "encode_window_match_rel s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
       and pend_lt: "pend_len < pending_cap"
       and tp_lt: "tp < tgt_len"
       and short: "match_t_C.len_C m < (of_nat min_match :: 32 word)"
@@ -8584,9 +8740,233 @@ lemma encode_window_pending_byte_step_topdown_budget:
                 sec' tp' pend_len' src_bytes tgt_bytes spec_st' \<and>
               (((pend_len', sec', tp'), t), ((pend_len, sec, tp), s)) \<in>
                 measure
-                  (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
-                     unat tgt_len - unat tp) \<rbrace>"
-  sorry
+	                  (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
+	                     unat tgt_len - unat tp) \<rbrace>"
+proof -
+  let ?byte = "tgt_bytes ! unat tp"
+  let ?written = "heap_w8 s (tgt +\<^sub>p uint tp)"
+  let ?t =
+    "heap_w8_update
+      (\<lambda>h. h(pending +\<^sub>p uint pend_len :=
+             ?written)) s"
+  let ?spec = "buffer_pending_byte_spec ?byte spec_st"
+  have update_eq:
+    "heap_w8_update
+       (\<lambda>h. h(pending +\<^sub>p uint pend_len :=
+              h (tgt +\<^sub>p uint tp))) s = ?t"
+    by simp
+  have pend_nat_lt: "unat pend_len < unat pending_cap"
+    using pend_lt by (simp add: word_less_nat_alt)
+  have tp_nat_lt: "unat tp < unat tgt_len"
+    using tp_lt by (simp add: word_less_nat_alt)
+  have tp_suc_le: "Suc (unat tp) \<le> unat tgt_len"
+    using tp_nat_lt by simp
+  have pend_suc: "unat (pend_len + 1) = Suc (unat pend_len)"
+    by (rule unat_suc_word_less[OF pend_lt])
+  have tp_suc: "unat (tp + 1) = Suc (unat tp)"
+    by (rule unat_suc_word_less[OF tp_lt])
+
+  have pending_valid: "buf_valid s pending (unat pending_cap)"
+    and tgt_valid: "buf_valid s tgt (unat tgt_len)"
+    and pending_dist: "ptr_range_distinct pending (unat pending_cap)"
+    and pending_src:
+      "bufs_disjoint pending (unat pending_cap) src (unat src_len)"
+    and pending_tgt:
+      "bufs_disjoint pending (unat pending_cap) tgt (unat tgt_len)"
+    and pending_data:
+      "bufs_disjoint pending (unat pending_cap) data (unat data_cap)"
+    and pending_inst:
+      "bufs_disjoint pending (unat pending_cap) inst (unat inst_cap)"
+    and pending_addr:
+      "bufs_disjoint pending (unat pending_cap) addr (unat addr_cap)"
+    using buffers
+    by (simp_all add: encode_window_loop_buffers_ok_def)
+  have pending_ptr:
+    "ptr_valid (heap_typing s) (pending +\<^sub>p uint pend_len)"
+    by (rule buf_valid_uintD[OF pending_valid pend_nat_lt])
+  have tgt_ptr:
+    "ptr_valid (heap_typing s) (tgt +\<^sub>p uint tp)"
+    by (rule buf_valid_uintD[OF tgt_valid tp_nat_lt])
+
+  have src_heap:
+    "heap_bytes ?t src (unat src_len) = src_bytes"
+  proof -
+    have src_pending:
+      "bufs_disjoint src (unat src_len) pending (unat pending_cap)"
+      using pending_src by (simp add: bufs_disjoint_sym)
+    have "heap_bytes ?t src (unat src_len) = heap_bytes s src (unat src_len)"
+      by (rule heap_bytes_update_disjoint_prefix[
+          OF src_pending pend_nat_lt order.refl])
+    thus ?thesis
+      using rel by (simp add: encode_window_loop_budget_rel_def)
+  qed
+  have tgt_heap:
+    "heap_bytes ?t tgt (unat tgt_len) = tgt_bytes"
+  proof -
+    have tgt_pending:
+      "bufs_disjoint tgt (unat tgt_len) pending (unat pending_cap)"
+      using pending_tgt by (simp add: bufs_disjoint_sym)
+    have "heap_bytes ?t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len)"
+      by (rule heap_bytes_update_disjoint_prefix[
+          OF tgt_pending pend_nat_lt order.refl])
+    thus ?thesis
+      using rel by (simp add: encode_window_loop_budget_rel_def)
+  qed
+  have tgt_byte:
+    "?written = ?byte"
+  proof -
+    have tgt_bytes_eq: "heap_bytes s tgt (unat tgt_len) = tgt_bytes"
+      using rel by (simp add: encode_window_loop_budget_rel_def)
+    have nth_heap:
+      "heap_bytes s tgt (unat tgt_len) ! unat tp =
+       heap_w8 s (tgt +\<^sub>p int (unat tp))"
+      by (rule heap_bytes_nth[OF tp_nat_lt])
+    have byte_eq:
+      "tgt_bytes ! unat tp =
+       heap_w8 s (tgt +\<^sub>p int (unat tp))"
+      using tgt_bytes_eq nth_heap by simp
+    show ?thesis
+      using byte_eq[symmetric] by (simp only: uint_nat)
+  qed
+  have pending_heap:
+    "heap_bytes_word ?t pending 0 (pend_len + 1) =
+       enc_pending ?spec"
+  proof -
+    have append:
+      "heap_bytes_word ?t pending 0 (pend_len + 1) =
+       heap_bytes_word s pending 0 pend_len @
+       [?written]"
+      by (rule heap_bytes_word_zero_update_append[OF pend_lt pending_dist])
+    show ?thesis
+      using append rel tgt_byte
+      by (simp add: encode_window_loop_budget_rel_def
+          buffer_pending_byte_spec_def)
+  qed
+  have data_heap:
+    "heap_bytes ?t data (unat (sections_t_C.data_pos_C sec)) =
+     heap_bytes s data (unat (sections_t_C.data_pos_C sec))"
+  proof -
+    have data_pending:
+      "bufs_disjoint data (unat data_cap) pending (unat pending_cap)"
+      using pending_data by (simp add: bufs_disjoint_sym)
+    have data_le:
+      "unat (sections_t_C.data_pos_C sec) \<le> unat data_cap"
+      using rel by (simp add: encode_window_loop_budget_rel_def)
+    show ?thesis
+      by (rule heap_bytes_update_disjoint_prefix[
+          OF data_pending pend_nat_lt data_le])
+  qed
+  have inst_heap:
+    "heap_bytes ?t inst (unat (sections_t_C.inst_pos_C sec)) =
+     heap_bytes s inst (unat (sections_t_C.inst_pos_C sec))"
+  proof -
+    have inst_pending:
+      "bufs_disjoint inst (unat inst_cap) pending (unat pending_cap)"
+      using pending_inst by (simp add: bufs_disjoint_sym)
+    have inst_le:
+      "unat (sections_t_C.inst_pos_C sec) \<le> unat inst_cap"
+      using rel by (simp add: encode_window_loop_budget_rel_def)
+    show ?thesis
+      by (rule heap_bytes_update_disjoint_prefix[
+          OF inst_pending pend_nat_lt inst_le])
+  qed
+  have addr_heap:
+    "heap_bytes ?t addr (unat (sections_t_C.addr_pos_C sec)) =
+     heap_bytes s addr (unat (sections_t_C.addr_pos_C sec))"
+  proof -
+    have addr_pending:
+      "bufs_disjoint addr (unat addr_cap) pending (unat pending_cap)"
+      using pending_addr by (simp add: bufs_disjoint_sym)
+    have addr_le:
+      "unat (sections_t_C.addr_pos_C sec) \<le> unat addr_cap"
+      using rel by (simp add: encode_window_loop_budget_rel_def)
+    show ?thesis
+      by (rule heap_bytes_update_disjoint_prefix[
+          OF addr_pending pend_nat_lt addr_le])
+  qed
+  have sections_rel:
+    "enc_sections_state_rel ?t data inst addr sec ?spec"
+    using rel data_heap inst_heap addr_heap
+    by (simp add: encode_window_loop_budget_rel_def enc_sections_state_rel_def
+                  emitted_sections_def buffer_pending_byte_spec_def)
+  have slack_step:
+    "Suc (unat pend_len) + (unat tgt_len - Suc (unat tp)) =
+     unat pend_len + (unat tgt_len - unat tp)"
+    using tp_nat_lt by simp
+  have data_slack:
+    "unat (sections_t_C.data_pos_C sec) + unat pend_len +
+       (unat tgt_len - unat tp) + 64 \<le> unat data_cap"
+    using rel unfolding encode_window_loop_budget_rel_def by blast
+  have inst_slack:
+    "unat (sections_t_C.inst_pos_C sec) + unat pend_len +
+       (unat tgt_len - unat tp) + 64 \<le> unat inst_cap"
+    using rel unfolding encode_window_loop_budget_rel_def by blast
+  have data_slack_after:
+    "unat (sections_t_C.data_pos_C sec) + Suc (unat pend_len) +
+       (unat tgt_len - Suc (unat tp)) + 64 \<le> unat data_cap"
+    using data_slack slack_step by linarith
+  have inst_slack_after:
+    "unat (sections_t_C.inst_pos_C sec) + Suc (unat pend_len) +
+       (unat tgt_len - Suc (unat tp)) + 64 \<le> unat inst_cap"
+    using inst_slack slack_step by linarith
+  have tp_eq: "enc_tp spec_st = unat tp"
+    using rel by (simp add: encode_window_loop_budget_rel_def)
+  have tp_spec_lt: "enc_tp spec_st < length tgt_bytes"
+    using rel tp_nat_lt
+    by (simp add: encode_window_loop_budget_rel_def)
+  have pure_short:
+    "em_len (find_best_match_spec src_bytes tgt_bytes (enc_tp spec_st)
+      (build_index_spec src_bytes)) < min_match"
+    by (rule encode_window_match_rel_short_spec[
+        OF rel match_rel tp_lt match short])
+  have budget0:
+    "encode_window_section_budget src_bytes tgt_bytes
+      data_cap inst_cap addr_cap spec_st"
+    using rel by (simp add: encode_window_loop_budget_rel_def)
+  have budget_after:
+    "encode_window_section_budget src_bytes tgt_bytes
+      data_cap inst_cap addr_cap ?spec"
+    using encode_window_section_budget_buffer_pending_byte[
+        OF budget0 tp_spec_lt pure_short] tp_eq
+    by simp
+  have rel_after:
+    "encode_window_loop_budget_rel ?t src src_len tgt tgt_len
+      data data_cap inst inst_cap addr addr_cap pending pending_cap
+      sec (tp + 1) (pend_len + 1) src_bytes tgt_bytes ?spec"
+    using rel src_heap tgt_heap pending_heap sections_rel
+      pend_suc tp_suc pend_nat_lt data_slack_after inst_slack_after
+      tp_suc_le budget_after
+    by (auto simp: encode_window_loop_budget_rel_def
+                   buffer_pending_byte_spec_def word_less_nat_alt)
+  have measure_after:
+    "(((pend_len + 1, sec, tp + 1), ?t), ((pend_len, sec, tp), s)) \<in>
+      measure
+        (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
+           unat tgt_len - unat tp)"
+    using tp_nat_lt tp_suc by simp
+  have find_run:
+    "gets_the (find_best_match' src src_len tgt tgt_len tp head_arr next_arr)
+      \<bullet> s \<lbrace> \<lambda>r t. t = s \<and> r = Result m \<rbrace>"
+    unfolding gets_the_def
+    apply runs_to_vcg
+    using match by simp
+  have short_branch: "match_t_C.len_C m < (4 :: 32 word)"
+    using short by (simp add: min_match_def)
+  have cap_branch: "\<not> pending_cap \<le> pend_len"
+    using pend_lt by simp
+  show ?thesis
+    unfolding encode_window_c_loop_body_def
+    apply simp
+    apply (rule runs_to_bind)
+     apply (rule runs_to_weaken[OF find_run])
+    apply clarsimp
+    using short_branch cap_branch
+    apply simp
+    apply runs_to_vcg
+    using pending_ptr tgt_ptr rel_after measure_after update_eq
+    apply (auto simp: update_eq)
+    done
+qed
 
 lemma encode_window_try_fused_copy_step_topdown_budget:
   assumes rel:
