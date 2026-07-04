@@ -9070,7 +9070,53 @@ lemma encode_window_match_step_topdown_budget:
                 measure
                   (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
                      unat tgt_len - unat tp) \<rbrace>"
-  sorry
+proof -
+  have find_run:
+    "gets_the (find_best_match' src src_len tgt tgt_len tp head_arr next_arr)
+      \<bullet> s \<lbrace> \<lambda>r t. t = s \<and> r = Result m \<rbrace>"
+    unfolding gets_the_def
+    apply runs_to_vcg
+    using match by simp
+  have match_not_short:
+    "\<not> match_t_C.len_C m < (of_nat min_match :: 32 word)"
+    using match_len
+    by simp
+  show ?thesis
+  proof (cases "try_emit_add_copy_spec (length src_bytes)
+      (unat (match_t_C.pos_C m)) (unat (match_t_C.len_C m)) spec_st")
+    case None
+    show ?thesis
+      unfolding encode_window_c_loop_body_def
+      apply simp
+      apply (rule runs_to_bind)
+       apply (rule runs_to_weaken[OF find_run])
+      apply clarsimp
+      using match_not_short
+      apply (simp add: min_match_def)
+      apply (fold encode_window_c_match_branch_def)
+      apply (rule runs_to_weaken[
+        OF encode_window_flush_then_copy_step_topdown_budget[
+          OF rel buffers match_rel src_tgt_bound tp_lt match match_len None]])
+      apply clarsimp
+      done
+  next
+    case (Some fused)
+    show ?thesis
+      unfolding encode_window_c_loop_body_def
+      apply simp
+      apply (rule runs_to_bind)
+       apply (rule runs_to_weaken[OF find_run])
+      apply clarsimp
+      using match_not_short
+      apply (simp add: min_match_def)
+      apply (fold encode_window_c_match_branch_def)
+      apply (rule runs_to_weaken[
+        OF encode_window_try_fused_copy_step_topdown_budget[
+          OF rel buffers match_rel src_tgt_bound tp_lt match match_len Some]])
+      apply clarsimp
+      done
+  qed
+qed
 
 lemma encode_window_loop_body_topdown_budget:
   assumes rel:
