@@ -527,6 +527,7 @@ lemma vcdiff_encode'_writes_encode_spec_roundtrip_context:
       and fit:
     "sections_fit_32 src_bytes tgt_bytes
        (encode_window_full_spec src_bytes tgt_bytes)"
+      and src_tgt_bound: "length src_bytes + length tgt_bytes < 2 ^ 32"
       and enc_out_cap_ok:
     "length (encode_spec src_bytes tgt_bytes) \<le> unat enc_out_cap"
       and encoded_len_word:
@@ -551,10 +552,11 @@ lemma vcdiff_encode'_writes_encode_spec_roundtrip_context:
         apply (metis head_no_alias)
        apply (metis next_no_alias)
       apply (metis next_head_disjoint)
-     apply (metis head_next_disjoint)
-    apply (rule fit)
-   apply (rule enc_out_cap_ok)
-  apply (rule encoded_len_word)
+	    apply (metis head_next_disjoint)
+	    apply (rule fit)
+	   apply (rule src_tgt_bound)
+	   apply (rule enc_out_cap_ok)
+	  apply (rule encoded_len_word)
   done
 
 theorem vcdiff_encode'_then_decode_roundtrip_topdown:
@@ -649,8 +651,8 @@ theorem vcdiff_encode'_then_decode_roundtrip_topdown:
 proof (rule runs_to_weaken[
     OF vcdiff_encode'_writes_encode_spec_roundtrip_context[
       OF input buffers pending_cap_ok src_len_word head_valid next_valid
-         head_no_alias next_no_alias next_head_disjoint head_next_disjoint
-         fit enc_out_cap_ok encoded_len_word]])
+	         head_no_alias next_no_alias next_head_disjoint head_next_disjoint
+	         fit src_tgt_bound enc_out_cap_ok encoded_len_word]])
   fix r enc_t
   assume post:
     "\<exists>n. r = Result n \<and>

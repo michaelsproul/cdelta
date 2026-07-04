@@ -1317,6 +1317,178 @@ lemma enc_mode_arg_wf_wf_encoding_byte:
   using wf mode_ge
   by (simp add: enc_mode_arg_wf_def)
 
+definition enc_best_bytes :: "32 word \<Rightarrow> 32 word \<Rightarrow> byte list" where
+  "enc_best_bytes mode arg =
+     (if mode < (6 :: 32 word) then varint_encode (unat arg)
+      else [ucast arg])"
+
+definition enc_best_rel ::
+  "32 word \<Rightarrow> 32 word \<Rightarrow> 32 word \<Rightarrow> nat \<times> byte list \<Rightarrow> bool"
+where
+  "enc_best_rel arg mode sz best \<longleftrightarrow>
+     best = (unat mode, enc_best_bytes mode arg) \<and>
+     unat sz = length (enc_best_bytes mode arg)"
+
+fun try_near_modes_prefix ::
+  "cache \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<times> byte list \<Rightarrow> nat \<times> byte list"
+where
+  "try_near_modes_prefix c addr 0 best = best"
+| "try_near_modes_prefix c addr (Suc i) best =
+     try_near_mode c addr i (try_near_modes_prefix c addr i best)"
+
+fun try_same_modes_prefix ::
+  "cache \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<times> byte list \<Rightarrow> nat \<times> byte list"
+where
+  "try_same_modes_prefix c addr 0 best = best"
+| "try_same_modes_prefix c addr (Suc i) best =
+     try_same_mode c addr i (try_same_modes_prefix c addr i best)"
+
+lemma try_near_modes_prefix_full:
+  "try_near_modes_prefix c addr s_near best =
+   try_near_modes c addr s_near best"
+  by (simp add: s_near_def eval_nat_numeral)
+
+lemma try_same_modes_prefix_full:
+  "try_same_modes_prefix c addr s_same best =
+   try_same_modes c addr s_same best"
+  by (simp add: s_same_def eval_nat_numeral)
+
+lemma try_same_modes_zero [simp]:
+  "try_same_modes c 0 k best = best"
+  by (induction k arbitrary: best) (simp_all add: try_same_mode_def Let_def)
+
+lemma try_near_modes_prefix_suc_word [simp]:
+  assumes "unat (i :: 32 word) < s_near"
+  shows "try_near_modes_prefix c addr (unat (i + 1)) best =
+         try_near_mode c addr (unat i)
+           (try_near_modes_prefix c addr (unat i) best)"
+proof -
+  have "unat (i + 1 :: 32 word) = Suc (unat i)"
+    using assms by (simp add: s_near_def unat_word_ariths)
+  then show ?thesis
+    by simp
+qed
+
+lemma try_same_modes_prefix_suc_word [simp]:
+  assumes "unat (i :: 32 word) < s_same"
+  shows "try_same_modes_prefix c addr (unat (i + 1)) best =
+         try_same_mode c addr (unat i)
+           (try_same_modes_prefix c addr (unat i) best)"
+proof -
+  have "unat (i + 1 :: 32 word) = Suc (unat i)"
+    using assms by (simp add: s_same_def unat_word_ariths)
+  then show ?thesis
+    by simp
+qed
+
+lemma enc_best_rel_self:
+  assumes size: "varint_size' addr s = Some sz"
+  shows "enc_best_rel addr 0 sz (0, varint_encode (unat addr))"
+  using varint_size'_unat_eq_varint_size[OF size]
+  by (simp add: enc_best_rel_def enc_best_bytes_def)
+
+lemma enc_best_rel_here:
+  assumes addr_lt_here: "addr < here"
+      and size: "varint_size' (here - addr) s = Some sz"
+  shows "enc_best_rel (here - addr) 1 sz
+          (1, varint_encode (unat here - unat addr))"
+proof -
+  have addr_le_here: "addr \<le> here"
+    using addr_lt_here by (simp add: word_less_nat_alt word_le_nat_alt)
+  have arg_unat: "unat (here - addr) = unat here - unat addr"
+    using addr_le_here by unat_arith
+  show ?thesis
+    using varint_size'_unat_eq_varint_size[OF size] arg_unat
+    by (simp add: enc_best_rel_def enc_best_bytes_def)
+qed
+
+lemma enc_best_rel_near_step:
+  assumes abs: "enc_cache_abs s c"
+      and wf: "enc_cache_wf c"
+      and rel: "enc_best_rel best_arg best_mode_v best_sz best"
+      and i_lt: "unat i < s_near"
+  shows "enc_best_rel
+       (if near_arr_'' s .[unat i] \<le> addr
+        then case varint_size' (addr - near_arr_'' s .[unat i]) s of
+               None \<Rightarrow> best_arg
+             | Some sz \<Rightarrow> if sz < best_sz then addr - near_arr_'' s .[unat i] else best_arg
+        else best_arg)
+       (if near_arr_'' s .[unat i] \<le> addr
+        then case varint_size' (addr - near_arr_'' s .[unat i]) s of
+               None \<Rightarrow> best_mode_v
+             | Some sz \<Rightarrow> if sz < best_sz then 2 + i else best_mode_v
+        else best_mode_v)
+       (if near_arr_'' s .[unat i] \<le> addr
+        then case varint_size' (addr - near_arr_'' s .[unat i]) s of
+               None \<Rightarrow> best_sz
+             | Some sz \<Rightarrow> if sz < best_sz then sz else best_sz
+        else best_sz)
+       (try_near_mode c (unat addr) (unat i) best)"
+proof (cases "near_arr_'' s .[unat i] \<le> addr")
+  case False
+  have near_eq:
+    "unat (near_arr_'' s .[unat i]) = near c ! unat i"
+    using enc_cache_abs_near_unat[OF abs wf i_lt] .
+  have pure_false: "\<not> near c ! unat i \<le> unat addr"
+    using False near_eq by (simp add: word_le_nat_alt)
+  then show ?thesis
+    using rel False pure_false by (simp add: try_near_mode_def)
+next
+  case base_le: True
+  obtain sz where size: "varint_size' (addr - near_arr_'' s .[unat i]) s = Some sz"
+    using varint_size'_some by blast
+  have near_eq:
+    "unat (near_arr_'' s .[unat i]) = near c ! unat i"
+    using enc_cache_abs_near_unat[OF abs wf i_lt] .
+  have pure_true: "near c ! unat i \<le> unat addr"
+    using base_le near_eq by (simp add: word_le_nat_alt)
+  have arg_unat:
+    "unat (addr - near_arr_'' s .[unat i]) =
+     unat addr - near c ! unat i"
+    using base_le near_eq by (simp add: unat_sub word_le_nat_alt)
+  have mode_unat: "unat (2 + i :: 32 word) = 2 + unat i"
+    using i_lt by (simp add: s_near_def unat_word_ariths)
+  have sz_len:
+    "unat sz =
+     length (varint_encode (unat addr - near c ! unat i))"
+    using varint_size'_unat_eq_varint_size[OF size] arg_unat by simp
+  have cand_sz_pos: "0 < varint_size (unat addr - near c ! unat i)"
+    using varint_encode_nonempty[of "unat addr - near c ! unat i"]
+    by (metis length_greater_0_conv varint_encode_length)
+  show ?thesis
+    using rel base_le size near_eq pure_true arg_unat mode_unat sz_len
+      cand_sz_pos i_lt
+	    by (auto simp: enc_best_rel_def enc_best_bytes_def
+	        try_near_mode_def try_better_def word_less_nat_alt s_near_def)
+qed
+
+lemma enc_best_rel_near_step_preserve:
+  fixes addr i :: "32 word"
+  assumes abs: "enc_cache_abs s c"
+      and wf: "enc_cache_wf c"
+      and rel: "enc_best_rel best_arg best_mode_v best_sz best"
+      and i_lt: "unat i < s_near"
+      and base_gt: "\<not> near_arr_'' s .[unat i] \<le> addr"
+  shows "enc_best_rel best_arg best_mode_v best_sz
+           (try_near_mode c (unat addr) (unat i) best)"
+  using enc_best_rel_near_step[OF abs wf rel i_lt, of addr] base_gt
+  by simp
+
+lemma enc_best_rel_near_step_not_better:
+  fixes addr i sz :: "32 word"
+  assumes abs: "enc_cache_abs s c"
+      and wf: "enc_cache_wf c"
+      and rel: "enc_best_rel best_arg best_mode_v best_sz best"
+      and i_lt: "unat i < s_near"
+      and base_le: "near_arr_'' s .[unat i] \<le> addr"
+      and size: "varint_size' (addr - near_arr_'' s .[unat i]) s = Some sz"
+      and not_lt: "\<not> unat sz < unat best_sz"
+  shows "enc_best_rel best_arg best_mode_v best_sz
+           (try_near_mode c (unat addr) (unat i) best)"
+  using enc_best_rel_near_step[OF abs wf rel i_lt, of addr]
+    base_le size not_lt
+  by (simp add: word_less_nat_alt)
+
 lemma enc_best_wf_self:
   "enc_best_wf s c addr here addr 0"
   by (simp add: enc_best_wf_def wf_encoding_def)
@@ -1509,6 +1681,97 @@ proof -
     by (simp add: word_less_nat_alt unat_mod)
 qed
 
+lemma enc_best_rel_same_step:
+  assumes abs: "enc_cache_abs s c"
+      and wf: "enc_cache_wf c"
+      and rel: "enc_best_rel best_arg best_mode_v best_sz best"
+      and addr_ne: "addr \<noteq> 0"
+      and i_lt: "unat i < s_same"
+  shows "enc_best_rel
+       (if same_arr_'' s .[unat (i * 0x100 + addr mod 0x100)] = addr \<and>
+           1 < best_sz
+        then addr mod 0x100 else best_arg)
+       (if same_arr_'' s .[unat (i * 0x100 + addr mod 0x100)] = addr \<and>
+           1 < best_sz
+        then 6 + i else best_mode_v)
+       (if same_arr_'' s .[unat (i * 0x100 + addr mod 0x100)] = addr \<and>
+           1 < best_sz
+        then 1 else best_sz)
+       (try_same_mode c (unat addr) (unat i) best)"
+proof -
+  have i_lt_3: "unat i < 3"
+    using i_lt by (simp add: s_same_def)
+  let ?slot_w = "i * 0x100 + addr mod 0x100 :: 32 word"
+  let ?slot = "unat i * 256 + unat addr mod 256"
+  have slot_unat: "unat ?slot_w = ?slot"
+    by (rule enc_best_same_slot_unat[OF i_lt_3])
+  have slot_lt: "?slot < same_buckets"
+    using i_lt_3 by (simp add: same_buckets_def s_same_def)
+  have same_eq:
+    "unat (same_arr_'' s .[unat ?slot_w]) = same c ! ?slot"
+    using enc_cache_abs_same_unat[OF abs wf slot_lt] slot_unat by simp
+  have addr_ne_nat: "unat addr \<noteq> 0"
+  proof
+    assume zero: "unat addr = 0"
+    have "addr = word_of_nat (unat addr)"
+      by (simp add: word_unat.Rep_inverse)
+    also have "\<dots> = 0"
+      using zero by simp
+    finally show False
+      using addr_ne by simp
+  qed
+  have mode_unat: "unat (6 + i :: 32 word) = 2 + s_near + unat i"
+    using i_lt_3 by (simp add: s_near_def unat_word_ariths)
+  have byte_eq:
+    "(word_of_nat (unat addr mod 256) :: byte) =
+     ucast (addr mod 0x100 :: 32 word)"
+  proof -
+    have lhs_unat:
+      "unat (word_of_nat (unat addr mod 256) :: byte) = unat addr mod 256"
+      by (simp add: unat_of_nat_eq)
+    have rhs_unat:
+      "unat (ucast (addr mod 0x100 :: 32 word) :: byte) =
+       unat addr mod 256"
+      by (simp add: unat_ucast unat_mod)
+    show ?thesis
+      using lhs_unat rhs_unat by (metis word_unat.Rep_inverse)
+  qed
+	  show ?thesis
+	    using rel same_eq addr_ne_nat mode_unat byte_eq
+	    by (auto simp: enc_best_rel_def enc_best_bytes_def try_same_mode_def
+	        try_better_def word_less_nat_alt s_near_def)
+qed
+
+lemma enc_best_rel_same_step_preserve:
+  fixes addr i :: "32 word"
+  assumes abs: "enc_cache_abs s c"
+      and wf: "enc_cache_wf c"
+      and rel: "enc_best_rel best_arg best_mode_v best_sz best"
+      and addr_ne: "addr \<noteq> 0"
+      and i_lt: "unat i < s_same"
+      and no_better:
+        "\<not> (same_arr_'' s .[unat (i * 0x100 + addr mod 0x100)] = addr \<and>
+             1 < best_sz)"
+  shows "enc_best_rel best_arg best_mode_v best_sz
+           (try_same_mode c (unat addr) (unat i) best)"
+  using enc_best_rel_same_step[OF abs wf rel addr_ne i_lt] no_better
+  by simp
+
+lemma enc_best_rel_same_step_hit:
+  fixes addr i :: "32 word"
+  assumes abs: "enc_cache_abs s c"
+      and wf: "enc_cache_wf c"
+      and rel: "enc_best_rel best_arg best_mode_v best_sz best"
+      and addr_ne: "addr \<noteq> 0"
+      and i_lt: "unat i < s_same"
+      and same_hit:
+        "same_arr_'' s .[unat (i * 0x100 + addr mod 0x100)] = addr"
+      and better: "1 < best_sz"
+  shows "enc_best_rel (addr mod 0x100) (6 + i) 1
+           (try_same_mode c (unat addr) (unat i) best)"
+  using enc_best_rel_same_step[OF abs wf rel addr_ne i_lt] same_hit better
+  by simp
+
 lemma enc_best_wf_same_bound:
   assumes abs: "enc_cache_abs s c"
       and wf: "enc_cache_wf c"
@@ -1579,6 +1842,340 @@ lemma mode_t_C_final_pair_case_apply:
            Some (mode_t_C final_mode final_arg)) \<and>
          (\<not> p \<longrightarrow> mode = final_mode \<and> arg = final_arg)"
   using assms by (cases p; cases g) (auto split: prod.splits)
+
+lemma best_mode'_some:
+  assumes abs: "enc_cache_abs s c"
+      and wf: "enc_cache_wf c"
+  obtains m where "best_mode' addr here s = Some m"
+proof -
+  let ?C_near = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                     best_sz :: 32 word, i :: 32 word) s. i < 4"
+  let ?B_near = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                     best_sz :: 32 word, i :: 32 word).
+       do {
+         base <- ogets (\<lambda>s. near_arr_'' s .[unat i]);
+         (best_arg, best_mode_v, best_sz) <-
+           ocondition (\<lambda>s. base \<le> addr)
+            (do {
+               sz <- varint_size' (addr - base);
+               oreturn
+                (if sz < best_sz then (addr - base, 2 + i, sz)
+                 else (best_arg, best_mode_v, best_sz))
+             })
+            (oreturn (best_arg, best_mode_v, best_sz));
+         oreturn (best_arg, best_mode_v, best_sz, i + 1)
+       }"
+  let ?I_near = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                     best_sz :: 32 word, i :: 32 word) st.
+       enc_best_wf s c addr here best_arg best_mode_v \<and> unat i \<le> 4"
+  let ?C_same = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                    best_sz :: 32 word, i :: 32 word) s. i < 3"
+  let ?B_same = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                    best_sz :: 32 word, i :: 32 word).
+       do {
+         oguard (\<lambda>_. i * 0x100 + addr mod 0x100 < 0x300);
+         ogets
+          (\<lambda>s. (case if same_arr_'' s .[unat (i * 0x100 + addr mod 0x100)] =
+                         addr \<and> 1 < best_sz
+                     then (addr mod 0x100, 6 + i, 1)
+                     else (best_arg, best_mode_v, best_sz) of
+                (x1, x2, x3) \<Rightarrow> \<lambda>_. (x1, x2, x3, i + 1)) s)
+       }"
+  let ?I_same = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                    best_sz :: 32 word, i :: 32 word) st.
+       enc_best_wf s c addr here best_arg best_mode_v \<and> unat i \<le> 3"
+  let ?B_near_unfolded = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                              best_sz :: 32 word, i :: 32 word) st.
+       (case if near_arr_'' st .[unat i] \<le> addr
+             then case varint_size' (addr - near_arr_'' st .[unat i]) st of
+                    None \<Rightarrow> None
+                  | Some sz \<Rightarrow>
+                      Some
+                       (if sz < best_sz
+                        then (addr - near_arr_'' st .[unat i], 2 + i, sz)
+                        else (best_arg, best_mode_v, best_sz))
+             else Some (best_arg, best_mode_v, best_sz) of
+          None \<Rightarrow> None
+        | Some x \<Rightarrow>
+            (case x of
+               (best_arg, best_mode_v, best_sz) \<Rightarrow>
+                 \<lambda>_. Some (best_arg, best_mode_v, best_sz, i + 1)) st)"
+  let ?B_same_unfolded = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                              best_sz :: 32 word, i :: 32 word) st.
+       (case if i * 0x100 + addr mod 0x100 < 0x300 then Some () else None of
+          None \<Rightarrow> None
+        | Some _ \<Rightarrow>
+            Some
+             (fst (if same_arr_'' st .[unat (i * 0x100 + addr mod 0x100)] =
+                       addr \<and> 1 < best_sz
+                    then (addr mod 0x100, 6 + i, 1)
+                    else (best_arg, best_mode_v, best_sz)),
+              fst (snd (if same_arr_'' st .[unat (i * 0x100 + addr mod 0x100)] =
+                            addr \<and> 1 < best_sz
+                         then (addr mod 0x100, 6 + i, 1)
+                         else (best_arg, best_mode_v, best_sz))),
+              snd (snd (if same_arr_'' st .[unat (i * 0x100 + addr mod 0x100)] =
+                            addr \<and> 1 < best_sz
+                         then (addr mod 0x100, 6 + i, 1)
+                         else (best_arg, best_mode_v, best_sz))),
+              i + 1))"
+  have B_near_unfolded_eq: "?B_near = ?B_near_unfolded"
+    by (auto simp: fun_eq_iff obind_def ocondition_def ogets_def K_def
+        split: prod.splits option.splits)
+  have B_same_unfolded_eq: "?B_same = ?B_same_unfolded"
+    by (auto simp: fun_eq_iff obind_def oguard_def ogets_def K_def
+        split: prod.splits option.splits)
+
+  have near_loop:
+    "case owhile ?C_near ?B_near init s of
+       None \<Rightarrow> False
+     | Some r \<Rightarrow> ?I_near r s"
+    if init_wf: "?I_near init s"
+    for init
+  proof -
+    show ?thesis
+      apply (rule Reader_Monad.owhile_rule
+        [where I = ?I_near
+           and M = "measure (\<lambda>x. case x of
+             (best_arg :: 32 word, best_mode_v :: 32 word,
+              best_sz :: 32 word, i :: 32 word) \<Rightarrow> 4 - unat i)"])
+      using init_wf abs wf
+      apply (simp_all add: Reader_Monad.oreturn_apply ogets_def
+          ocondition_def word_less_nat_alt)
+      subgoal
+        by (auto simp: Reader_Monad.oreturn_apply enc_best_measure_decrease
+            split: prod.splits)
+      subgoal
+        apply (auto simp: Reader_Monad.oreturn_apply obind_def ogets_def
+            ocondition_def varint_size'_some word_less_nat_alt s_near_def
+            split: prod.splits if_splits option.splits)
+        subgoal
+          by (rule enc_best_wf_near_bound[OF abs wf]) simp_all
+        subgoal
+          by (rule enc_best_counter_suc_le) simp_all
+        subgoal
+          by (rule enc_best_counter_suc_le) simp_all
+        subgoal
+          by (rule enc_best_counter_suc_le) simp_all
+        done
+      subgoal
+        by (auto simp: Reader_Monad.oreturn_apply obind_def ogets_def
+            ocondition_def varint_size'_neq_None
+            split: prod.splits if_splits option.splits)
+      done
+  qed
+
+  have same_loop:
+    "case owhile ?C_same ?B_same init s of
+       None \<Rightarrow> False
+     | Some r \<Rightarrow> ?I_same r s"
+    if init_wf: "?I_same init s"
+      and addr_ne: "addr \<noteq> 0"
+    for init
+  proof -
+    show ?thesis
+      apply (rule Reader_Monad.owhile_rule
+        [where I = ?I_same
+           and M = "measure (\<lambda>x. case x of
+             (best_arg :: 32 word, best_mode_v :: 32 word,
+              best_sz :: 32 word, i :: 32 word) \<Rightarrow> 3 - unat i)"])
+      using init_wf abs wf addr_ne
+      apply (simp_all add: Reader_Monad.oreturn_apply ogets_def oguard_def
+          word_less_nat_alt)
+      subgoal
+        by (auto simp: Reader_Monad.oreturn_apply enc_best_measure_decrease
+            split: prod.splits)
+      subgoal
+        apply (auto simp: Reader_Monad.oreturn_apply word_less_nat_alt s_same_def
+            split: prod.splits if_splits option.splits)
+        subgoal
+          by (rule enc_best_wf_same_bound_low[OF abs wf]) simp_all
+        subgoal
+          by (rule enc_best_counter_suc_le) simp_all
+        subgoal
+          by (rule enc_best_counter_suc_le) simp_all
+        subgoal
+          by (rule enc_best_counter_suc_le) simp_all
+        done
+      subgoal
+        by (auto simp: obind_def oguard_def ogets_def word_less_nat_alt
+            unat_word_ariths enc_best_same_slot_nat_lt
+            intro: enc_best_same_slot_guard
+            split: prod.splits)
+      done
+  qed
+
+  obtain best_sz where sz0: "varint_size' addr s = Some best_sz"
+    using varint_size'_some by blast
+  let ?best0 = "(addr, 0 :: 32 word, best_sz)"
+  have best0_wf: "enc_best_wf s c addr here addr 0"
+    by (rule enc_best_wf_self)
+  have best1_case:
+    "case (if addr < here
+           then case varint_size' (here - addr) s of
+                  None \<Rightarrow> None
+                | Some sz \<Rightarrow>
+                    Some (if sz < best_sz then (here - addr, 1, sz) else ?best0)
+           else Some ?best0) of
+       None \<Rightarrow> False
+     | Some (best_arg, best_mode_v, best_sz) \<Rightarrow>
+         enc_best_wf s c addr here best_arg best_mode_v"
+    using best0_wf enc_best_wf_here[of addr here s c]
+    by (auto simp: varint_size'_neq_None split: option.splits)
+
+  let ?best1 =
+    "(if addr < here
+      then case varint_size' (here - addr) s of
+             None \<Rightarrow> None
+           | Some sz \<Rightarrow>
+               Some (if sz < best_sz then (here - addr, 1, sz) else ?best0)
+      else Some ?best0)"
+  obtain best_arg1 best_mode1 best_sz1 where best1:
+      "?best1 = Some (best_arg1, best_mode1, best_sz1)"
+    and wf1: "enc_best_wf s c addr here best_arg1 best_mode1"
+    using best1_case by (cases ?best1) auto
+  have near_init: "?I_near (best_arg1, best_mode1, best_sz1, 0) s"
+    using wf1 by simp
+  obtain best_arg2 best_mode2 best_sz2 i2 where near_res:
+      "owhile ?C_near ?B_near (best_arg1, best_mode1, best_sz1, 0) s =
+       Some (best_arg2, best_mode2, best_sz2, i2)"
+    and wf2: "enc_best_wf s c addr here best_arg2 best_mode2"
+    using near_loop[OF near_init]
+    by (cases "owhile ?C_near ?B_near (best_arg1, best_mode1, best_sz1, 0) s")
+       (auto split: prod.splits)
+  have near_res_unfolded:
+      "owhile ?C_near ?B_near_unfolded (best_arg1, best_mode1, best_sz1, 0) s =
+       Some (best_arg2, best_mode2, best_sz2, i2)"
+    using near_res[unfolded B_near_unfolded_eq] .
+
+  have final_pair:
+    "\<exists>final_arg final_mode.
+       (if addr \<noteq> 0
+        then case owhile ?C_same ?B_same (best_arg2, best_mode2, best_sz2, 0) s of
+               None \<Rightarrow> None
+             | Some (best_arg, best_mode_v, best_sz, i) \<Rightarrow>
+                 Some (best_arg, best_mode_v)
+        else Some (best_arg2, best_mode2)) =
+       Some (final_arg, final_mode)"
+  proof (cases "addr = 0")
+    case True
+    then show ?thesis by auto
+  next
+    case False
+    have same_init: "?I_same (best_arg2, best_mode2, best_sz2, 0) s"
+      using wf2 by simp
+    obtain final_arg final_mode final_sz final_i where same_res:
+        "owhile ?C_same ?B_same (best_arg2, best_mode2, best_sz2, 0) s =
+         Some (final_arg, final_mode, final_sz, final_i)"
+      using same_loop[OF same_init False]
+      by (cases "owhile ?C_same ?B_same (best_arg2, best_mode2, best_sz2, 0) s")
+         (auto split: prod.splits)
+    show ?thesis
+      using False same_res by auto
+  qed
+  then obtain final_arg final_mode where final_pair_res:
+      "(if addr \<noteq> 0
+        then case owhile ?C_same ?B_same (best_arg2, best_mode2, best_sz2, 0) s of
+               None \<Rightarrow> None
+             | Some (best_arg, best_mode_v, best_sz, i) \<Rightarrow>
+                 Some (best_arg, best_mode_v)
+        else Some (best_arg2, best_mode2)) =
+       Some (final_arg, final_mode)"
+    by blast
+  have final_pair_res_unfolded:
+      "(if addr \<noteq> 0
+        then case owhile ?C_same ?B_same_unfolded
+                    (best_arg2, best_mode2, best_sz2, 0) s of
+               None \<Rightarrow> None
+             | Some x \<Rightarrow>
+                 (case x of
+                    (best_arg, best_mode_v, best_sz, i) \<Rightarrow>
+                      \<lambda>_. Some (best_arg, best_mode_v)) s
+        else Some (best_arg2, best_mode2)) =
+       Some (final_arg, final_mode)"
+  proof (cases "addr = 0")
+    case True
+    then show ?thesis
+      using final_pair_res[unfolded B_same_unfolded_eq] by simp
+  next
+    case False
+    then show ?thesis
+      using final_pair_res[unfolded B_same_unfolded_eq]
+      by (cases "owhile ?C_same ?B_same_unfolded
+            (best_arg2, best_mode2, best_sz2, 0) s")
+         (auto split: prod.splits)
+  qed
+  let ?final_mode_res =
+    "(if addr \<noteq> 0
+      then case (case owhile ?C_same ?B_same_unfolded
+                     (best_arg2, best_mode2, best_sz2, 0) s of
+                None \<Rightarrow> None
+              | Some x \<Rightarrow>
+                  (case x of
+                     (best_arg, best_mode_v, best_sz, i) \<Rightarrow>
+                       \<lambda>_. Some (best_arg, best_mode_v)) s) of
+             None \<Rightarrow> None
+           | Some x \<Rightarrow>
+               (case x of
+                  (best_arg, best_mode_v) \<Rightarrow>
+                    \<lambda>_. Some (mode_t_C best_mode_v best_arg)) s
+      else Some (mode_t_C best_mode2 best_arg2))"
+  have final_ctor: "?final_mode_res = Some (mode_t_C final_mode final_arg)"
+  proof (cases "addr = 0")
+    case True
+    then show ?thesis
+      using final_pair_res_unfolded by simp
+  next
+    case False
+    then show ?thesis
+      using final_pair_res_unfolded by simp
+  qed
+  have bm_final: "best_mode' addr here s = Some (mode_t_C final_mode final_arg)"
+  proof (cases "addr < here")
+    case True
+    have first_eval:
+      "(case varint_size' (here - addr) s of
+          None \<Rightarrow> None
+        | Some sz \<Rightarrow>
+            Some
+             (if sz < best_sz then (here - addr, 1, sz)
+              else (addr, 0, best_sz))) =
+       Some (best_arg1, best_mode1, best_sz1)"
+      using best1 True
+      by (cases "varint_size' (here - addr) s")
+         (simp_all add: enc_oreturn_apply)
+    have eval: "best_mode' addr here s = ?final_mode_res"
+      using sz0 True first_eval near_res_unfolded
+      unfolding best_mode'_def
+      by (simp add: obind_def ocondition_def ogets_def oguard_def K_def
+          Reader_Monad.oreturn_apply Reader_Monad.oreturn_def enc_oreturn_apply
+          split_beta case_prod_beta)
+    show ?thesis
+      using eval final_ctor by simp
+  next
+    case False
+    have first_eval:
+      "Some (addr, 0, best_sz) = Some (best_arg1, best_mode1, best_sz1)"
+      using best1 False by (simp add: enc_oreturn_apply)
+    have first_eqs:
+      "best_arg1 = addr" "best_mode1 = 0" "best_sz1 = best_sz"
+      using first_eval by simp_all
+    have near_res_addr:
+      "owhile ?C_near ?B_near_unfolded (addr, 0, best_sz, 0) s =
+       Some (best_arg2, best_mode2, best_sz2, i2)"
+      using near_res_unfolded first_eqs by simp
+    have eval: "best_mode' addr here s = ?final_mode_res"
+      using sz0 False near_res_addr
+      unfolding best_mode'_def
+      by (simp add: obind_def ocondition_def ogets_def oguard_def K_def
+          Reader_Monad.oreturn_apply Reader_Monad.oreturn_def enc_oreturn_apply
+          split_beta case_prod_beta)
+    show ?thesis
+      using eval final_ctor by simp
+  qed
+  show ?thesis
+    by (rule that[OF bm_final])
+qed
 
 lemma best_mode'_encode_address_correct:
   assumes abs: "enc_cache_abs s c"
@@ -1925,6 +2522,362 @@ proof -
   show ?thesis
     using wf_final m_eq
     by (simp add: enc_mode_arg_wf_def enc_best_wf_def)
+qed
+
+lemma best_mode'_encode_address_exact:
+  assumes abs: "enc_cache_abs s c"
+      and wf: "enc_cache_wf c"
+      and bm: "best_mode' addr here s = Some m"
+  shows "encode_address c (unat addr) (unat here) =
+         (unat (mode_t_C.mode_C m),
+          enc_best_bytes (mode_t_C.mode_C m) (mode_t_C.arg_C m),
+          cache_update c (unat addr))"
+proof -
+  let ?C_near = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                     best_sz :: 32 word, i :: 32 word) s. i < 4"
+  let ?B_near = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                     best_sz :: 32 word, i :: 32 word).
+       do {
+         base <- ogets (\<lambda>s. near_arr_'' s .[unat i]);
+         (best_arg, best_mode_v, best_sz) <-
+           ocondition (\<lambda>s. base \<le> addr)
+            (do {
+               sz <- varint_size' (addr - base);
+               oreturn
+                (if sz < best_sz then (addr - base, 2 + i, sz)
+                 else (best_arg, best_mode_v, best_sz))
+             })
+            (oreturn (best_arg, best_mode_v, best_sz));
+         oreturn (best_arg, best_mode_v, best_sz, i + 1)
+       }"
+  let ?C_same = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                    best_sz :: 32 word, i :: 32 word) s. i < 3"
+  let ?B_same = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                    best_sz :: 32 word, i :: 32 word).
+       do {
+         oguard (\<lambda>_. i * 0x100 + addr mod 0x100 < 0x300);
+         ogets
+          (\<lambda>s. (case if same_arr_'' s .[unat (i * 0x100 + addr mod 0x100)] =
+                         addr \<and> 1 < best_sz
+                     then (addr mod 0x100, 6 + i, 1)
+                     else (best_arg, best_mode_v, best_sz) of
+                (x1, x2, x3) \<Rightarrow> \<lambda>_. (x1, x2, x3, i + 1)) s)
+       }"
+
+  obtain best_sz0 where sz0: "varint_size' addr s = Some best_sz0"
+    using varint_size'_some by blast
+  let ?best0 = "(0 :: nat, varint_encode (unat addr))"
+  let ?best1 =
+    "(if addr < here
+      then try_better ?best0 1 (varint_encode (unat here - unat addr))
+      else ?best0)"
+  let ?best1_c =
+    "(if addr < here
+      then case varint_size' (here - addr) s of
+             None \<Rightarrow> None
+           | Some sz \<Rightarrow>
+               Some (if sz < best_sz0 then (here - addr, 1, sz)
+                     else (addr, 0, best_sz0))
+      else Some (addr, 0, best_sz0))"
+  have best1_case:
+    "case ?best1_c of
+       None \<Rightarrow> False
+     | Some (best_arg, best_mode_v, best_sz) \<Rightarrow>
+         enc_best_rel best_arg best_mode_v best_sz ?best1"
+  proof (cases "addr < here")
+    case False
+    then show ?thesis
+      using enc_best_rel_self[OF sz0]
+      by (simp add: try_better_def)
+  next
+    case True
+    obtain here_sz where here_size:
+      "varint_size' (here - addr) s = Some here_sz"
+      using varint_size'_some by blast
+    have rel0: "enc_best_rel addr 0 best_sz0 ?best0"
+      by (rule enc_best_rel_self[OF sz0])
+    have rel_here:
+      "enc_best_rel (here - addr) 1 here_sz
+        (1, varint_encode (unat here - unat addr))"
+      by (rule enc_best_rel_here[OF True here_size])
+    show ?thesis
+      using True here_size rel0 rel_here
+      by (auto simp: enc_best_rel_def try_better_def word_less_nat_alt)
+  qed
+  have best1_c_some: "\<exists>best. ?best1_c = Some best"
+  proof (cases "addr < here")
+    case True
+    obtain here_sz where "varint_size' (here - addr) s = Some here_sz"
+      using varint_size'_some by blast
+    then show ?thesis
+      using True by auto
+  next
+    case False
+    then show ?thesis
+      by auto
+  qed
+  then obtain best_arg1 best_mode1 best_sz1 :: "32 word" where best1:
+      "?best1_c = Some (best_arg1, best_mode1, best_sz1)"
+    by (auto split: prod.splits)
+  have rel1: "enc_best_rel best_arg1 best_mode1 best_sz1 ?best1"
+    using best1_case best1 by simp
+
+  let ?I_near = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                     best_sz :: 32 word, i :: 32 word) st.
+       enc_best_rel best_arg best_mode_v best_sz
+         (try_near_modes_prefix c (unat addr) (unat i) ?best1) \<and>
+       unat i \<le> s_near"
+	  have near_loop:
+	    "case owhile ?C_near ?B_near
+	        (best_arg1, best_mode1, best_sz1, 0) s of
+	       None \<Rightarrow> False
+	     | Some r \<Rightarrow> ?I_near r s \<and> \<not> ?C_near r s"
+  proof -
+    show ?thesis
+      apply (rule Reader_Monad.owhile_rule
+        [where I = ?I_near
+           and M = "measure (\<lambda>x. case x of
+             (best_arg :: 32 word, best_mode_v :: 32 word,
+              best_sz :: 32 word, i :: 32 word) \<Rightarrow> s_near - unat i)"])
+      using rel1 abs wf
+      apply (simp_all add: Reader_Monad.oreturn_apply ogets_def
+          ocondition_def word_less_nat_alt s_near_def)
+      subgoal
+        by (auto simp: Reader_Monad.oreturn_apply enc_best_measure_decrease
+            s_near_def split: prod.splits)
+      subgoal
+        apply (auto simp: Reader_Monad.oreturn_apply obind_def ogets_def
+            ocondition_def varint_size'_neq_None word_less_nat_alt
+            s_near_def split: prod.splits if_splits option.splits)
+	        subgoal for best_arg best_mode_v best_sz i
+	          using enc_best_rel_near_step[OF abs wf, of best_arg best_mode_v
+	              best_sz "try_near_modes_prefix c (unat addr) (unat i) ?best1" i addr]
+	          by (simp add: s_near_def unat_word_ariths word_less_nat_alt)
+	        subgoal
+	          using enc_best_rel_near_step_not_better[OF abs wf]
+	          by (fastforce simp: s_near_def unat_word_ariths word_less_nat_alt)
+	        subgoal
+	          using enc_best_rel_near_step_not_better[OF abs wf]
+	          by (fastforce simp: s_near_def unat_word_ariths word_less_nat_alt)
+	        subgoal
+	          using enc_best_rel_near_step_preserve[OF abs wf]
+	          by (fastforce simp: s_near_def unat_word_ariths word_less_nat_alt)
+	        subgoal
+	          using enc_best_rel_near_step_preserve[OF abs wf]
+	          by (fastforce simp: s_near_def unat_word_ariths word_less_nat_alt)
+	        subgoal
+	          using enc_best_rel_near_step_preserve[OF abs wf]
+	          by (fastforce simp: s_near_def unat_word_ariths word_less_nat_alt)
+	        subgoal for best_arg best_mode_v best_sz i
+	          using enc_best_rel_near_step[OF abs wf, of best_arg best_mode_v
+	              best_sz "try_near_modes_prefix c (unat addr) (unat i) ?best1" i addr]
+	          by (simp add: s_near_def unat_word_ariths word_less_nat_alt)
+	        subgoal
+	          using enc_best_rel_near_step_not_better[OF abs wf]
+	          by (fastforce simp: s_near_def unat_word_ariths word_less_nat_alt)
+	        subgoal
+	          using enc_best_rel_near_step_not_better[OF abs wf]
+	          by (fastforce simp: s_near_def unat_word_ariths word_less_nat_alt)
+	        subgoal
+	          using enc_best_rel_near_step_preserve[OF abs wf]
+	          by (fastforce simp: s_near_def unat_word_ariths word_less_nat_alt)
+	        subgoal
+	          using enc_best_rel_near_step_preserve[OF abs wf]
+	          by (fastforce simp: s_near_def unat_word_ariths word_less_nat_alt)
+	        subgoal
+	          using enc_best_rel_near_step_preserve[OF abs wf]
+	          by (fastforce simp: s_near_def unat_word_ariths word_less_nat_alt)
+	        done
+	      subgoal
+	        by (auto simp: Reader_Monad.oreturn_apply obind_def ogets_def
+	            ocondition_def varint_size'_neq_None
+	            split: prod.splits if_splits option.splits)
+	      done
+  qed
+  obtain best_arg2 best_mode2 best_sz2 i2 where near_res:
+      "owhile ?C_near ?B_near
+        (best_arg1, best_mode1, best_sz1, 0) s =
+       Some (best_arg2, best_mode2, best_sz2, i2)"
+    and rel2_prefix:
+      "enc_best_rel best_arg2 best_mode2 best_sz2
+        (try_near_modes_prefix c (unat addr) (unat i2) ?best1)"
+	    and i2_le: "unat i2 \<le> s_near"
+	    and i2_done: "\<not> i2 < (4 :: 32 word)"
+	    using near_loop
+	    by (cases "owhile ?C_near ?B_near
+	          (best_arg1, best_mode1, best_sz1, 0) s")
+	       (auto split: prod.splits)
+	  have i2_eq: "unat i2 = s_near"
+	    using i2_le i2_done
+	    by (simp add: s_near_def word_less_nat_alt)
+  have rel2:
+    "enc_best_rel best_arg2 best_mode2 best_sz2
+      (try_near_modes c (unat addr) s_near ?best1)"
+    using rel2_prefix i2_eq
+    by (simp add: try_near_modes_prefix_full)
+
+  let ?best2 = "try_near_modes c (unat addr) s_near ?best1"
+  let ?I_same = "\<lambda>(best_arg :: 32 word, best_mode_v :: 32 word,
+                     best_sz :: 32 word, i :: 32 word) st.
+       enc_best_rel best_arg best_mode_v best_sz
+         (try_same_modes_prefix c (unat addr) (unat i) ?best2) \<and>
+       unat i \<le> s_same"
+  have final_pair:
+    "\<exists>final_arg final_mode final_sz.
+       (if addr \<noteq> 0
+        then case owhile ?C_same ?B_same (best_arg2, best_mode2, best_sz2, 0) s of
+               None \<Rightarrow> None
+             | Some (best_arg, best_mode_v, best_sz, i) \<Rightarrow>
+                 Some (best_arg, best_mode_v, best_sz)
+        else Some (best_arg2, best_mode2, best_sz2)) =
+       Some (final_arg, final_mode, final_sz) \<and>
+       enc_best_rel final_arg final_mode final_sz
+         (try_same_modes c (unat addr) s_same ?best2)"
+  proof (cases "addr = 0")
+    case True
+    then show ?thesis
+      using rel2
+      by (auto simp: try_same_modes_prefix_full)
+  next
+    case addr_ne: False
+	    have same_loop:
+	      "case owhile ?C_same ?B_same (best_arg2, best_mode2, best_sz2, 0) s of
+	         None \<Rightarrow> False
+	       | Some r \<Rightarrow> ?I_same r s \<and> \<not> ?C_same r s"
+    proof -
+      show ?thesis
+        apply (rule Reader_Monad.owhile_rule
+          [where I = ?I_same
+             and M = "measure (\<lambda>x. case x of
+               (best_arg :: 32 word, best_mode_v :: 32 word,
+                best_sz :: 32 word, i :: 32 word) \<Rightarrow> s_same - unat i)"])
+        using rel2 abs wf addr_ne
+        apply (simp_all add: Reader_Monad.oreturn_apply ogets_def oguard_def
+            word_less_nat_alt s_same_def)
+        subgoal
+          by (auto simp: Reader_Monad.oreturn_apply enc_best_measure_decrease
+              s_same_def split: prod.splits)
+        subgoal
+          apply (auto simp: Reader_Monad.oreturn_apply word_less_nat_alt
+              s_same_def split: prod.splits if_splits option.splits)
+	          subgoal for best_arg best_mode_v best_sz i
+	            using enc_best_rel_same_step[OF abs wf, of best_arg best_mode_v
+	                best_sz "try_same_modes_prefix c (unat addr) (unat i) ?best2"
+	                addr i]
+	            by (simp add: s_same_def unat_word_ariths word_less_nat_alt addr_ne)
+	          subgoal
+	            using enc_best_rel_same_step_preserve[OF abs wf] addr_ne
+	            by (fastforce simp: s_same_def unat_word_ariths word_less_nat_alt)
+	          subgoal
+	            using enc_best_rel_same_step_preserve[OF abs wf] addr_ne
+	            by (fastforce simp: s_same_def unat_word_ariths word_less_nat_alt)
+	          subgoal
+	            using enc_best_rel_same_step_preserve[OF abs wf] addr_ne
+	            by (fastforce simp: s_same_def unat_word_ariths word_less_nat_alt)
+	          subgoal
+	            using enc_best_rel_same_step_hit[OF abs wf] addr_ne
+	            by (fastforce simp: s_same_def unat_word_ariths word_less_nat_alt)
+	          subgoal
+	            using enc_best_rel_same_step_hit[OF abs wf] addr_ne
+	            by (fastforce simp: s_same_def unat_word_ariths word_less_nat_alt)
+	          subgoal
+	            using enc_best_rel_same_step_hit[OF abs wf] addr_ne
+	            by (fastforce simp: s_same_def unat_word_ariths word_less_nat_alt)
+	          subgoal
+	            using enc_best_rel_same_step_preserve[OF abs wf] addr_ne
+	            by (fastforce simp: s_same_def unat_word_ariths word_less_nat_alt)
+	          subgoal
+	            using enc_best_rel_same_step_preserve[OF abs wf] addr_ne
+	            by (fastforce simp: s_same_def unat_word_ariths word_less_nat_alt)
+	          subgoal
+	            by (rule enc_best_counter_suc_le) (simp_all add: s_same_def)
+	          subgoal
+	            by (rule enc_best_counter_suc_le) (simp_all add: s_same_def)
+	          subgoal
+	            by (rule enc_best_counter_suc_le) (simp_all add: s_same_def)
+	          done
+        subgoal
+          by (auto simp: obind_def oguard_def ogets_def word_less_nat_alt
+              unat_word_ariths enc_best_same_slot_nat_lt
+              intro: enc_best_same_slot_guard
+              split: prod.splits)
+        done
+    qed
+    obtain final_arg final_mode final_sz final_i where same_res:
+        "owhile ?C_same ?B_same (best_arg2, best_mode2, best_sz2, 0) s =
+         Some (final_arg, final_mode, final_sz, final_i)"
+      and rel_final_prefix:
+        "enc_best_rel final_arg final_mode final_sz
+          (try_same_modes_prefix c (unat addr) (unat final_i) ?best2)"
+	      and final_i_le: "unat final_i \<le> s_same"
+	      and final_i_done: "\<not> final_i < (3 :: 32 word)"
+	      using same_loop
+	      by (cases "owhile ?C_same ?B_same
+	            (best_arg2, best_mode2, best_sz2, 0) s")
+	         (auto split: prod.splits)
+	    have final_i_eq: "unat final_i = s_same"
+	      using final_i_le final_i_done
+	      by (simp add: s_same_def word_less_nat_alt)
+    have rel_final:
+      "enc_best_rel final_arg final_mode final_sz
+        (try_same_modes c (unat addr) s_same ?best2)"
+      using rel_final_prefix final_i_eq
+      by (simp add: try_same_modes_prefix_full)
+    show ?thesis
+      using addr_ne same_res rel_final by auto
+  qed
+  then obtain final_arg final_mode final_sz where final_pair_res:
+      "(if addr \<noteq> 0
+        then case owhile ?C_same ?B_same (best_arg2, best_mode2, best_sz2, 0) s of
+               None \<Rightarrow> None
+             | Some (best_arg, best_mode_v, best_sz, i) \<Rightarrow>
+                 Some (best_arg, best_mode_v, best_sz)
+        else Some (best_arg2, best_mode2, best_sz2)) =
+       Some (final_arg, final_mode, final_sz)"
+    and rel_final:
+      "enc_best_rel final_arg final_mode final_sz
+        (try_same_modes c (unat addr) s_same ?best2)"
+    by blast
+  have best3_eq:
+    "try_same_modes c (unat addr) s_same ?best2 =
+      (unat final_mode, enc_best_bytes final_mode final_arg)"
+    using rel_final by (simp add: enc_best_rel_def)
+  have bm_final: "best_mode' addr here s = Some (mode_t_C final_mode final_arg)"
+  proof -
+    have eval_first:
+      "best_mode' addr here s =
+       (case (if addr \<noteq> 0
+              then case owhile ?C_same ?B_same (best_arg2, best_mode2, best_sz2, 0) s of
+                     None \<Rightarrow> None
+                   | Some (best_arg, best_mode_v, best_sz, i) \<Rightarrow>
+                       Some (best_arg, best_mode_v, best_sz)
+              else Some (best_arg2, best_mode2, best_sz2)) of
+          None \<Rightarrow> None
+        | Some (best_arg, best_mode_v, best_sz) \<Rightarrow>
+            Some (mode_t_C best_mode_v best_arg))"
+      using sz0 best1 near_res
+      unfolding best_mode'_def
+      by (cases "addr < here")
+         (auto simp: obind_def ocondition_def ogets_def oguard_def K_def
+          Reader_Monad.oreturn_apply Reader_Monad.oreturn_def
+          enc_oreturn_apply split_beta case_prod_beta
+          split: option.splits prod.splits)
+    show ?thesis
+      using eval_first final_pair_res by simp
+  qed
+  have m_eq: "m = mode_t_C final_mode final_arg"
+    using bm bm_final by simp
+  have pure_eval:
+    "encode_address c (unat addr) (unat here) =
+     (fst (try_same_modes c (unat addr) s_same ?best2),
+      snd (try_same_modes c (unat addr) s_same ?best2),
+      cache_update c (unat addr))"
+    unfolding encode_address_def
+    by (simp add: Let_def word_less_nat_alt try_near_modes_prefix_full
+        split: prod.splits)
+  show ?thesis
+    using pure_eval best3_eq m_eq
+    by simp
 qed
 
 end
