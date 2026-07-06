@@ -10150,6 +10150,668 @@ next
     by (rule try_emit_add_copy'_mode_gt5_copy_ne4_noop[OF bm mode_gt copy_ne])
 qed
 
+text \<open>Keystone: a plain emit_copy' in the encode-window loop context,
+  producing the exact emit_copy_spec section relation plus the cache and
+  src/tgt frame needed to re-establish the budget invariant.  Uses EXACT
+  section room (the budget provides no addr headroom).\<close>
+
+lemma emit_copy'_state_rel_cache_frame_from_loop:
+  fixes src tgt data inst addr pending :: "8 word ptr"
+    and src_len_w tgt_len data_cap inst_cap addr_cap pending_cap :: "32 word"
+    and copy_addr here copy_len :: "32 word"
+    and src_len :: nat
+  assumes buffers:
+      "encode_window_loop_buffers_ok s src src_len_w tgt tgt_len
+        pending pending_cap data data_cap inst inst_cap addr addr_cap"
+    and rel: "enc_sections_state_rel s data inst addr sec spec_st"
+    and abs: "enc_cache_abs s (enc_cache spec_st)"
+    and wf: "enc_cache_wf (enc_cache spec_st)"
+    and bm: "best_mode' copy_addr here s = Some bm_m"
+    and addr_exact:
+      "encode_address (enc_cache spec_st) (unat copy_addr)
+         (src_len + enc_flushed spec_st) =
+       (unat (mode_t_C.mode_C bm_m),
+        enc_best_bytes (mode_t_C.mode_C bm_m) (mode_t_C.arg_C bm_m),
+        cache_update (enc_cache spec_st) (unat copy_addr))"
+    and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+    and copy_ge: "(4 :: 32 word) \<le> copy_len"
+    and data_pos_le: "unat (sections_t_C.data_pos_C sec) \<le> unat data_cap"
+    and inst_room_spec:
+      "length (enc_inst (emit_copy_spec src_len (unat copy_addr)
+         (unat copy_len) spec_st)) \<le> unat inst_cap"
+    and addr_room_spec:
+      "length (enc_addr (emit_copy_spec src_len (unat copy_addr)
+         (unat copy_len) spec_st)) \<le> unat addr_cap"
+  shows "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+         \<lbrace> \<lambda>r t. \<exists>sec'.
+              r = Result sec' \<and>
+              sections_t_C.err_C sec' = ENC_OK \<and>
+              sections_t_C.data_pos_C sec' = sections_t_C.data_pos_C sec \<and>
+              unat (sections_t_C.inst_pos_C sec') \<le> unat inst_cap \<and>
+              unat (sections_t_C.addr_pos_C sec') \<le> unat addr_cap \<and>
+              enc_sections_state_rel t data inst addr sec'
+                (emit_copy_spec src_len (unat copy_addr) (unat copy_len)
+                  spec_st) \<and>
+              enc_cache_abs t
+                (cache_update (enc_cache spec_st) (unat copy_addr)) \<and>
+              enc_cache_wf
+                (cache_update (enc_cache spec_st) (unat copy_addr)) \<and>
+              heap_bytes t src (unat src_len_w) =
+                heap_bytes s src (unat src_len_w) \<and>
+              heap_bytes t tgt (unat tgt_len) =
+                heap_bytes s tgt (unat tgt_len) \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  let ?spec' = "emit_copy_spec src_len (unat copy_addr) (unat copy_len) spec_st"
+  let ?c1 = "cache_update (enc_cache spec_st) (unat copy_addr)"
+  let ?ip = "sections_t_C.inst_pos_C sec"
+  let ?ap = "sections_t_C.addr_pos_C sec"
+  let ?dp = "sections_t_C.data_pos_C sec"
+  have src_valid: "buf_valid s src (unat src_len_w)"
+    and tgt_valid: "buf_valid s tgt (unat tgt_len)"
+    and data_valid: "buf_valid s data (unat data_cap)"
+    and inst_valid: "buf_valid s inst (unat inst_cap)"
+    and addr_valid: "buf_valid s addr (unat addr_cap)"
+    and inst_dist: "ptr_range_distinct inst (unat inst_cap)"
+    and addr_dist: "ptr_range_distinct addr (unat addr_cap)"
+    and data_inst: "bufs_disjoint data (unat data_cap) inst (unat inst_cap)"
+    and data_addr: "bufs_disjoint data (unat data_cap) addr (unat addr_cap)"
+    and inst_addr: "bufs_disjoint inst (unat inst_cap) addr (unat addr_cap)"
+    and inst_src: "bufs_disjoint inst (unat inst_cap) src (unat src_len_w)"
+    and inst_tgt: "bufs_disjoint inst (unat inst_cap) tgt (unat tgt_len)"
+    and addr_src: "bufs_disjoint addr (unat addr_cap) src (unat src_len_w)"
+    and addr_tgt: "bufs_disjoint addr (unat addr_cap) tgt (unat tgt_len)"
+    using buffers by (auto simp: encode_window_loop_buffers_ok_def)
+  have inst_len_eq: "length (enc_inst spec_st) = unat ?ip"
+    and addr_len_eq: "length (enc_addr spec_st) = unat ?ap"
+    using enc_sections_state_rel_lengths[OF rel] by simp_all
+  have inst_pos_le: "unat ?ip \<le> unat inst_cap"
+    using inst_room_spec inst_len_eq
+      emit_copy_spec_sections_mono[of spec_st src_len "unat copy_addr" "unat copy_len"]
+    by simp
+  have addr_pos_le: "unat ?ap \<le> unat addr_cap"
+    using addr_room_spec addr_len_eq
+      emit_copy_spec_sections_mono[of spec_st src_len "unat copy_addr" "unat copy_len"]
+    by simp
+  obtain an where addr_size: "varint_size' (mode_t_C.arg_C bm_m) s = Some an"
+    using varint_size'_some by blast
+  obtain sn where copy_size: "varint_size' copy_len s = Some sn"
+    using varint_size'_some by blast
+  have an_le5: "unat an \<le> 5" by (rule varint_size'_le5[OF addr_size])
+  have sn_le5: "unat sn \<le> 5" by (rule varint_size'_le5[OF copy_size])
+  have mode_le8: "mode_t_C.mode_C bm_m \<le> (8 :: 32 word)"
+    by (rule enc_mode_arg_wf_mode_word_le8[
+          OF best_mode'_encode_address_correct[OF abs wf bm]])
+  have near_ptr_lt: "near_ptr_'' s < (4 :: 32 word)"
+    by (rule enc_cache_abs_near_ptr_lt_word[OF abs])
+  have addr_choice_gt5:
+    "\<not> mode_t_C.mode_C bm_m < (6 :: 32 word) \<Longrightarrow>
+     encode_address (enc_cache spec_st) (unat copy_addr)
+       (src_len + enc_flushed spec_st) =
+     (unat (mode_t_C.mode_C bm_m), [ucast (mode_t_C.arg_C bm_m)], ?c1)"
+    using addr_exact by (simp add: enc_best_bytes_def)
+  have addr_choice_le5:
+    "mode_t_C.mode_C bm_m < (6 :: 32 word) \<Longrightarrow>
+     encode_address (enc_cache spec_st) (unat copy_addr)
+       (src_len + enc_flushed spec_st) =
+     (unat (mode_t_C.mode_C bm_m), varint_bytes32 (mode_t_C.arg_C bm_m) an, ?c1)"
+    using addr_exact varint_bytes32_eq_varint_encode[OF addr_size]
+    by (simp add: enc_best_bytes_def)
+
+  \<comment> \<open>--- conditional frame facts, proved once, instantiated per case ---\<close>
+  have ibp: "unat ?ip < unat inst_cap \<Longrightarrow>
+      ptr_valid (heap_typing s) (inst +\<^sub>p uint ?ip)"
+    by (rule buf_valid_uintD[OF inst_valid])
+  have ibd: "unat ?ip < unat inst_cap \<Longrightarrow>
+      ptr_range_distinct inst (Suc (unat ?ip))"
+    by (rule ptr_range_distinct_mono[OF inst_dist]) simp
+  have ibdd: "unat ?ip < unat inst_cap \<Longrightarrow>
+      \<forall>i < unat ?dp. data +\<^sub>p int i \<noteq> inst +\<^sub>p uint ?ip"
+  proof (intro impI allI impI)
+    fix i assume IL: "unat ?ip < unat inst_cap" and i_lt: "i < unat ?dp"
+    have "i < unat data_cap" using i_lt data_pos_le by linarith
+    thus "data +\<^sub>p int i \<noteq> inst +\<^sub>p uint ?ip"
+      by (rule bufs_disjoint_int_uintD[OF data_inst _ IL])
+  qed
+  have ibad: "unat ?ip < unat inst_cap \<Longrightarrow>
+      \<forall>i < unat ?ap. addr +\<^sub>p int i \<noteq> inst +\<^sub>p uint ?ip"
+  proof (intro impI allI impI)
+    fix i assume IL: "unat ?ip < unat inst_cap" and i_lt: "i < unat ?ap"
+    have i_cap: "i < unat addr_cap" using i_lt addr_pos_le by linarith
+    show "addr +\<^sub>p int i \<noteq> inst +\<^sub>p uint ?ip"
+      by (rule bufs_disjoint_int_uintD[OF bufs_disjoint_sym[THEN iffD1, OF inst_addr] i_cap IL])
+  qed
+  have sib: "unat ?ip < unat inst_cap \<Longrightarrow>
+      \<forall>i < unat src_len_w. src +\<^sub>p int i \<noteq> inst +\<^sub>p uint ?ip"
+  proof (intro impI allI impI)
+    fix i assume H: "unat ?ip < unat inst_cap" and i_lt: "i < unat src_len_w"
+    show "src +\<^sub>p int i \<noteq> inst +\<^sub>p uint ?ip"
+      by (rule bufs_disjoint_int_uintD[OF bufs_disjoint_sym[THEN iffD1, OF inst_src] i_lt H])
+  qed
+  have tib: "unat ?ip < unat inst_cap \<Longrightarrow>
+      \<forall>i < unat tgt_len. tgt +\<^sub>p int i \<noteq> inst +\<^sub>p uint ?ip"
+  proof (intro impI allI impI)
+    fix i assume H: "unat ?ip < unat inst_cap" and i_lt: "i < unat tgt_len"
+    show "tgt +\<^sub>p int i \<noteq> inst +\<^sub>p uint ?ip"
+      by (rule bufs_disjoint_int_uintD[OF bufs_disjoint_sym[THEN iffD1, OF inst_tgt] i_lt H])
+  qed
+  have abp: "unat ?ap < unat addr_cap \<Longrightarrow>
+      ptr_valid (heap_typing s) (addr +\<^sub>p uint ?ap)"
+    by (rule buf_valid_uintD[OF addr_valid])
+  have abd: "unat ?ap < unat addr_cap \<Longrightarrow>
+      ptr_range_distinct addr (Suc (unat ?ap))"
+    by (rule ptr_range_distinct_mono[OF addr_dist]) simp
+  have abdd: "unat ?ap < unat addr_cap \<Longrightarrow>
+      \<forall>i < unat ?dp. data +\<^sub>p int i \<noteq> addr +\<^sub>p uint ?ap"
+  proof (intro impI allI impI)
+    fix i assume AL: "unat ?ap < unat addr_cap" and i_lt: "i < unat ?dp"
+    have "i < unat data_cap" using i_lt data_pos_le by linarith
+    thus "data +\<^sub>p int i \<noteq> addr +\<^sub>p uint ?ap"
+      by (rule bufs_disjoint_int_uintD[OF data_addr _ AL])
+  qed
+  have sab: "unat ?ap < unat addr_cap \<Longrightarrow>
+      \<forall>i < unat src_len_w. src +\<^sub>p int i \<noteq> addr +\<^sub>p uint ?ap"
+  proof (intro impI allI impI)
+    fix i assume H: "unat ?ap < unat addr_cap" and i_lt: "i < unat src_len_w"
+    show "src +\<^sub>p int i \<noteq> addr +\<^sub>p uint ?ap"
+      by (rule bufs_disjoint_int_uintD[OF bufs_disjoint_sym[THEN iffD1, OF addr_src] i_lt H])
+  qed
+  have tab: "unat ?ap < unat addr_cap \<Longrightarrow>
+      \<forall>i < unat tgt_len. tgt +\<^sub>p int i \<noteq> addr +\<^sub>p uint ?ap"
+  proof (intro impI allI impI)
+    fix i assume H: "unat ?ap < unat addr_cap" and i_lt: "i < unat tgt_len"
+    show "tgt +\<^sub>p int i \<noteq> addr +\<^sub>p uint ?ap"
+      by (rule bufs_disjoint_int_uintD[OF bufs_disjoint_sym[THEN iffD1, OF addr_tgt] i_lt H])
+  qed
+  \<comment> \<open>addr byte vs inst prefix (bound n \<le> inst_cap)\<close>
+  have abid: "\<And>n. n \<le> unat inst_cap \<Longrightarrow>
+      \<forall>i < n. inst +\<^sub>p int i \<noteq> addr +\<^sub>p uint ?ap"
+    if AL: "unat ?ap < unat addr_cap" for AL
+  proof -
+    fix n :: nat assume n_le: "n \<le> unat inst_cap"
+    show "\<forall>i < n. inst +\<^sub>p int i \<noteq> addr +\<^sub>p uint ?ap"
+    proof (intro allI impI)
+      fix i assume "i < n"
+      hence i_cap: "i < unat inst_cap" using n_le by linarith
+      show "inst +\<^sub>p int i \<noteq> addr +\<^sub>p uint ?ap"
+        by (rule bufs_disjoint_int_uintD[OF inst_addr i_cap AL])
+    qed
+  qed
+  \<comment> \<open>addr varint facts, given addr_pos + an \<le> addr_cap\<close>
+  have avf: "unat ?ap + unat an \<le> unat addr_cap \<Longrightarrow> \<not> addr_cap - ?ap < an"
+    by (rule word_sub_not_less_of_unat_add_le)
+  have avno: "unat ?ap + unat an \<le> unat addr_cap \<Longrightarrow>
+      unat ?ap + unat an < 2 ^ 32"
+    using unat_lt2p[of addr_cap] by simp
+  have avv: "unat ?ap + unat an \<le> unat addr_cap \<Longrightarrow>
+      \<forall>j < unat an. ptr_valid (heap_typing s) (addr +\<^sub>p uint (?ap + of_nat j))"
+  proof (intro impI allI impI)
+    fix j assume AN: "unat ?ap + unat an \<le> unat addr_cap" and j_lt: "j < unat an"
+    show "ptr_valid (heap_typing s) (addr +\<^sub>p uint (?ap + of_nat j))"
+      by (rule buf_valid_word_rangeD[OF addr_valid j_lt avno[OF AN] AN])
+  qed
+  have avi: "unat ?ap + unat an \<le> unat addr_cap \<Longrightarrow>
+      \<forall>i < unat an. \<forall>j < unat an. i \<noteq> j \<longrightarrow>
+        addr +\<^sub>p uint (?ap + of_nat i) \<noteq> addr +\<^sub>p uint (?ap + of_nat j)"
+  proof (intro impI allI impI)
+    fix i j assume AN: "unat ?ap + unat an \<le> unat addr_cap"
+      and i_lt: "i < unat an" and j_lt: "j < unat an" and ne: "i \<noteq> j"
+    show "addr +\<^sub>p uint (?ap + of_nat i) \<noteq> addr +\<^sub>p uint (?ap + of_nat j)"
+    proof
+      assume "addr +\<^sub>p uint (?ap + of_nat i) = addr +\<^sub>p uint (?ap + of_nat j)"
+      hence "i = j"
+        by (rule ptr_range_distinct_word_range_inj[OF addr_dist avno[OF AN] AN i_lt j_lt])
+      thus False using ne by simp
+    qed
+  qed
+  have avp: "unat ?ap + unat an \<le> unat addr_cap \<Longrightarrow>
+      \<forall>k < unat ?ap. \<forall>i. i < an \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> addr +\<^sub>p uint (?ap + i)"
+  proof (intro impI allI impI)
+    fix k i assume AN: "unat ?ap + unat an \<le> unat addr_cap"
+      and k_lt: "k < unat ?ap" and i_lt: "i < an"
+    show "addr +\<^sub>p int k \<noteq> addr +\<^sub>p uint (?ap + i)"
+      by (rule ptr_range_distinct_word_prefix_disj[OF addr_dist avno[OF AN] AN k_lt i_lt])
+  qed
+  have avdd: "unat ?ap + unat an \<le> unat addr_cap \<Longrightarrow>
+      \<forall>k < unat ?dp. \<forall>i. i < an \<longrightarrow>
+        data +\<^sub>p int k \<noteq> addr +\<^sub>p uint (?ap + i)"
+  proof (intro impI allI impI)
+    fix k i assume AN: "unat ?ap + unat an \<le> unat addr_cap"
+      and k_lt: "k < unat ?dp" and i_lt: "i < an"
+    have "k < unat data_cap" using k_lt data_pos_le by linarith
+    thus "data +\<^sub>p int k \<noteq> addr +\<^sub>p uint (?ap + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[OF data_addr _ i_lt avno[OF AN] AN])
+  qed
+  have sav: "unat ?ap + unat an \<le> unat addr_cap \<Longrightarrow>
+      \<forall>k < unat src_len_w. \<forall>i. i < an \<longrightarrow>
+        src +\<^sub>p int k \<noteq> addr +\<^sub>p uint (?ap + i)"
+  proof (intro impI allI impI)
+    fix k i assume AN: "unat ?ap + unat an \<le> unat addr_cap"
+      and k_lt: "k < unat src_len_w" and i_lt: "i < an"
+    show "src +\<^sub>p int k \<noteq> addr +\<^sub>p uint (?ap + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+            OF bufs_disjoint_sym[THEN iffD1, OF addr_src] k_lt i_lt avno[OF AN] AN])
+  qed
+  have tav: "unat ?ap + unat an \<le> unat addr_cap \<Longrightarrow>
+      \<forall>k < unat tgt_len. \<forall>i. i < an \<longrightarrow>
+        tgt +\<^sub>p int k \<noteq> addr +\<^sub>p uint (?ap + i)"
+  proof (intro impI allI impI)
+    fix k i assume AN: "unat ?ap + unat an \<le> unat addr_cap"
+      and k_lt: "k < unat tgt_len" and i_lt: "i < an"
+    show "tgt +\<^sub>p int k \<noteq> addr +\<^sub>p uint (?ap + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+            OF bufs_disjoint_sym[THEN iffD1, OF addr_tgt] k_lt i_lt avno[OF AN] AN])
+  qed
+  have avid: "\<And>n. \<lbrakk> unat ?ap + unat an \<le> unat addr_cap; n \<le> unat inst_cap \<rbrakk> \<Longrightarrow>
+      \<forall>k < n. \<forall>i. i < an \<longrightarrow> inst +\<^sub>p int k \<noteq> addr +\<^sub>p uint (?ap + i)"
+  proof (intro allI impI)
+    fix n :: nat and k i
+    assume AN: "unat ?ap + unat an \<le> unat addr_cap" and n_le: "n \<le> unat inst_cap"
+      and k_lt: "k < n" and i_lt: "i < an"
+    have k_cap: "k < unat inst_cap" using k_lt n_le by linarith
+    show "inst +\<^sub>p int k \<noteq> addr +\<^sub>p uint (?ap + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[OF inst_addr k_cap i_lt avno[OF AN] AN])
+  qed
+  \<comment> \<open>inst size-varint facts, given inst_pos + 1 + sn \<le> inst_cap\<close>
+  have ivf: "unat (?ip + 1) + unat sn \<le> unat inst_cap \<Longrightarrow>
+      \<not> inst_cap - (?ip + 1) < sn"
+    by (rule word_sub_not_less_of_unat_add_le)
+  have ivno: "unat (?ip + 1) + unat sn \<le> unat inst_cap \<Longrightarrow>
+      unat (?ip + 1) + unat sn < 2 ^ 32"
+    using unat_lt2p[of inst_cap] by simp
+  have ivv: "unat (?ip + 1) + unat sn \<le> unat inst_cap \<Longrightarrow>
+      \<forall>j < unat sn. ptr_valid (heap_typing s) (inst +\<^sub>p uint (?ip + 1 + of_nat j))"
+  proof (intro impI allI impI)
+    fix j assume IN: "unat (?ip + 1) + unat sn \<le> unat inst_cap" and j_lt: "j < unat sn"
+    show "ptr_valid (heap_typing s) (inst +\<^sub>p uint (?ip + 1 + of_nat j))"
+      by (rule buf_valid_word_rangeD[OF inst_valid j_lt ivno[OF IN] IN])
+  qed
+  have ivi: "unat (?ip + 1) + unat sn \<le> unat inst_cap \<Longrightarrow>
+      \<forall>i < unat sn. \<forall>j < unat sn. i \<noteq> j \<longrightarrow>
+        inst +\<^sub>p uint (?ip + 1 + of_nat i) \<noteq> inst +\<^sub>p uint (?ip + 1 + of_nat j)"
+  proof (intro impI allI impI)
+    fix i j assume IN: "unat (?ip + 1) + unat sn \<le> unat inst_cap"
+      and i_lt: "i < unat sn" and j_lt: "j < unat sn" and ne: "i \<noteq> j"
+    show "inst +\<^sub>p uint (?ip + 1 + of_nat i) \<noteq> inst +\<^sub>p uint (?ip + 1 + of_nat j)"
+    proof
+      assume "inst +\<^sub>p uint (?ip + 1 + of_nat i) = inst +\<^sub>p uint (?ip + 1 + of_nat j)"
+      hence "i = j"
+        by (rule ptr_range_distinct_word_range_inj[OF inst_dist ivno[OF IN] IN i_lt j_lt])
+      thus False using ne by simp
+    qed
+  qed
+  have ivp: "unat (?ip + 1) + unat sn \<le> unat inst_cap \<Longrightarrow>
+      \<forall>k < unat (?ip + 1). \<forall>i. i < sn \<longrightarrow>
+        inst +\<^sub>p int k \<noteq> inst +\<^sub>p uint (?ip + 1 + i)"
+  proof (intro impI allI impI)
+    fix k i assume IN: "unat (?ip + 1) + unat sn \<le> unat inst_cap"
+      and k_lt: "k < unat (?ip + 1)" and i_lt: "i < sn"
+    show "inst +\<^sub>p int k \<noteq> inst +\<^sub>p uint (?ip + 1 + i)"
+      by (rule ptr_range_distinct_word_prefix_disj[OF inst_dist ivno[OF IN] IN k_lt i_lt])
+  qed
+  have ivdd: "unat (?ip + 1) + unat sn \<le> unat inst_cap \<Longrightarrow>
+      \<forall>k < unat ?dp. \<forall>i. i < sn \<longrightarrow>
+        data +\<^sub>p int k \<noteq> inst +\<^sub>p uint (?ip + 1 + i)"
+  proof (intro impI allI impI)
+    fix k i assume IN: "unat (?ip + 1) + unat sn \<le> unat inst_cap"
+      and k_lt: "k < unat ?dp" and i_lt: "i < sn"
+    have "k < unat data_cap" using k_lt data_pos_le by linarith
+    thus "data +\<^sub>p int k \<noteq> inst +\<^sub>p uint (?ip + 1 + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[OF data_inst _ i_lt ivno[OF IN] IN])
+  qed
+  have ivad: "unat (?ip + 1) + unat sn \<le> unat inst_cap \<Longrightarrow>
+      \<forall>k < unat ?ap. \<forall>i. i < sn \<longrightarrow>
+        addr +\<^sub>p int k \<noteq> inst +\<^sub>p uint (?ip + 1 + i)"
+  proof (intro impI allI impI)
+    fix k i assume IN: "unat (?ip + 1) + unat sn \<le> unat inst_cap"
+      and k_lt: "k < unat ?ap" and i_lt: "i < sn"
+    have "k < unat addr_cap" using k_lt addr_pos_le by linarith
+    thus "addr +\<^sub>p int k \<noteq> inst +\<^sub>p uint (?ip + 1 + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+            OF bufs_disjoint_sym[THEN iffD1, OF inst_addr] _ i_lt ivno[OF IN] IN])
+  qed
+  have siv: "unat (?ip + 1) + unat sn \<le> unat inst_cap \<Longrightarrow>
+      \<forall>k < unat src_len_w. \<forall>i. i < sn \<longrightarrow>
+        src +\<^sub>p int k \<noteq> inst +\<^sub>p uint (?ip + 1 + i)"
+  proof (intro impI allI impI)
+    fix k i assume IN: "unat (?ip + 1) + unat sn \<le> unat inst_cap"
+      and k_lt: "k < unat src_len_w" and i_lt: "i < sn"
+    show "src +\<^sub>p int k \<noteq> inst +\<^sub>p uint (?ip + 1 + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+            OF bufs_disjoint_sym[THEN iffD1, OF inst_src] k_lt i_lt ivno[OF IN] IN])
+  qed
+  have tiv: "unat (?ip + 1) + unat sn \<le> unat inst_cap \<Longrightarrow>
+      \<forall>k < unat tgt_len. \<forall>i. i < sn \<longrightarrow>
+        tgt +\<^sub>p int k \<noteq> inst +\<^sub>p uint (?ip + 1 + i)"
+  proof (intro impI allI impI)
+    fix k i assume IN: "unat (?ip + 1) + unat sn \<le> unat inst_cap"
+      and k_lt: "k < unat tgt_len" and i_lt: "i < sn"
+    show "tgt +\<^sub>p int k \<noteq> inst +\<^sub>p uint (?ip + 1 + i)"
+      by (rule bufs_disjoint_word_range_rightD_word[
+            OF bufs_disjoint_sym[THEN iffD1, OF inst_tgt] k_lt i_lt ivno[OF IN] IN])
+  qed
+  have package:
+    "\<And>ipos apos.
+      emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+        \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and>
+             enc_sections_state_rel t data inst addr sec' ?spec') \<and>
+             heap_typing t = heap_typing s \<rbrace> \<Longrightarrow>
+      emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+        \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and> enc_cache_abs t ?c1 \<and>
+             enc_cache_wf ?c1) \<and> heap_typing t = heap_typing s \<rbrace> \<Longrightarrow>
+      emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+        \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and>
+             sections_result sec' ?dp ipos apos ENC_OK \<and>
+             heap_bytes t src (unat src_len_w) = heap_bytes s src (unat src_len_w) \<and>
+             heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len)) \<and>
+             heap_typing t = heap_typing s \<rbrace> \<Longrightarrow>
+      unat ipos \<le> unat inst_cap \<Longrightarrow>
+      unat apos \<le> unat addr_cap \<Longrightarrow>
+      emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+        \<lbrace> \<lambda>r t. \<exists>sec'.
+             r = Result sec' \<and>
+             sections_t_C.err_C sec' = ENC_OK \<and>
+             sections_t_C.data_pos_C sec' = ?dp \<and>
+             unat (sections_t_C.inst_pos_C sec') \<le> unat inst_cap \<and>
+             unat (sections_t_C.addr_pos_C sec') \<le> unat addr_cap \<and>
+             enc_sections_state_rel t data inst addr sec' ?spec' \<and>
+             enc_cache_abs t ?c1 \<and> enc_cache_wf ?c1 \<and>
+             heap_bytes t src (unat src_len_w) = heap_bytes s src (unat src_len_w) \<and>
+             heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len) \<and>
+             heap_typing t = heap_typing s \<rbrace>"
+  proof -
+    fix ipos apos :: "32 word"
+    assume S: "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+        \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and>
+             enc_sections_state_rel t data inst addr sec' ?spec') \<and>
+             heap_typing t = heap_typing s \<rbrace>"
+      and C: "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+        \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and> enc_cache_abs t ?c1 \<and>
+             enc_cache_wf ?c1) \<and> heap_typing t = heap_typing s \<rbrace>"
+      and F: "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+        \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and>
+             sections_result sec' ?dp ipos apos ENC_OK \<and>
+             heap_bytes t src (unat src_len_w) = heap_bytes s src (unat src_len_w) \<and>
+             heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len)) \<and>
+             heap_typing t = heap_typing s \<rbrace>"
+      and Ipos: "unat ipos \<le> unat inst_cap"
+      and Apos: "unat apos \<le> unat addr_cap"
+    have comb: "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+        \<lbrace> \<lambda>r t. ((\<exists>sec'. r = Result sec' \<and>
+                   enc_sections_state_rel t data inst addr sec' ?spec') \<and>
+                 heap_typing t = heap_typing s) \<and>
+                ((\<exists>sec'. r = Result sec' \<and> enc_cache_abs t ?c1 \<and>
+                   enc_cache_wf ?c1) \<and> heap_typing t = heap_typing s) \<and>
+                ((\<exists>sec'. r = Result sec' \<and>
+                   sections_result sec' ?dp ipos apos ENC_OK \<and>
+                   heap_bytes t src (unat src_len_w) = heap_bytes s src (unat src_len_w) \<and>
+                   heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len)) \<and>
+                 heap_typing t = heap_typing s) \<rbrace>"
+      using S C F by (simp add: runs_to_conj)
+    show "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+        \<lbrace> \<lambda>r t. \<exists>sec'.
+             r = Result sec' \<and>
+             sections_t_C.err_C sec' = ENC_OK \<and>
+             sections_t_C.data_pos_C sec' = ?dp \<and>
+             unat (sections_t_C.inst_pos_C sec') \<le> unat inst_cap \<and>
+             unat (sections_t_C.addr_pos_C sec') \<le> unat addr_cap \<and>
+             enc_sections_state_rel t data inst addr sec' ?spec' \<and>
+             enc_cache_abs t ?c1 \<and> enc_cache_wf ?c1 \<and>
+             heap_bytes t src (unat src_len_w) = heap_bytes s src (unat src_len_w) \<and>
+             heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len) \<and>
+             heap_typing t = heap_typing s \<rbrace>"
+      apply (rule runs_to_weaken[OF comb])
+      using Ipos Apos by (auto simp: sections_result_def)
+  qed
+
+  show ?thesis
+  proof (cases "mode_t_C.mode_C bm_m < (6 :: 32 word)")
+    case mode_lt: True
+    note ac = addr_choice_le5[OF mode_lt]
+    have abl: "length (varint_bytes32 (mode_t_C.arg_C bm_m) an) = unat an"
+      using an_le5 by (simp add: varint_bytes32_def)
+    show ?thesis
+    proof (cases "copy_len \<le> (18 :: 32 word)")
+      case sz_small: True
+      have IS: "enc_inst ?spec' = enc_inst spec_st @
+          [ucast (op_t_C.op_C (single_copy_opcode' copy_len (mode_t_C.mode_C bm_m)))]"
+        by (rule emit_copy_spec_small_sections(2)[OF copy_ge sz_small mode_le8 ac])
+      have AS: "enc_addr ?spec' = enc_addr spec_st @ varint_bytes32 (mode_t_C.arg_C bm_m) an"
+        by (rule emit_copy_spec_small_sections(3)[OF copy_ge sz_small mode_le8 ac])
+      have inst1_le: "unat ?ip + 1 \<le> unat inst_cap"
+        using inst_room_spec IS inst_len_eq by simp
+      have AN: "unat ?ap + unat an \<le> unat addr_cap"
+        using addr_room_spec AS addr_len_eq abl by simp
+      have IL: "unat ?ip < unat inst_cap" using inst1_le by linarith
+      have ILW: "?ip < inst_cap" using IL by (simp add: word_less_nat_alt)
+      have isu: "unat (?ip + 1) = unat ?ip + 1"
+        using inst1_le unat_lt2p[of inst_cap] by unat_arith
+      have inst1_le': "unat (?ip + 1) \<le> unat inst_cap"
+        using isu inst1_le by simp
+      have Apos: "unat (?ap + an) \<le> unat addr_cap"
+        using AN avno[OF AN] by (simp add: unat_word_add_no_overflow)
+      have srel:
+        "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and>
+                enc_sections_state_rel t data inst addr sec' ?spec') \<and>
+                heap_typing t = heap_typing s \<rbrace>"
+        by (rule runs_to_weaken[
+          OF emit_copy'_small_addr_varint_success_enc_sections_state_rel[
+            OF rel abs wf bm copy_ge sz_small mode_lt addr_size ac sec_ok
+               ILW ibp[OF IL] ibd[OF IL] ibdd[OF IL] ibad[OF IL]
+               avf[OF AN] avv[OF AN] avi[OF AN] avp[OF AN] avno[OF AN]
+               avdd[OF AN] avid[OF AN inst1_le']]]) auto
+      have cache:
+        "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and> enc_cache_abs t ?c1 \<and>
+                enc_cache_wf ?c1) \<and> heap_typing t = heap_typing s \<rbrace>"
+        by (rule emit_copy'_small_addr_varint_success_enc_cache_abs[
+            OF abs wf bm copy_ge sz_small mode_lt addr_size ILW ibp[OF IL]
+               avf[OF AN] avv[OF AN]])
+      have frame:
+        "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and>
+                sections_result sec' ?dp (?ip + 1) (?ap + an) ENC_OK \<and>
+                heap_bytes t src (unat src_len_w) = heap_bytes s src (unat src_len_w) \<and>
+                heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len)) \<and>
+                heap_typing t = heap_typing s \<rbrace>"
+        by (rule runs_to_weaken[
+          OF emit_copy'_small_addr_varint_success_heap_bytes2_frame[
+            OF bm copy_ge sz_small mode_lt addr_size sec_ok near_ptr_lt
+               ILW ibp[OF IL] ibd[OF IL] sib[OF IL] tib[OF IL]
+               avf[OF AN] avv[OF AN] avi[OF AN] avp[OF AN] avno[OF AN]
+               sav[OF AN] tav[OF AN]]]) auto
+      show ?thesis
+        by (rule package[OF srel cache frame inst1_le' Apos])
+    next
+      case sz_large: False
+      hence sz_large': "\<not> ((4 :: 32 word) \<le> copy_len \<and> copy_len \<le> (18 :: 32 word))"
+        by simp
+      have IS: "enc_inst ?spec' = enc_inst spec_st @
+          [ucast (op_t_C.op_C (single_copy_opcode' copy_len (mode_t_C.mode_C bm_m)))] @
+          varint_bytes32 copy_len sn"
+        by (rule emit_copy_spec_large_sections(2)[OF sz_large' mode_le8 copy_size ac])
+      have AS: "enc_addr ?spec' = enc_addr spec_st @ varint_bytes32 (mode_t_C.arg_C bm_m) an"
+        by (rule emit_copy_spec_large_sections(3)[OF sz_large' mode_le8 copy_size ac])
+      have sbl: "length (varint_bytes32 copy_len sn) = unat sn"
+        using sn_le5 by (simp add: varint_bytes32_def)
+      have AN: "unat ?ap + unat an \<le> unat addr_cap"
+        using addr_room_spec AS addr_len_eq abl by simp
+      have Apos: "unat (?ap + an) \<le> unat addr_cap"
+        using AN avno[OF AN] by (simp add: unat_word_add_no_overflow)
+      have inst_isn_le: "unat ?ip + 1 + unat sn \<le> unat inst_cap"
+        using inst_room_spec IS inst_len_eq sbl by simp
+      have IL: "unat ?ip < unat inst_cap" using inst_isn_le by linarith
+      have ILW: "?ip < inst_cap" using IL by (simp add: word_less_nat_alt)
+      have isu: "unat (?ip + 1) = unat ?ip + 1"
+        using inst_isn_le unat_lt2p[of inst_cap] by unat_arith
+      have IN: "unat (?ip + 1) + unat sn \<le> unat inst_cap" using isu inst_isn_le by simp
+      have isnu: "unat (?ip + 1 + sn) = unat (?ip + 1) + unat sn"
+        using IN unat_lt2p[of inst_cap] by unat_arith
+      have inst1sn_le': "unat (?ip + 1 + sn) \<le> unat inst_cap" using isnu IN by simp
+      have srel:
+        "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and>
+                enc_sections_state_rel t data inst addr sec' ?spec') \<and>
+                heap_typing t = heap_typing s \<rbrace>"
+        by (rule runs_to_weaken[
+          OF emit_copy'_large_addr_varint_success_enc_sections_state_rel[
+            OF rel abs wf bm sz_large' copy_size mode_lt addr_size ac sec_ok
+               ILW ibp[OF IL] ibd[OF IL] ibdd[OF IL] ibad[OF IL]
+               ivf[OF IN] ivv[OF IN] ivi[OF IN] ivp[OF IN] ivno[OF IN]
+               ivdd[OF IN] ivad[OF IN]
+               avf[OF AN] avv[OF AN] avi[OF AN] avp[OF AN] avno[OF AN]
+               avdd[OF AN] avid[OF AN inst1sn_le']]]) auto
+      have cache:
+        "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and> enc_cache_abs t ?c1 \<and>
+                enc_cache_wf ?c1) \<and> heap_typing t = heap_typing s \<rbrace>"
+        by (rule emit_copy'_large_addr_varint_success_enc_cache_abs[
+            OF abs wf bm sz_large' copy_size mode_lt addr_size ILW ibp[OF IL]
+               ivf[OF IN] ivv[OF IN] avf[OF AN] avv[OF AN]])
+      have frame:
+        "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and>
+                sections_result sec' ?dp (?ip + 1 + sn) (?ap + an) ENC_OK \<and>
+                heap_bytes t src (unat src_len_w) = heap_bytes s src (unat src_len_w) \<and>
+                heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len)) \<and>
+                heap_typing t = heap_typing s \<rbrace>"
+        by (rule runs_to_weaken[
+          OF emit_copy'_large_addr_varint_success_heap_bytes2_frame[
+            OF bm sz_large' copy_size mode_lt addr_size sec_ok near_ptr_lt
+               ILW ibp[OF IL] ibd[OF IL] sib[OF IL] tib[OF IL]
+               ivf[OF IN] ivv[OF IN] ivi[OF IN] ivp[OF IN] ivno[OF IN]
+               siv[OF IN] tiv[OF IN]
+               avf[OF AN] avv[OF AN] avi[OF AN] avp[OF AN] avno[OF AN]
+               sav[OF AN] tav[OF AN]]]) auto
+      show ?thesis
+        by (rule package[OF srel cache frame inst1sn_le' Apos])
+    qed
+  next
+    case mode_ge: False
+    hence mode_ge': "\<not> mode_t_C.mode_C bm_m < (6 :: 32 word)" by simp
+    note ac = addr_choice_gt5[OF mode_ge']
+    show ?thesis
+    proof (cases "copy_len \<le> (18 :: 32 word)")
+      case sz_small: True
+      have IS: "enc_inst ?spec' = enc_inst spec_st @
+          [ucast (op_t_C.op_C (single_copy_opcode' copy_len (mode_t_C.mode_C bm_m)))]"
+        by (rule emit_copy_spec_small_sections(2)[OF copy_ge sz_small mode_le8 ac])
+      have AS: "enc_addr ?spec' = enc_addr spec_st @ [ucast (mode_t_C.arg_C bm_m)]"
+        by (rule emit_copy_spec_small_sections(3)[OF copy_ge sz_small mode_le8 ac])
+      have inst1_le: "unat ?ip + 1 \<le> unat inst_cap"
+        using inst_room_spec IS inst_len_eq by simp
+      have addr1_le: "unat ?ap + 1 \<le> unat addr_cap"
+        using addr_room_spec AS addr_len_eq by simp
+      have IL: "unat ?ip < unat inst_cap" using inst1_le by linarith
+      have ILW: "?ip < inst_cap" using IL by (simp add: word_less_nat_alt)
+      have AL: "unat ?ap < unat addr_cap" using addr1_le by linarith
+      have ALW: "?ap < addr_cap" using AL by (simp add: word_less_nat_alt)
+      have isu: "unat (?ip + 1) = unat ?ip + 1"
+        using inst1_le unat_lt2p[of inst_cap] by unat_arith
+      have inst1_le': "unat (?ip + 1) \<le> unat inst_cap" using isu inst1_le by simp
+      have asu: "unat (?ap + 1) = unat ?ap + 1"
+        using addr1_le unat_lt2p[of addr_cap] by unat_arith
+      have addr1_le': "unat (?ap + 1) \<le> unat addr_cap" using asu addr1_le by simp
+      have srel:
+        "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and>
+                enc_sections_state_rel t data inst addr sec' ?spec') \<and>
+                heap_typing t = heap_typing s \<rbrace>"
+        by (rule runs_to_weaken[
+          OF emit_copy'_small_addr_byte_success_enc_sections_state_rel[
+            OF rel abs wf bm copy_ge sz_small mode_ge' ac sec_ok
+               ILW ibp[OF IL] ibd[OF IL] ibdd[OF IL] ibad[OF IL]
+               ALW abp[OF AL] abd[OF AL] abdd[OF AL] abid[OF AL inst1_le']]]) auto
+      have cache:
+        "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and> enc_cache_abs t ?c1 \<and>
+                enc_cache_wf ?c1) \<and> heap_typing t = heap_typing s \<rbrace>"
+        by (rule emit_copy'_small_addr_byte_success_enc_cache_abs[
+            OF abs wf bm copy_ge sz_small mode_ge' ILW ibp[OF IL] ALW abp[OF AL]])
+      have frame:
+        "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and>
+                sections_result sec' ?dp (?ip + 1) (?ap + 1) ENC_OK \<and>
+                heap_bytes t src (unat src_len_w) = heap_bytes s src (unat src_len_w) \<and>
+                heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len)) \<and>
+                heap_typing t = heap_typing s \<rbrace>"
+        by (rule runs_to_weaken[
+          OF emit_copy'_small_addr_byte_success_heap_bytes2_frame[
+            OF bm copy_ge sz_small mode_ge' sec_ok near_ptr_lt
+               ILW ibp[OF IL] ibd[OF IL] sib[OF IL] tib[OF IL]
+               ALW abp[OF AL] abd[OF AL] sab[OF AL] tab[OF AL]]]) auto
+      show ?thesis
+        by (rule package[OF srel cache frame inst1_le' addr1_le'])
+    next
+      case sz_large: False
+      hence sz_large': "\<not> ((4 :: 32 word) \<le> copy_len \<and> copy_len \<le> (18 :: 32 word))"
+        by simp
+      have IS: "enc_inst ?spec' = enc_inst spec_st @
+          [ucast (op_t_C.op_C (single_copy_opcode' copy_len (mode_t_C.mode_C bm_m)))] @
+          varint_bytes32 copy_len sn"
+        by (rule emit_copy_spec_large_sections(2)[OF sz_large' mode_le8 copy_size ac])
+      have AS: "enc_addr ?spec' = enc_addr spec_st @ [ucast (mode_t_C.arg_C bm_m)]"
+        by (rule emit_copy_spec_large_sections(3)[OF sz_large' mode_le8 copy_size ac])
+      have sbl: "length (varint_bytes32 copy_len sn) = unat sn"
+        using sn_le5 by (simp add: varint_bytes32_def)
+      have addr1_le: "unat ?ap + 1 \<le> unat addr_cap"
+        using addr_room_spec AS addr_len_eq by simp
+      have AL: "unat ?ap < unat addr_cap" using addr1_le by linarith
+      have ALW: "?ap < addr_cap" using AL by (simp add: word_less_nat_alt)
+      have asu: "unat (?ap + 1) = unat ?ap + 1"
+        using addr1_le unat_lt2p[of addr_cap] by unat_arith
+      have addr1_le': "unat (?ap + 1) \<le> unat addr_cap" using asu addr1_le by simp
+      have inst_isn_le: "unat ?ip + 1 + unat sn \<le> unat inst_cap"
+        using inst_room_spec IS inst_len_eq sbl by simp
+      have IL: "unat ?ip < unat inst_cap" using inst_isn_le by linarith
+      have ILW: "?ip < inst_cap" using IL by (simp add: word_less_nat_alt)
+      have isu: "unat (?ip + 1) = unat ?ip + 1"
+        using inst_isn_le unat_lt2p[of inst_cap] by unat_arith
+      have IN: "unat (?ip + 1) + unat sn \<le> unat inst_cap" using isu inst_isn_le by simp
+      have isnu: "unat (?ip + 1 + sn) = unat (?ip + 1) + unat sn"
+        using IN unat_lt2p[of inst_cap] by unat_arith
+      have inst1sn_le': "unat (?ip + 1 + sn) \<le> unat inst_cap" using isnu IN by simp
+      have srel:
+        "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and>
+                enc_sections_state_rel t data inst addr sec' ?spec') \<and>
+                heap_typing t = heap_typing s \<rbrace>"
+        by (rule runs_to_weaken[
+          OF emit_copy'_large_addr_byte_success_enc_sections_state_rel[
+            OF rel abs wf bm sz_large' copy_size mode_ge' ac sec_ok
+               ILW ibp[OF IL] ibd[OF IL] ibdd[OF IL] ibad[OF IL]
+               ivf[OF IN] ivv[OF IN] ivi[OF IN] ivp[OF IN] ivno[OF IN]
+               ivdd[OF IN] ivad[OF IN]
+               ALW abp[OF AL] abd[OF AL] abdd[OF AL] abid[OF AL inst1sn_le']]]) auto
+      have cache:
+        "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and> enc_cache_abs t ?c1 \<and>
+                enc_cache_wf ?c1) \<and> heap_typing t = heap_typing s \<rbrace>"
+        by (rule emit_copy'_large_addr_byte_success_enc_cache_abs[
+            OF abs wf bm sz_large' copy_size mode_ge' ILW ibp[OF IL]
+               ivf[OF IN] ivv[OF IN] ALW abp[OF AL]])
+      have frame:
+        "emit_copy' sec inst inst_cap addr addr_cap copy_addr here copy_len \<bullet> s
+           \<lbrace> \<lambda>r t. (\<exists>sec'. r = Result sec' \<and>
+                sections_result sec' ?dp (?ip + 1 + sn) (?ap + 1) ENC_OK \<and>
+                heap_bytes t src (unat src_len_w) = heap_bytes s src (unat src_len_w) \<and>
+                heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len)) \<and>
+                heap_typing t = heap_typing s \<rbrace>"
+        by (rule runs_to_weaken[
+          OF emit_copy'_large_addr_byte_success_heap_bytes2_frame[
+            OF bm sz_large' copy_size mode_ge' sec_ok near_ptr_lt
+               ILW ibp[OF IL] ibd[OF IL] sib[OF IL] tib[OF IL]
+               ivf[OF IN] ivv[OF IN] ivi[OF IN] ivp[OF IN] ivno[OF IN]
+               siv[OF IN] tiv[OF IN]
+               ALW abp[OF AL] abd[OF AL] sab[OF AL] tab[OF AL]]]) auto
+      show ?thesis
+        by (rule package[OF srel cache frame inst1sn_le' addr1_le'])
+    qed
+  qed
+qed
+
 
 
 lemma encode_window_try_fused_copy_step_topdown_budget:
