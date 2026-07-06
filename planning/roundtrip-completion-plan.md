@@ -39,11 +39,20 @@ pieces of infrastructure, all in `VcdiffEnc_Serialize.thy`:
    `unat tgt_len − unat tp`; exit gives `flush_pending_spec spec_st =
    final` via the fuel-1 lemma `encode_window_section_budget_exit_flush`.
 
-**Next: item 4** (`encode_window_final_flush_topdown_budget`, one sorry
-below the while lemma) — the framed flush helper's premises fit; then the
-glue (items 5–6). Remaining sorries: final_flush_budget, phase_core_budget,
-window_phase_budget, compose_phases, and the two FALSE non-budget lemmas to
-delete (8309 flush_then_copy, while_loop non-budget).
+**Work item 4 DONE** (same session): `encode_window_final_flush_topdown_budget`
+proved (sorry count 6 → 5) — a ~190-line proof instead of adapting the
+840-line non-budget original, because the framed flush helper does all the
+work: room64s for data/inst come from the retained linear slacks at
+tp = tgt_len (the whole `(tgt_len − tp)` window term is released), addr
+room and the caps postcondition come from `final_spec` + `final_caps`, the
+empty-pending case is `flush_pending_spec_empty_sections`, and the
+`liftE/condition/throw` plumbing reuses
+`runs_to_liftE_bind_throw_exn_result` from the non-budget tail.
+
+**Next: item 5 glue.** Remaining sorries (5): phase_core_budget (needs
+head_valid/next_valid threaded), window_phase_budget, compose_phases, and
+the two FALSE non-budget lemmas to delete in item 6 (flush_then_copy
+non-budget, while_loop non-budget).
 
 **2026-07-06 (session 2, cont.).** **Work item 1 DONE**:
 `encode_window_flush_then_copy_step_topdown_budget` is proved (sorry count

@@ -15916,6 +15916,11 @@ proof -
   qed
 qed
 
+text \<open>The final flush under the budget invariant: at loop exit the retained
+  data/inst linear slacks fund the flush (tp = tgt_len releases the whole
+  window term), the addr section is untouched, and the flushed spec state
+  is exactly the final one.\<close>
+
 lemma encode_window_final_flush_topdown_budget:
   fixes src tgt data inst addr pending :: "8 word ptr"
     and src_len tgt_len data_cap inst_cap addr_cap pending_cap :: "32 word"
@@ -15954,7 +15959,151 @@ lemma encode_window_final_flush_topdown_budget:
               sections_t_C.err_C sec' = ENC_OK \<and>
               encoder_window_caps_ok sec' data_cap inst_cap addr_cap \<and>
               heap_typing t = heap_typing s \<rbrace>"
-  sorry
+proof -
+  let ?final = "encode_window_final_spec_state src_bytes tgt_bytes"
+  have typing_s: "heap_typing s = heap_typing s0"
+    using index by (simp add: encoder_index_post_def)
+  have loop_buffers0:
+    "encode_window_loop_buffers_ok s0 src src_len tgt tgt_len
+      pending pending_cap data data_cap inst inst_cap addr addr_cap"
+    by (rule encoder_buffers_ok_encode_window_loop_buffers_ok[OF buffers])
+  have buffers_s:
+    "encode_window_loop_buffers_ok s src src_len tgt tgt_len
+      pending pending_cap data data_cap inst inst_cap addr addr_cap"
+    by (rule encode_window_loop_buffers_ok_heap_typing[
+          OF loop_buffers0 typing_s])
+  have sections_rel: "enc_sections_state_rel s data inst addr sec spec_st"
+    and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+    and pending_heap:
+      "heap_bytes_word s pending 0 pend_len = enc_pending spec_st"
+    and pending_len: "length (enc_pending spec_st) = unat pend_len"
+    and tp_eq: "enc_tp spec_st = unat tp"
+    and tgt_len_eq: "length tgt_bytes = unat tgt_len"
+    and pend_cap_le: "unat pend_len \<le> unat pending_cap"
+    and tp_le: "unat tp \<le> unat tgt_len"
+    and abs: "enc_cache_abs s (enc_cache spec_st)"
+    and cwf: "enc_cache_wf (enc_cache spec_st)"
+    using loop_exit by (simp_all add: encode_window_loop_budget_rel_def)
+  have data_slack:
+    "unat (sections_t_C.data_pos_C sec) + unat pend_len +
+       (unat tgt_len - unat tp) + 64 \<le> unat data_cap"
+    using loop_exit unfolding encode_window_loop_budget_rel_def by blast
+  have inst_slack:
+    "unat (sections_t_C.inst_pos_C sec) + unat pend_len +
+       (unat tgt_len - unat tp) + 64 \<le> unat inst_cap"
+    using loop_exit unfolding encode_window_loop_budget_rel_def by blast
+  have dp_len0: "length (enc_data spec_st) = unat (sections_t_C.data_pos_C sec)"
+    and ip_len0: "length (enc_inst spec_st) = unat (sections_t_C.inst_pos_C sec)"
+    and ap_len0: "length (enc_addr spec_st) = unat (sections_t_C.addr_pos_C sec)"
+    using enc_sections_state_rel_lengths[OF sections_rel] by simp_all
+  have final_data_cap: "length (enc_data ?final) \<le> unat data_cap"
+    and final_inst_cap: "length (enc_inst ?final) \<le> unat inst_cap"
+    and final_addr_cap: "length (enc_addr ?final) \<le> unat addr_cap"
+    using final_caps by (simp_all add: encoder_final_section_caps_ok_def)
+  have pending_lt32: "length (enc_pending spec_st) < 2 ^ 32"
+    using pending_len unat_lt2p[of pend_len] by simp
+  have flush_data_room64:
+    "length (enc_data (flush_pending_spec (length src_bytes) spec_st)) + 64
+      \<le> unat data_cap"
+    using flush_pending_spec_growth_bounds(1)[OF pending_lt32,
+        of "length src_bytes"]
+      pending_len dp_len0 data_slack
+    by linarith
+  have flush_inst_room64:
+    "length (enc_inst (flush_pending_spec (length src_bytes) spec_st)) + 64
+      \<le> unat inst_cap"
+    using flush_pending_spec_growth_bounds(2)[OF pending_lt32,
+        of "length src_bytes"]
+      pending_len ip_len0 inst_slack
+    by linarith
+  have flush_addr_room:
+    "length (enc_addr (flush_pending_spec (length src_bytes) spec_st))
+      \<le> unat addr_cap"
+    using final_spec final_addr_cap by simp
+  have cond_flush:
+    "condition (\<lambda>s. 0 < pend_len)
+       (flush_pending' sec data data_cap inst inst_cap pending pend_len)
+       (return sec) \<bullet> s
+     \<lbrace> \<lambda>Res sec' t.
+          enc_sections_state_rel t data inst addr sec' ?final \<and>
+          sections_t_C.err_C sec' = ENC_OK \<and>
+          heap_typing t = heap_typing s \<rbrace>"
+  proof (cases "0 < pend_len")
+    case pend_pos: True
+    have FH:
+      "flush_pending' sec data data_cap inst inst_cap pending pend_len \<bullet> s
+       \<lbrace> \<lambda>r t. \<exists>sec'.
+            r = Result sec' \<and>
+            enc_sections_state_rel t data inst addr sec'
+              (flush_pending_spec (length src_bytes) spec_st) \<and>
+            sections_t_C.err_C sec' = ENC_OK \<and>
+            heap_bytes_word t src 0 src_len =
+              heap_bytes_word s src 0 src_len \<and>
+            heap_bytes_word t tgt 0 tgt_len =
+              heap_bytes_word s tgt 0 tgt_len \<and>
+            enc_cache_abs t (enc_cache spec_st) \<and>
+            heap_typing t = heap_typing s \<rbrace>"
+      by (rule flush_pending'_loop_from_final_fits_framed[
+            OF buffers_s sections_rel abs cwf sec_ok pending_heap[symmetric]
+               pend_cap_le flush_data_room64 flush_inst_room64
+               flush_addr_room])
+    show ?thesis
+      unfolding condition_def
+      using pend_pos
+      apply runs_to_vcg
+      apply (rule runs_to_weaken[OF FH])
+      using final_spec
+      apply auto
+      done
+  next
+    case False
+    have pend0: "pend_len = 0"
+      using False by (simp add: word_neq_0_conv not_less)
+    have pending_nil: "enc_pending spec_st = []"
+      using pending_len pend0 by simp
+    have flush_secs:
+      "enc_data (flush_pending_spec (length src_bytes) spec_st) =
+        enc_data spec_st"
+      "enc_inst (flush_pending_spec (length src_bytes) spec_st) =
+        enc_inst spec_st"
+      "enc_addr (flush_pending_spec (length src_bytes) spec_st) =
+        enc_addr spec_st"
+      using flush_pending_spec_empty_sections[OF pending_nil] by simp_all
+    have final_secs:
+      "enc_data ?final = enc_data spec_st"
+      "enc_inst ?final = enc_inst spec_st"
+      "enc_addr ?final = enc_addr spec_st"
+      using flush_secs final_spec by simp_all
+    have rel_final: "enc_sections_state_rel s data inst addr sec ?final"
+      using sections_rel final_secs
+      by (simp add: enc_sections_state_rel_def)
+    show ?thesis
+      unfolding condition_def
+      using False rel_final sec_ok
+      by runs_to_vcg
+  qed
+  show ?thesis
+    apply (rule runs_to_weaken[
+      OF runs_to_liftE_bind_throw_exn_result[OF cond_flush]])
+    subgoal premises post for r t
+    proof -
+      obtain sec' where
+          r_def: "r = Exn sec'"
+        and rel_sec:
+          "enc_sections_state_rel t data inst addr sec' ?final"
+        and sec'_ok: "sections_t_C.err_C sec' = ENC_OK"
+        and typing_t: "heap_typing t = heap_typing s"
+        using post by auto
+      have caps_e:
+        "encoder_window_caps_ok sec' data_cap inst_cap addr_cap"
+        using enc_sections_state_rel_lengths[OF rel_sec]
+          final_data_cap final_inst_cap final_addr_cap
+        by (auto simp: encoder_window_caps_ok_def)
+      show ?thesis
+        using r_def rel_sec sec'_ok caps_e typing_t by auto
+    qed
+    done
+qed
 
 lemma encode_window_phase_core_topdown_budget:
   fixes src tgt data inst addr pending :: "8 word ptr"
