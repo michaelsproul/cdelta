@@ -10086,6 +10086,70 @@ proof -
   show ?thesis by (rule flush)
 qed
 
+text \<open>Helper A: when the fused spec step is None, the C try_emit_add_copy'
+  is a pure noop returning fused=0 and the original sections struct.\<close>
+
+lemma try_emit_add_copy'_spec_none_noop:
+  fixes copy_addr here copy_len pend_len :: "32 word"
+  assumes rel: "enc_sections_state_rel s data inst addr_buf sec spec_st"
+      and pend_eq: "length (enc_pending spec_st) = unat pend_len"
+      and copy_ge: "(4 :: 32 word) \<le> copy_len"
+      and none:
+        "try_emit_add_copy_spec sl (unat copy_addr) (unat copy_len) spec_st
+          = None"
+      and bm: "best_mode' copy_addr here s = Some bm_m"
+      and mode_le8: "mode_t_C.mode_C bm_m \<le> (8 :: 32 word)"
+      and addr_exact:
+        "encode_address (enc_cache spec_st) (unat copy_addr)
+           (sl + enc_tp spec_st) =
+         (unat (mode_t_C.mode_C bm_m), addr_bytes,
+          cache_update (enc_cache spec_st) (unat copy_addr))"
+  shows "try_emit_add_copy' sec data data_cap inst inst_cap addr_buf addr_cap
+            pending pend_len copy_addr here copy_len \<bullet> s
+         \<lbrace> \<lambda>r t.
+              (\<exists>f. r = Result f \<and>
+                   fused_t_C.s_C f = sec \<and>
+                   fused_t_C.fused_C f = 0) \<and>
+              t = s \<rbrace>"
+proof (cases "pend_len < (1 :: 32 word) \<or> (4 :: 32 word) < pend_len
+              \<or> copy_len < (4 :: 32 word)")
+  case True
+  show ?thesis
+    by (rule try_emit_add_copy'_early_noop[OF True])
+next
+  case False
+  have pend_ne: "pend_len \<noteq> 0"
+    and pend_le: "pend_len \<le> (4 :: 32 word)"
+    using False by (auto simp: not_less)
+  have pend_ge: "(1 :: 32 word) \<le> pend_len"
+    using pend_ne by unat_arith
+  have mode_gt: "(5 :: 32 word) < mode_t_C.mode_C bm_m"
+  proof (rule ccontr)
+    assume "\<not> (5 :: 32 word) < mode_t_C.mode_C bm_m"
+    hence mode_le: "mode_t_C.mode_C bm_m \<le> (5 :: 32 word)"
+      by simp
+    have "try_emit_add_copy_spec sl (unat copy_addr) (unat copy_len) spec_st
+            \<noteq> None"
+      using try_emit_add_copy_spec_mode_le5_success[
+            OF pend_eq pend_ge pend_le copy_ge mode_le addr_exact]
+      by simp
+    thus False using none by simp
+  qed
+  have copy_ne: "copy_len \<noteq> (4 :: 32 word)"
+  proof (rule ccontr)
+    assume "\<not> copy_len \<noteq> (4 :: 32 word)"
+    hence copy_eq: "copy_len = (4 :: 32 word)" by simp
+    have "try_emit_add_copy_spec sl (unat copy_addr) (unat copy_len) spec_st
+            \<noteq> None"
+      using try_emit_add_copy_spec_mode_gt5_success[
+            OF pend_eq pend_ge pend_le copy_eq mode_gt mode_le8 addr_exact]
+      by simp
+    thus False using none by simp
+  qed
+  show ?thesis
+    by (rule try_emit_add_copy'_mode_gt5_copy_ne4_noop[OF bm mode_gt copy_ne])
+qed
+
 
 
 lemma encode_window_try_fused_copy_step_topdown_budget:
