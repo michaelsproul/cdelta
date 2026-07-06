@@ -12848,6 +12848,1099 @@ proof -
     done
 qed
 
+lemma flush_pending'_loop_from_final_fits_framed:
+  fixes s :: lifted_globals
+    and src tgt data inst addr pending :: "8 word ptr"
+    and src_len tgt_len data_cap inst_cap addr_cap pending_cap pend_len :: "32 word"
+  assumes buffers:
+      "encode_window_loop_buffers_ok s src src_len tgt tgt_len
+        pending pending_cap data data_cap inst inst_cap addr addr_cap"
+    and rel: "enc_sections_state_rel s data inst addr sec spec_st"
+    and abs: "enc_cache_abs s c"
+    and cache_wf: "enc_cache_wf c"
+    and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+    and pending_eq:
+      "enc_pending spec_st = heap_bytes_word s pending 0 pend_len"
+    and pend_len_le: "unat pend_len \<le> unat pending_cap"
+    and final_data_room64:
+      "length (enc_data (flush_pending_spec sl spec_st)) + 64 \<le> unat data_cap"
+    and final_inst_room64:
+      "length (enc_inst (flush_pending_spec sl spec_st)) + 64 \<le> unat inst_cap"
+    and final_addr_room:
+      "length (enc_addr (flush_pending_spec sl spec_st)) \<le> unat addr_cap"
+  shows "flush_pending' sec data data_cap inst inst_cap pending pend_len \<bullet> s
+         \<lbrace> \<lambda>r t. \<exists>sec'.
+              r = Result sec' \<and>
+              enc_sections_state_rel t data inst addr sec'
+                (flush_pending_spec sl spec_st) \<and>
+              sections_t_C.err_C sec' = ENC_OK \<and>
+              heap_bytes_word t src 0 src_len =
+                heap_bytes_word s src 0 src_len \<and>
+              heap_bytes_word t tgt 0 tgt_len =
+                heap_bytes_word s tgt 0 tgt_len \<and>
+              enc_cache_abs t c \<and>
+              heap_typing t = heap_typing s \<rbrace>"
+proof -
+  let ?pending_bytes = "heap_bytes_word s pending 0 pend_len"
+  let ?final_st = "flush_pending_spec sl spec_st"
+  let ?P = "\<lambda>u. heap_bytes_word u src 0 src_len =
+                  heap_bytes_word s src 0 src_len \<and>
+                heap_bytes_word u tgt 0 tgt_len =
+                  heap_bytes_word s tgt 0 tgt_len \<and>
+                enc_cache_abs u c"
+  have P0: "?P s" using abs by simp
+  have inst_src0: "bufs_disjoint inst (unat inst_cap) src (unat src_len)"
+    and inst_tgt0: "bufs_disjoint inst (unat inst_cap) tgt (unat tgt_len)"
+    and data_src0: "bufs_disjoint data (unat data_cap) src (unat src_len)"
+    and data_tgt0: "bufs_disjoint data (unat data_cap) tgt (unat tgt_len)"
+    using buffers by (auto simp: encode_window_loop_buffers_ok_def)
+  have src_inst_disj: "bufs_disjoint src (unat src_len) inst (unat inst_cap)"
+    by (rule bufs_disjoint_sym[THEN iffD1, OF inst_src0])
+  have tgt_inst_disj: "bufs_disjoint tgt (unat tgt_len) inst (unat inst_cap)"
+    by (rule bufs_disjoint_sym[THEN iffD1, OF inst_tgt0])
+  have src_data_disj: "bufs_disjoint src (unat src_len) data (unat data_cap)"
+    by (rule bufs_disjoint_sym[THEN iffD1, OF data_src0])
+  have tgt_data_disj: "bufs_disjoint tgt (unat tgt_len) data (unat data_cap)"
+    by (rule bufs_disjoint_sym[THEN iffD1, OF data_tgt0])
+  have typing_s0: "heap_typing s = heap_typing s"
+    by (rule refl)
+  have pending_valid:
+    "\<forall>j < unat pend_len.
+      ptr_valid (heap_typing s)
+        (pending +\<^sub>p uint ((0 :: 32 word) + of_nat j))"
+    by (rule encode_window_loop_buffers_ok_pending_ptr_valid[
+        OF buffers pend_len_le])
+  have final_loop:
+    "flush_pending_loop_spec sl ?pending_bytes 0 0 spec_st = ?final_st"
+    by (rule flush_pending_loop_spec_eq_flush_pending_spec[OF pending_eq])
+    have tail_pre:
+      "\<And>add_start i sec_cur t loop_st. \<lbrakk>
+        flush_pending_outer_loop_inv (sl) s data inst addr
+          pending pend_len spec_st add_start i sec_cur t;
+        ?P t;
+        i \<le> pend_len;
+        i = pend_len;
+        enc_sections_state_rel t data inst addr sec_cur loop_st;
+        flush_pending_loop_spec (sl)
+          (heap_bytes_word s pending 0 pend_len) (unat add_start)
+          (unat pend_len) loop_st =
+        flush_pending_loop_spec (sl)
+          (heap_bytes_word s pending 0 pend_len) 0 0 spec_st
+      \<rbrakk> \<Longrightarrow>
+        flush_pending_outer_tail data data_cap inst inst_cap pending pend_len
+          add_start sec_cur \<bullet> t
+        \<lbrace> \<lambda>Res sec' u.
+	             enc_sections_state_rel u data inst addr sec'
+	               (flush_pending_outer_tail_state (sl) s
+	                 pending pend_len add_start loop_st) \<and>
+	             sections_t_C.err_C sec' = ENC_OK \<and>
+	             heap_typing u = heap_typing s \<and>
+	             ?P u \<rbrace>"
+    proof -
+      fix add_start i sec_cur t loop_st
+      assume inv:
+        "flush_pending_outer_loop_inv (sl) s data inst addr
+          pending pend_len spec_st add_start i sec_cur t"
+      assume P_t: "?P t"
+      assume i_eq: "i = pend_len"
+      assume rel_cur: "enc_sections_state_rel t data inst addr sec_cur loop_st"
+      assume eq_loop:
+        "flush_pending_loop_spec (sl)
+          (heap_bytes_word s pending 0 pend_len) (unat add_start)
+          (unat pend_len) loop_st =
+        flush_pending_loop_spec (sl)
+          (heap_bytes_word s pending 0 pend_len) 0 0 spec_st"
+      have add_start_le_len: "add_start \<le> pend_len"
+        using inv i_eq by (simp add: flush_pending_outer_loop_inv_def)
+      have src_frame_t:
+        "heap_bytes_word t src 0 src_len = heap_bytes_word s src 0 src_len"
+        and tgt_frame_t:
+        "heap_bytes_word t tgt 0 tgt_len = heap_bytes_word s tgt 0 tgt_len"
+        and abs_t: "enc_cache_abs t c"
+        using P_t by auto
+      have typing_t_s: "heap_typing t = heap_typing s"
+        using inv by (simp add: flush_pending_outer_loop_inv_def)
+      have typing_t_s0: "heap_typing t = heap_typing s"
+        using typing_t_s typing_s0 by simp
+      have frame_t:
+        "heap_bytes_word t pending 0 pend_len = ?pending_bytes"
+        using inv by (simp add: flush_pending_outer_loop_inv_def)
+      have sec_cur_ok: "sections_t_C.err_C sec_cur = ENC_OK"
+        using inv by (simp add: flush_pending_outer_loop_inv_def)
+      have exit_tail:
+        "flush_pending_loop_spec (sl) ?pending_bytes
+          (unat add_start) (unat pend_len) loop_st =
+         flush_pending_outer_tail_state (sl) s pending
+          pend_len add_start loop_st"
+        unfolding flush_pending_outer_tail_state_def
+        by (rule flush_pending_loop_spec_exit_heap_emit_word[
+          OF add_start_le_len]) simp
+      have tail_state_eq:
+        "flush_pending_outer_tail_state (sl) s pending
+          pend_len add_start loop_st = ?final_st"
+        using exit_tail eq_loop final_loop by simp
+      have add_start_nat_le_len: "unat add_start \<le> unat pend_len"
+        using add_start_le_len by (simp add: word_le_nat_alt)
+      have pend_nat_le_pending_bytes: "unat pend_len \<le> length ?pending_bytes"
+        by simp
+      have cur_data_le_loop:
+        "length (enc_data loop_st) \<le>
+         length (enc_data
+          (flush_pending_loop_spec (sl) ?pending_bytes
+            (unat add_start) (unat pend_len) loop_st))"
+        by (rule flush_pending_loop_spec_mono(1)[
+          OF add_start_nat_le_len pend_nat_le_pending_bytes])
+      have cur_inst_le_loop:
+        "length (enc_inst loop_st) \<le>
+         length (enc_inst
+          (flush_pending_loop_spec (sl) ?pending_bytes
+            (unat add_start) (unat pend_len) loop_st))"
+        by (rule flush_pending_loop_spec_mono(2)[
+          OF add_start_nat_le_len pend_nat_le_pending_bytes])
+      have cur_addr_eq_loop:
+        "length (enc_addr
+          (flush_pending_loop_spec (sl) ?pending_bytes
+            (unat add_start) (unat pend_len) loop_st)) =
+         length (enc_addr loop_st)"
+        by (rule flush_pending_loop_spec_mono(3)[
+          OF add_start_nat_le_len pend_nat_le_pending_bytes])
+      have cur_data_le_final:
+        "length (enc_data loop_st) \<le> length (enc_data ?final_st)"
+        using cur_data_le_loop eq_loop final_loop by simp
+      have cur_inst_le_final:
+        "length (enc_inst loop_st) \<le> length (enc_inst ?final_st)"
+        using cur_inst_le_loop eq_loop final_loop by simp
+      have cur_addr_le_final:
+        "length (enc_addr loop_st) = length (enc_addr ?final_st)"
+        using cur_addr_eq_loop eq_loop final_loop by simp
+      show "flush_pending_outer_tail data data_cap inst inst_cap pending
+          pend_len add_start sec_cur \<bullet> t
+        \<lbrace> \<lambda>Res sec' u.
+	             enc_sections_state_rel u data inst addr sec'
+	               (flush_pending_outer_tail_state (sl) s
+	                 pending pend_len add_start loop_st) \<and>
+	             sections_t_C.err_C sec' = ENC_OK \<and>
+	             heap_typing u = heap_typing s \<and>
+	             ?P u \<rbrace>"
+      proof (cases "add_start < pend_len")
+        case False
+	        show ?thesis
+	          using False rel_cur typing_t_s sec_cur_ok P_t
+	          by (auto simp: flush_pending_outer_tail_def
+	              flush_pending_outer_tail_state_def enc_sections_state_rel_def)
+      next
+        case add_lt: True
+        let ?sz = "pend_len - add_start"
+        let ?add_state =
+          "emit_inst_spec (sl)
+            (RAdd (heap_bytes_word s pending add_start ?sz)) loop_st"
+        have add_pending_clear:
+          "?add_state\<lparr>enc_pending := []\<rparr> = ?final_st"
+          using tail_state_eq add_lt
+          by (simp add: flush_pending_outer_tail_state_def)
+        have add_sections_final:
+          "enc_data ?add_state = enc_data ?final_st"
+          "enc_inst ?add_state = enc_inst ?final_st"
+          "enc_addr ?add_state = enc_addr ?final_st"
+          using arg_cong[OF add_pending_clear, of enc_data]
+            arg_cong[OF add_pending_clear, of enc_inst]
+            arg_cong[OF add_pending_clear, of enc_addr]
+          by simp_all
+        have sz_ge: "(1 :: 32 word) \<le> ?sz"
+          using add_lt by unat_arith
+        have pending_range:
+          "unat add_start + unat ?sz \<le> unat pending_cap"
+          using add_start_le_len pend_len_le by unat_arith
+        have slice_eq:
+          "heap_bytes_word t pending add_start ?sz =
+           heap_bytes_word s pending add_start ?sz"
+          by (rule heap_bytes_word_slice_eq_from_zero_frame[
+            OF frame_t]) (use add_start_le_len in unat_arith)
+        have data_room_add:
+          "unat (sections_t_C.data_pos_C sec_cur) + unat ?sz \<le>
+           unat data_cap"
+        proof -
+          have add_len:
+            "length (enc_data ?add_state) =
+             unat (sections_t_C.data_pos_C sec_cur) + unat ?sz"
+            using enc_sections_state_rel_lengths(1)[OF rel_cur] add_lt
+            by (simp add: emit_inst_spec_RAdd_sections_general)
+          have "length (enc_data ?add_state) =
+                length (enc_data ?final_st)"
+            using add_sections_final(1) by simp
+          then show ?thesis
+            using add_len final_data_room64 by linarith
+        qed
+        have inst_room_add:
+          "unat (sections_t_C.inst_pos_C sec_cur) + 6 \<le>
+           unat inst_cap"
+          using enc_sections_state_rel_lengths(2)[OF rel_cur]
+            cur_inst_le_final final_inst_room64 by linarith
+        have addr_room_add:
+          "unat (sections_t_C.addr_pos_C sec_cur) \<le> unat addr_cap"
+          using enc_sections_state_rel_lengths(3)[OF rel_cur]
+            cur_addr_le_final final_addr_room by linarith
+        have add:
+          "emit_add' sec_cur data data_cap inst inst_cap pending add_start
+              ?sz \<bullet> t
+           \<lbrace> \<lambda>r u.
+                (\<exists>sec'.
+                  r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK \<and>
+                  enc_sections_state_rel u data inst addr sec'
+                    ?add_state) \<and>
+                heap_bytes_word u pending 0 pend_len =
+                  heap_bytes_word t pending 0 pend_len \<and>
+                heap_typing u = heap_typing t \<rbrace>"
+          apply (rule runs_to_weaken)
+           apply (rule emit_pending_add_chunk_from_loop_buffers[
+            where spec_src_len = "sl"
+              and pending_frame_off = 0
+              and pending_frame_len = pend_len])
+                    apply (rule buffers)
+                   apply (rule typing_t_s0)
+                  apply (rule rel_cur)
+                 apply (rule sec_cur_ok)
+                apply (rule sz_ge)
+               apply (rule pending_range)
+              apply (simp add: pend_len_le)
+             apply (rule data_room_add)
+            apply (rule inst_room_add)
+           apply (rule addr_room_add)
+          using slice_eq by auto
+        have add_src_frame:
+          "emit_add' sec_cur data data_cap inst inst_cap pending add_start
+              ?sz \<bullet> t
+           \<lbrace> \<lambda>r u.
+                (\<exists>sec'. r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK) \<and>
+                heap_bytes_word u src 0 src_len =
+                  heap_bytes_word t src 0 src_len \<and>
+                enc_cache_abs u c \<and>
+                enc_cache_wf c \<and>
+                heap_typing u = heap_typing t \<rbrace>"
+          by (rule emit_add'_loop_buffers_heap_word_cache_frame[
+                OF buffers typing_t_s0 abs_t cache_wf sec_cur_ok sz_ge
+                   pending_range data_room_add inst_room_add
+                   src_inst_disj src_data_disj])
+        have add_tgt_frame:
+          "emit_add' sec_cur data data_cap inst inst_cap pending add_start
+              ?sz \<bullet> t
+           \<lbrace> \<lambda>r u.
+                (\<exists>sec'. r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK) \<and>
+                heap_bytes_word u tgt 0 tgt_len =
+                  heap_bytes_word t tgt 0 tgt_len \<and>
+                enc_cache_abs u c \<and>
+                enc_cache_wf c \<and>
+                heap_typing u = heap_typing t \<rbrace>"
+          by (rule emit_add'_loop_buffers_heap_word_cache_frame[
+                OF buffers typing_t_s0 abs_t cache_wf sec_cur_ok sz_ge
+                   pending_range data_room_add inst_room_add
+                   tgt_inst_disj tgt_data_disj])
+        have add_framed:
+          "emit_add' sec_cur data data_cap inst inst_cap pending add_start
+              ?sz \<bullet> t
+           \<lbrace> \<lambda>r u.
+                ((\<exists>sec'.
+                  r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK \<and>
+                  enc_sections_state_rel u data inst addr sec'
+                    ?add_state) \<and>
+                heap_bytes_word u pending 0 pend_len =
+                  heap_bytes_word t pending 0 pend_len \<and>
+                heap_typing u = heap_typing t) \<and>
+                ((\<exists>sec'. r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK) \<and>
+                heap_bytes_word u src 0 src_len =
+                  heap_bytes_word t src 0 src_len \<and>
+                enc_cache_abs u c \<and>
+                enc_cache_wf c \<and>
+                heap_typing u = heap_typing t) \<and>
+                ((\<exists>sec'. r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK) \<and>
+                heap_bytes_word u tgt 0 tgt_len =
+                  heap_bytes_word t tgt 0 tgt_len \<and>
+                enc_cache_abs u c \<and>
+                enc_cache_wf c \<and>
+                heap_typing u = heap_typing t) \<rbrace>"
+          using add add_src_frame add_tgt_frame by (simp add: runs_to_conj)
+        show ?thesis
+          unfolding flush_pending_outer_tail_def
+          using add_lt
+          apply simp
+          apply (rule runs_to_weaken[OF add_framed])
+          using typing_t_s frame_t tail_state_eq add_lt add_sections_final
+            src_frame_t tgt_frame_t
+          apply (auto simp: flush_pending_outer_tail_state_def
+              enc_sections_state_rel_def)
+          done
+      qed
+    qed
+    have run_pre:
+      "\<And>add_start i sec_cur t j b loop_st. \<lbrakk>
+        flush_pending_outer_loop_inv (sl) s data inst addr
+          pending pend_len spec_st add_start i sec_cur t;
+        ?P t;
+        i \<le> pend_len;
+        i < j;
+        j \<le> pend_len;
+        pending_run_end (heap_bytes_word s pending 0 pend_len) (unat i) =
+          unat j;
+        (4 :: 32 word) \<le> j - i;
+        b = heap_w8 s (pending +\<^sub>p uint i);
+        enc_sections_state_rel t data inst addr sec_cur loop_st;
+        flush_pending_loop_spec (sl)
+          (heap_bytes_word s pending 0 pend_len) (unat add_start) (unat i)
+          loop_st =
+        flush_pending_loop_spec (sl)
+          (heap_bytes_word s pending 0 pend_len) 0 0 spec_st
+      \<rbrakk> \<Longrightarrow>
+        flush_pending_outer_run_branch data data_cap inst inst_cap pending
+          add_start i j b sec_cur \<bullet> t
+        \<lbrace> \<lambda>r u.
+             \<exists>sec'.
+               r = Result (j, j, sec') \<and>
+               sections_t_C.err_C sec' = ENC_OK \<and>
+               heap_bytes_word u pending 0 pend_len =
+                 heap_bytes_word s pending 0 pend_len \<and>
+               heap_typing u = heap_typing s \<and>
+               enc_sections_state_rel u data inst addr sec'
+                 (flush_pending_outer_run_state (sl) s
+                   pending add_start i j b loop_st) \<and>
+               ?P u \<rbrace>"
+    proof -
+      fix add_start i sec_cur t j b loop_st
+      assume inv:
+        "flush_pending_outer_loop_inv (sl) s data inst addr
+          pending pend_len spec_st add_start i sec_cur t"
+      assume P_t: "?P t"
+      assume i_le_len: "i \<le> pend_len"
+        and i_lt_j: "i < j"
+        and j_le_len: "j \<le> pend_len"
+        and run_end:
+          "pending_run_end (heap_bytes_word s pending 0 pend_len) (unat i) =
+           unat j"
+        and run_ge: "(4 :: 32 word) \<le> j - i"
+        and b_eq: "b = heap_w8 s (pending +\<^sub>p uint i)"
+        and rel_cur: "enc_sections_state_rel t data inst addr sec_cur loop_st"
+        and eq_loop:
+          "flush_pending_loop_spec (sl)
+            (heap_bytes_word s pending 0 pend_len) (unat add_start)
+            (unat i) loop_st =
+           flush_pending_loop_spec (sl)
+            (heap_bytes_word s pending 0 pend_len) 0 0 spec_st"
+      have add_start_le_i: "add_start \<le> i"
+        using inv by (simp add: flush_pending_outer_loop_inv_def)
+      have src_frame_t:
+        "heap_bytes_word t src 0 src_len = heap_bytes_word s src 0 src_len"
+        and tgt_frame_t:
+        "heap_bytes_word t tgt 0 tgt_len = heap_bytes_word s tgt 0 tgt_len"
+        and abs_t: "enc_cache_abs t c"
+        using P_t by auto
+      have typing_t_s: "heap_typing t = heap_typing s"
+        using inv by (simp add: flush_pending_outer_loop_inv_def)
+      have typing_t_s0: "heap_typing t = heap_typing s"
+        using typing_t_s typing_s0 by simp
+      have frame_t:
+        "heap_bytes_word t pending 0 pend_len = ?pending_bytes"
+        using inv by (simp add: flush_pending_outer_loop_inv_def)
+      have sec_cur_ok: "sections_t_C.err_C sec_cur = ENC_OK"
+        using inv by (simp add: flush_pending_outer_loop_inv_def)
+      have add_start_nat_le_i: "unat add_start \<le> unat i"
+        using add_start_le_i by (simp add: word_le_nat_alt)
+      have i_nat_le_pending_bytes: "unat i \<le> length ?pending_bytes"
+        using i_le_len by (simp add: word_le_nat_alt)
+      have j_nat_le_pending_bytes: "unat j \<le> length ?pending_bytes"
+        using j_le_len by (simp add: word_le_nat_alt)
+      have cur_data_le_loop:
+        "length (enc_data loop_st) \<le>
+         length (enc_data
+          (flush_pending_loop_spec (sl) ?pending_bytes
+            (unat add_start) (unat i) loop_st))"
+        by (rule flush_pending_loop_spec_mono(1)[
+          OF add_start_nat_le_i i_nat_le_pending_bytes])
+      have cur_inst_le_loop:
+        "length (enc_inst loop_st) \<le>
+         length (enc_inst
+          (flush_pending_loop_spec (sl) ?pending_bytes
+            (unat add_start) (unat i) loop_st))"
+        by (rule flush_pending_loop_spec_mono(2)[
+          OF add_start_nat_le_i i_nat_le_pending_bytes])
+      have cur_addr_eq_loop:
+        "length (enc_addr
+          (flush_pending_loop_spec (sl) ?pending_bytes
+            (unat add_start) (unat i) loop_st)) =
+         length (enc_addr loop_st)"
+        by (rule flush_pending_loop_spec_mono(3)[
+          OF add_start_nat_le_i i_nat_le_pending_bytes])
+      have cur_data_le_final:
+        "length (enc_data loop_st) \<le> length (enc_data ?final_st)"
+        using cur_data_le_loop eq_loop final_loop by simp
+      have cur_inst_le_final:
+        "length (enc_inst loop_st) \<le> length (enc_inst ?final_st)"
+        using cur_inst_le_loop eq_loop final_loop by simp
+      have cur_addr_eq_final:
+        "length (enc_addr loop_st) = length (enc_addr ?final_st)"
+        using cur_addr_eq_loop eq_loop final_loop by simp
+      let ?add_base =
+        "if add_start < i
+         then emit_inst_spec (sl)
+           (RAdd (heap_bytes_word s pending add_start (i - add_start)))
+           loop_st
+         else loop_st"
+      let ?run_state =
+        "flush_pending_outer_run_state (sl) s pending
+          add_start i j b loop_st"
+      have step_eq:
+        "flush_pending_loop_spec (sl) ?pending_bytes
+          (unat add_start) (unat i) loop_st =
+         flush_pending_loop_spec (sl) ?pending_bytes
+          (unat j) (unat j) ?run_state"
+        unfolding flush_pending_outer_run_state_def
+        by (rule flush_pending_loop_spec_run_step_heap_emit_word[
+          OF add_start_le_i i_lt_j j_le_len run_end run_ge b_eq])
+      have run_loop_eq:
+        "flush_pending_loop_spec (sl) ?pending_bytes
+          (unat j) (unat j) ?run_state = ?final_st"
+        using step_eq eq_loop final_loop by simp
+      have run_state_data_le_loop:
+        "length (enc_data ?run_state) \<le>
+         length (enc_data
+          (flush_pending_loop_spec (sl) ?pending_bytes
+            (unat j) (unat j) ?run_state))"
+        by (rule flush_pending_loop_spec_mono(1)[
+          OF order_refl j_nat_le_pending_bytes])
+      have run_state_inst_le_loop:
+        "length (enc_inst ?run_state) \<le>
+         length (enc_inst
+          (flush_pending_loop_spec (sl) ?pending_bytes
+            (unat j) (unat j) ?run_state))"
+        by (rule flush_pending_loop_spec_mono(2)[
+          OF order_refl j_nat_le_pending_bytes])
+      have run_state_addr_eq_loop:
+        "length (enc_addr
+          (flush_pending_loop_spec (sl) ?pending_bytes
+            (unat j) (unat j) ?run_state)) =
+         length (enc_addr ?run_state)"
+        by (rule flush_pending_loop_spec_mono(3)[
+          OF order_refl j_nat_le_pending_bytes])
+      have run_state_data_le_final:
+        "length (enc_data ?run_state) \<le> length (enc_data ?final_st)"
+        using run_state_data_le_loop run_loop_eq by simp
+      have run_state_inst_le_final:
+        "length (enc_inst ?run_state) \<le> length (enc_inst ?final_st)"
+        using run_state_inst_le_loop run_loop_eq by simp
+      have run_state_addr_eq_final:
+        "length (enc_addr ?run_state) = length (enc_addr ?final_st)"
+        using run_state_addr_eq_loop run_loop_eq by simp
+      have run_len_ge_nat: "4 \<le> unat (j - i)"
+        using run_ge by (simp add: word_le_nat_alt)
+      have add_base_data_plus:
+        "length (enc_data ?run_state) = length (enc_data ?add_base) + 1"
+        unfolding flush_pending_outer_run_state_def
+        using run_len_ge_nat
+        by (simp add: emit_inst_spec_RRun_sections_general)
+      show "flush_pending_outer_run_branch data data_cap inst inst_cap pending
+          add_start i j b sec_cur \<bullet> t
+        \<lbrace> \<lambda>r u.
+             \<exists>sec'.
+               r = Result (j, j, sec') \<and>
+               sections_t_C.err_C sec' = ENC_OK \<and>
+               heap_bytes_word u pending 0 pend_len =
+                 heap_bytes_word s pending 0 pend_len \<and>
+               heap_typing u = heap_typing s \<and>
+               enc_sections_state_rel u data inst addr sec'
+                 ?run_state \<and>
+               ?P u \<rbrace>"
+      proof (cases "add_start < i")
+        case no_add: False
+        have data_room_run:
+          "unat (sections_t_C.data_pos_C sec_cur) + 1 \<le> unat data_cap"
+          using enc_sections_state_rel_lengths(1)[OF rel_cur]
+            cur_data_le_final final_data_room64 by linarith
+        have inst_room_run:
+          "unat (sections_t_C.inst_pos_C sec_cur) + 6 \<le> unat inst_cap"
+          using enc_sections_state_rel_lengths(2)[OF rel_cur]
+            cur_inst_le_final final_inst_room64 by linarith
+        have addr_room_run:
+          "unat (sections_t_C.addr_pos_C sec_cur) \<le> unat addr_cap"
+          using enc_sections_state_rel_lengths(3)[OF rel_cur]
+            cur_addr_eq_final final_addr_room by linarith
+        have run:
+          "emit_run' sec_cur data data_cap inst inst_cap b (j - i) \<bullet> t
+           \<lbrace> \<lambda>r u.
+                (\<exists>sec'.
+                  r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK \<and>
+                  enc_sections_state_rel u data inst addr sec'
+                    ?run_state) \<and>
+                heap_bytes_word u pending 0 pend_len =
+                  heap_bytes_word t pending 0 pend_len \<and>
+                heap_typing u = heap_typing t \<rbrace>"
+          unfolding flush_pending_outer_run_state_def
+          using no_add
+          apply simp
+	          apply (rule emit_pending_run_chunk_from_loop_buffers[
+	            where spec_src_len = "sl"
+	              and pending_frame_off = 0
+	              and pending_frame_len = pend_len])
+                   apply (rule buffers)
+                  apply (rule typing_t_s0)
+                 apply (rule rel_cur)
+                apply (rule sec_cur_ok)
+               apply (simp add: pend_len_le)
+              apply (rule data_room_run)
+             apply (rule inst_room_run)
+            apply (rule addr_room_run)
+          done
+        have run_src_frame:
+          "emit_run' sec_cur data data_cap inst inst_cap b (j - i) \<bullet> t
+           \<lbrace> \<lambda>r u.
+                (\<exists>sec'. r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK) \<and>
+                heap_bytes_word u src 0 src_len =
+                  heap_bytes_word t src 0 src_len \<and>
+                enc_cache_abs u c \<and>
+                enc_cache_wf c \<and>
+                heap_typing u = heap_typing t \<rbrace>"
+          by (rule emit_run'_loop_buffers_heap_word_cache_frame[
+                OF buffers typing_t_s0 abs_t cache_wf sec_cur_ok
+                   data_room_run inst_room_run
+                   src_inst_disj src_data_disj])
+        have run_tgt_frame:
+          "emit_run' sec_cur data data_cap inst inst_cap b (j - i) \<bullet> t
+           \<lbrace> \<lambda>r u.
+                (\<exists>sec'. r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK) \<and>
+                heap_bytes_word u tgt 0 tgt_len =
+                  heap_bytes_word t tgt 0 tgt_len \<and>
+                enc_cache_abs u c \<and>
+                enc_cache_wf c \<and>
+                heap_typing u = heap_typing t \<rbrace>"
+          by (rule emit_run'_loop_buffers_heap_word_cache_frame[
+                OF buffers typing_t_s0 abs_t cache_wf sec_cur_ok
+                   data_room_run inst_room_run
+                   tgt_inst_disj tgt_data_disj])
+        have run_framed:
+          "emit_run' sec_cur data data_cap inst inst_cap b (j - i) \<bullet> t
+           \<lbrace> \<lambda>r u.
+                ((\<exists>sec'.
+                  r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK \<and>
+                  enc_sections_state_rel u data inst addr sec'
+                    ?run_state) \<and>
+                heap_bytes_word u pending 0 pend_len =
+                  heap_bytes_word t pending 0 pend_len \<and>
+                heap_typing u = heap_typing t) \<and>
+                ((\<exists>sec'. r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK) \<and>
+                heap_bytes_word u src 0 src_len =
+                  heap_bytes_word t src 0 src_len \<and>
+                enc_cache_abs u c \<and>
+                enc_cache_wf c \<and>
+                heap_typing u = heap_typing t) \<and>
+                ((\<exists>sec'. r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK) \<and>
+                heap_bytes_word u tgt 0 tgt_len =
+                  heap_bytes_word t tgt 0 tgt_len \<and>
+                enc_cache_abs u c \<and>
+                enc_cache_wf c \<and>
+                heap_typing u = heap_typing t) \<rbrace>"
+          using run run_src_frame run_tgt_frame by (simp add: runs_to_conj)
+        show ?thesis
+          unfolding flush_pending_outer_run_branch_def
+          using no_add
+          apply simp
+          apply (rule runs_to_bind_exception)
+           apply (rule runs_to_liftE)
+           apply (rule runs_to_weaken[OF run_framed])
+          using frame_t typing_t_s src_frame_t tgt_frame_t
+          apply auto
+          done
+      next
+        case add_lt: True
+        let ?sz = "i - add_start"
+        let ?add_state =
+          "emit_inst_spec (sl)
+            (RAdd (heap_bytes_word s pending add_start ?sz)) loop_st"
+        have sz_ge: "(1 :: 32 word) \<le> ?sz"
+          using add_lt by unat_arith
+        have pending_range:
+          "unat add_start + unat ?sz \<le> unat pending_cap"
+          using add_start_le_i i_le_len pend_len_le by unat_arith
+        have slice_eq:
+          "heap_bytes_word t pending add_start ?sz =
+           heap_bytes_word s pending add_start ?sz"
+          by (rule heap_bytes_word_slice_eq_from_zero_frame[
+            OF frame_t]) (use add_start_le_i i_le_len in unat_arith)
+        have add_state_eq_base:
+          "?add_state = ?add_base"
+          using add_lt by simp
+        have add_base_inst_le_run:
+          "length (enc_inst ?add_base) \<le> length (enc_inst ?run_state)"
+          unfolding flush_pending_outer_run_state_def
+          by (simp add: emit_inst_spec_RRun_sections_general)
+        have add_base_inst_len:
+          "length (enc_inst ?add_base) = length (enc_inst ?add_state)"
+          using add_state_eq_base by simp
+        have add_state_inst_le_final:
+          "length (enc_inst ?add_state) \<le> length (enc_inst ?final_st)"
+          using add_base_inst_le_run add_base_inst_len
+            run_state_inst_le_final by linarith
+        have add_state_addr_eq_final:
+          "length (enc_addr ?add_state) = length (enc_addr ?final_st)"
+          using add_state_eq_base run_state_addr_eq_final
+          unfolding flush_pending_outer_run_state_def
+          by (simp add: emit_inst_spec_RRun_sections_general)
+        have add_data_room:
+          "unat (sections_t_C.data_pos_C sec_cur) + unat ?sz \<le>
+           unat data_cap"
+        proof -
+          have add_len:
+            "length (enc_data ?add_state) =
+             unat (sections_t_C.data_pos_C sec_cur) + unat ?sz"
+            using enc_sections_state_rel_lengths(1)[OF rel_cur] add_lt
+            by (simp add: emit_inst_spec_RAdd_sections_general)
+          have add_base_data_len:
+            "length (enc_data ?add_base) = length (enc_data ?add_state)"
+            using add_state_eq_base by simp
+          have add_state_plus_le_final:
+            "length (enc_data ?add_state) + 1 \<le>
+             length (enc_data ?final_st)"
+            using add_base_data_plus run_state_data_le_final
+              add_base_data_len by linarith
+          have "length (enc_data ?add_state) \<le>
+                length (enc_data ?final_st)"
+            using add_state_plus_le_final by linarith
+          then show ?thesis
+            using add_len final_data_room64 by linarith
+        qed
+        have add_inst_room:
+          "unat (sections_t_C.inst_pos_C sec_cur) + 6 \<le>
+           unat inst_cap"
+          using enc_sections_state_rel_lengths(2)[OF rel_cur]
+            cur_inst_le_final final_inst_room64 by linarith
+        have add_addr_room:
+          "unat (sections_t_C.addr_pos_C sec_cur) \<le> unat addr_cap"
+          using enc_sections_state_rel_lengths(3)[OF rel_cur]
+            cur_addr_eq_final final_addr_room by linarith
+        have add:
+          "emit_add' sec_cur data data_cap inst inst_cap pending add_start
+              ?sz \<bullet> t
+           \<lbrace> \<lambda>r u.
+                (\<exists>sec'.
+                  r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK \<and>
+                  enc_sections_state_rel u data inst addr sec'
+                    ?add_state) \<and>
+                heap_bytes_word u pending 0 pend_len =
+                  heap_bytes_word t pending 0 pend_len \<and>
+                heap_typing u = heap_typing t \<rbrace>"
+          apply (rule runs_to_weaken)
+           apply (rule emit_pending_add_chunk_from_loop_buffers[
+            where spec_src_len = "sl"
+              and pending_frame_off = 0
+              and pending_frame_len = pend_len])
+                    apply (rule buffers)
+                   apply (rule typing_t_s0)
+                  apply (rule rel_cur)
+                 apply (rule sec_cur_ok)
+                apply (rule sz_ge)
+               apply (rule pending_range)
+              apply (simp add: pend_len_le)
+             apply (rule add_data_room)
+            apply (rule add_inst_room)
+           apply (rule add_addr_room)
+          using slice_eq by auto
+        have add_src_frame:
+          "emit_add' sec_cur data data_cap inst inst_cap pending add_start
+              ?sz \<bullet> t
+           \<lbrace> \<lambda>r u.
+                (\<exists>sec'. r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK) \<and>
+                heap_bytes_word u src 0 src_len =
+                  heap_bytes_word t src 0 src_len \<and>
+                enc_cache_abs u c \<and>
+                enc_cache_wf c \<and>
+                heap_typing u = heap_typing t \<rbrace>"
+          by (rule emit_add'_loop_buffers_heap_word_cache_frame[
+                OF buffers typing_t_s0 abs_t cache_wf sec_cur_ok sz_ge
+                   pending_range add_data_room add_inst_room
+                   src_inst_disj src_data_disj])
+        have add_tgt_frame:
+          "emit_add' sec_cur data data_cap inst inst_cap pending add_start
+              ?sz \<bullet> t
+           \<lbrace> \<lambda>r u.
+                (\<exists>sec'. r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK) \<and>
+                heap_bytes_word u tgt 0 tgt_len =
+                  heap_bytes_word t tgt 0 tgt_len \<and>
+                enc_cache_abs u c \<and>
+                enc_cache_wf c \<and>
+                heap_typing u = heap_typing t \<rbrace>"
+          by (rule emit_add'_loop_buffers_heap_word_cache_frame[
+                OF buffers typing_t_s0 abs_t cache_wf sec_cur_ok sz_ge
+                   pending_range add_data_room add_inst_room
+                   tgt_inst_disj tgt_data_disj])
+        have add_framed:
+          "emit_add' sec_cur data data_cap inst inst_cap pending add_start
+              ?sz \<bullet> t
+           \<lbrace> \<lambda>r u.
+                ((\<exists>sec'.
+                  r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK \<and>
+                  enc_sections_state_rel u data inst addr sec'
+                    ?add_state) \<and>
+                heap_bytes_word u pending 0 pend_len =
+                  heap_bytes_word t pending 0 pend_len \<and>
+                heap_typing u = heap_typing t) \<and>
+                ((\<exists>sec'. r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK) \<and>
+                heap_bytes_word u src 0 src_len =
+                  heap_bytes_word t src 0 src_len \<and>
+                enc_cache_abs u c \<and>
+                enc_cache_wf c \<and>
+                heap_typing u = heap_typing t) \<and>
+                ((\<exists>sec'. r = Result sec' \<and>
+                  sections_t_C.err_C sec' = ENC_OK) \<and>
+                heap_bytes_word u tgt 0 tgt_len =
+                  heap_bytes_word t tgt 0 tgt_len \<and>
+                enc_cache_abs u c \<and>
+                enc_cache_wf c \<and>
+                heap_typing u = heap_typing t) \<rbrace>"
+          using add add_src_frame add_tgt_frame by (simp add: runs_to_conj)
+        have add_run_data_room:
+          "\<And>u sec_add. enc_sections_state_rel u data inst addr sec_add
+              ?add_state \<Longrightarrow>
+            unat (sections_t_C.data_pos_C sec_add) + 1 \<le>
+              unat data_cap"
+          using add_base_data_plus run_state_data_le_final add_state_eq_base
+            final_data_room64
+          by (simp add: enc_sections_state_rel_lengths)
+        have add_run_inst_room:
+          "\<And>u sec_add. enc_sections_state_rel u data inst addr sec_add
+              ?add_state \<Longrightarrow>
+            unat (sections_t_C.inst_pos_C sec_add) + 6 \<le>
+              unat inst_cap"
+          using add_state_inst_le_final final_inst_room64
+          by (simp add: enc_sections_state_rel_lengths; linarith)
+	        have add_run_addr_room:
+	          "\<And>u sec_add. enc_sections_state_rel u data inst addr sec_add
+	              ?add_state \<Longrightarrow>
+	            unat (sections_t_C.addr_pos_C sec_add) \<le> unat addr_cap"
+	          using final_addr_room add_state_addr_eq_final
+	          by (simp add: enc_sections_state_rel_lengths; linarith)
+	        have add_checked:
+	          "(do {
+	              sec_add \<leftarrow> liftE
+	                (emit_add' sec_cur data data_cap inst inst_cap pending
+	                  add_start ?sz);
+	              unless (sections_t_C.err_C sec_add = ENC_OK)
+	                (throw sec_add);
+	              return sec_add
+	            }) \<bullet> t
+	           \<lbrace> \<lambda>r u.
+	                \<exists>sec_add.
+	                  r = Result sec_add \<and>
+	                  sections_t_C.err_C sec_add = ENC_OK \<and>
+	                  enc_sections_state_rel u data inst addr sec_add
+	                    ?add_state \<and>
+	                  heap_bytes_word u pending 0 pend_len =
+	                    heap_bytes_word t pending 0 pend_len \<and>
+	                  heap_bytes_word u src 0 src_len =
+	                    heap_bytes_word t src 0 src_len \<and>
+	                  heap_bytes_word u tgt 0 tgt_len =
+	                    heap_bytes_word t tgt 0 tgt_len \<and>
+	                  enc_cache_abs u c \<and>
+	                  heap_typing u = heap_typing t \<rbrace>"
+	          apply (rule runs_to_bind_exception)
+	           apply (rule runs_to_liftE)
+	           apply (rule runs_to_weaken[OF add_framed])
+	          by auto
+	        show ?thesis
+	          unfolding flush_pending_outer_run_branch_def
+	          using add_lt
+	          apply simp
+	          apply (rule runs_to_bind_exception)
+	           apply (rule runs_to_weaken[OF add_checked])
+	           apply clarsimp
+	           subgoal premises add_post for u sec_add
+	           proof -
+	             have rel_add:
+	               "enc_sections_state_rel u data inst addr sec_add ?add_state"
+	               using add_post by auto
+	             have sec_add_ok:
+	               "sections_t_C.err_C sec_add = ENC_OK"
+	               using add_post by auto
+	             have typing_u_s0: "heap_typing u = heap_typing s"
+	               using add_post typing_t_s0 by auto
+	             have frame_u_s:
+	               "heap_bytes_word u pending 0 pend_len =
+	                heap_bytes_word s pending 0 pend_len"
+	               using add_post frame_t by auto
+	             have typing_u_s: "heap_typing u = heap_typing s"
+	               using add_post typing_t_s by auto
+	             have src_frame_u_s:
+	               "heap_bytes_word u src 0 src_len =
+	                heap_bytes_word s src 0 src_len"
+	               using add_post src_frame_t by auto
+	             have tgt_frame_u_s:
+	               "heap_bytes_word u tgt 0 tgt_len =
+	                heap_bytes_word s tgt 0 tgt_len"
+	               using add_post tgt_frame_t by auto
+	             have abs_u: "enc_cache_abs u c"
+	               using add_post by auto
+	             have run:
+	               "emit_run' sec_add data data_cap inst inst_cap b (j - i) \<bullet> u
+	                \<lbrace> \<lambda>r v.
+	                     (\<exists>sec'.
+	                       r = Result sec' \<and>
+	                       sections_t_C.err_C sec' = ENC_OK \<and>
+	                       enc_sections_state_rel v data inst addr sec'
+	                         ?run_state) \<and>
+	                     heap_bytes_word v pending 0 pend_len =
+	                       heap_bytes_word u pending 0 pend_len \<and>
+	                     heap_typing v = heap_typing u \<rbrace>"
+	               apply (rule runs_to_weaken)
+	                apply (rule emit_pending_run_chunk_from_loop_buffers[
+	                  where spec_src_len = "sl"
+	                    and spec_st =
+	                      "emit_inst_spec (sl)
+	                        (RAdd (heap_bytes_word s pending add_start
+	                          (i - add_start))) loop_st"
+	                    and pending_frame_off = 0
+	                    and pending_frame_len = pend_len])
+                         apply (rule buffers)
+	                        apply (rule typing_u_s0)
+	                       apply (rule rel_add)
+	                      apply (rule sec_add_ok)
+	                     apply (simp add: pend_len_le)
+	                    apply (rule add_run_data_room[OF rel_add])
+	                   apply (rule add_run_inst_room[OF rel_add])
+	                  apply (rule add_run_addr_room[OF rel_add])
+	               using add_state_eq_base add_lt
+	               apply (auto simp: flush_pending_outer_run_state_def)
+	               done
+	             have run_src_frame2:
+	               "emit_run' sec_add data data_cap inst inst_cap b (j - i) \<bullet> u
+	                \<lbrace> \<lambda>r v.
+	                     (\<exists>sec'. r = Result sec' \<and>
+	                       sections_t_C.err_C sec' = ENC_OK) \<and>
+	                     heap_bytes_word v src 0 src_len =
+	                       heap_bytes_word u src 0 src_len \<and>
+	                     enc_cache_abs v c \<and>
+	                     enc_cache_wf c \<and>
+	                     heap_typing v = heap_typing u \<rbrace>"
+	               by (rule emit_run'_loop_buffers_heap_word_cache_frame[
+	                     OF buffers typing_u_s0 abs_u cache_wf sec_add_ok
+	                        add_run_data_room[OF rel_add]
+	                        add_run_inst_room[OF rel_add]
+	                        src_inst_disj src_data_disj])
+	             have run_tgt_frame2:
+	               "emit_run' sec_add data data_cap inst inst_cap b (j - i) \<bullet> u
+	                \<lbrace> \<lambda>r v.
+	                     (\<exists>sec'. r = Result sec' \<and>
+	                       sections_t_C.err_C sec' = ENC_OK) \<and>
+	                     heap_bytes_word v tgt 0 tgt_len =
+	                       heap_bytes_word u tgt 0 tgt_len \<and>
+	                     enc_cache_abs v c \<and>
+	                     enc_cache_wf c \<and>
+	                     heap_typing v = heap_typing u \<rbrace>"
+	               by (rule emit_run'_loop_buffers_heap_word_cache_frame[
+	                     OF buffers typing_u_s0 abs_u cache_wf sec_add_ok
+	                        add_run_data_room[OF rel_add]
+	                        add_run_inst_room[OF rel_add]
+	                        tgt_inst_disj tgt_data_disj])
+	             have run_framed2:
+	               "emit_run' sec_add data data_cap inst inst_cap b (j - i) \<bullet> u
+	                \<lbrace> \<lambda>r v.
+	                     ((\<exists>sec'.
+	                       r = Result sec' \<and>
+	                       sections_t_C.err_C sec' = ENC_OK \<and>
+	                       enc_sections_state_rel v data inst addr sec'
+	                         ?run_state) \<and>
+	                     heap_bytes_word v pending 0 pend_len =
+	                       heap_bytes_word u pending 0 pend_len \<and>
+	                     heap_typing v = heap_typing u) \<and>
+	                     ((\<exists>sec'. r = Result sec' \<and>
+	                       sections_t_C.err_C sec' = ENC_OK) \<and>
+	                     heap_bytes_word v src 0 src_len =
+	                       heap_bytes_word u src 0 src_len \<and>
+	                     enc_cache_abs v c \<and>
+	                     enc_cache_wf c \<and>
+	                     heap_typing v = heap_typing u) \<and>
+	                     ((\<exists>sec'. r = Result sec' \<and>
+	                       sections_t_C.err_C sec' = ENC_OK) \<and>
+	                     heap_bytes_word v tgt 0 tgt_len =
+	                       heap_bytes_word u tgt 0 tgt_len \<and>
+	                     enc_cache_abs v c \<and>
+	                     enc_cache_wf c \<and>
+	                     heap_typing v = heap_typing u) \<rbrace>"
+	               using run run_src_frame2 run_tgt_frame2
+	               by (simp add: runs_to_conj)
+	             have run_checked:
+	               "(do {
+	                   sec_run \<leftarrow> liftE
+	                     (emit_run' sec_add data data_cap inst inst_cap b
+	                       (j - i));
+	                   unless (sections_t_C.err_C sec_run = ENC_OK)
+	                     (throw sec_run);
+	                   return (j, j, sec_run)
+	                 }) \<bullet> u
+	                \<lbrace> \<lambda>r v.
+	                     \<exists>sec'.
+	                       r = Result (j, j, sec') \<and>
+	                       sections_t_C.err_C sec' = ENC_OK \<and>
+	                       heap_bytes_word v pending 0 pend_len =
+	                         heap_bytes_word s pending 0 pend_len \<and>
+	                       heap_typing v = heap_typing s \<and>
+	                       enc_sections_state_rel v data inst addr sec'
+	                         ?run_state \<and>
+	                       ?P v \<rbrace>"
+	               apply (rule runs_to_bind_exception)
+	                apply (rule runs_to_liftE)
+	                apply (rule runs_to_weaken[OF run_framed2])
+	               using frame_u_s typing_u_s src_frame_u_s tgt_frame_u_s
+	               by auto
+	             show ?thesis
+	               by (rule run_checked)
+	           qed
+	          done
+	      qed
+    qed
+    have flush:
+      "flush_pending' sec data data_cap inst inst_cap pending pend_len \<bullet> s
+       \<lbrace> \<lambda>r t. \<exists>sec'.
+            r = Result sec' \<and>
+            enc_sections_state_rel t data inst addr sec'
+              (flush_pending_spec sl spec_st) \<and>
+            sections_t_C.err_C sec' = ENC_OK \<and>
+            heap_typing t = heap_typing s \<and>
+            ?P t \<rbrace>"
+      apply (rule runs_to_weaken[
+       OF flush_pending'_enc_sections_state_rel_branch_pre_frame[
+         where src_len = "sl" and P = "?P",
+         OF rel pending_eq sec_ok pending_valid P0 run_pre tail_pre]])
+      apply auto
+      done
+  show ?thesis
+    apply (rule runs_to_weaken[OF flush])
+    apply auto
+    done
+qed
+
+text \<open>Pure facts about a full flush: cache and tp are untouched, flushed
+  advances by exactly the pending length, sections grow by at most the
+  pending length; plus an emit_copy inst-growth bound by the copy length
+  (small opcodes grow by 1, large ones by \<le>6 \<le> len).\<close>
+
+lemma emit_inst_spec_no_copy_cache:
+  assumes no_copy: "raw_inst_no_copy i"
+  shows "enc_cache (emit_inst_spec sl i st) = enc_cache st"
+  using no_copy
+  by (cases i) (auto simp: emit_inst_spec_def Let_def split: prod.splits)
+
+lemma emit_insts_spec_no_copy_cache:
+  assumes no_copy: "\<forall>i \<in> set insts. raw_inst_no_copy i"
+  shows "enc_cache (emit_insts_spec sl insts st) = enc_cache st"
+  using no_copy
+proof (induction insts arbitrary: st)
+  case Nil
+  then show ?case by (simp add: emit_insts_spec_def)
+next
+  case (Cons i insts)
+  have step: "emit_insts_spec sl (i # insts) st =
+      emit_insts_spec sl insts (emit_inst_spec sl i st)"
+    by (simp add: emit_insts_spec_def)
+  show ?case
+    using Cons emit_inst_spec_no_copy_cache[of i sl st]
+    by (simp add: step)
+qed
+
+lemma flush_pending_spec_cache:
+  "enc_cache (flush_pending_spec sl st) = enc_cache st"
+  using emit_insts_spec_no_copy_cache[OF flush_pending_insts_no_copy]
+  by (simp add: flush_pending_spec_def)
+
+lemma flush_pending_spec_flushed:
+  "enc_flushed (flush_pending_spec sl st) =
+   enc_flushed st + length (enc_pending st)"
+proof -
+  have acc_len: "length (replicate (enc_flushed st) (0 :: byte)) =
+      enc_flushed st" by simp
+  have "enc_flushed (emit_insts_spec sl
+          (flush_pending_insts (enc_pending st)) st) =
+        length (exec_inst_list [] (flush_pending_insts (enc_pending st))
+          (replicate (enc_flushed st) (0 :: byte)))"
+    by (rule emit_insts_spec_enc_flushed_exec[OF acc_len])
+  also have "... = enc_flushed st + length (enc_pending st)"
+    by (simp add: flush_pending_insts_exec)
+  finally show ?thesis
+    by (simp add: flush_pending_spec_def)
+qed
+
+lemma flush_pending_spec_growth_bounds:
+  assumes pending32: "length (enc_pending st) < 2 ^ 32"
+  shows "length (enc_data (flush_pending_spec sl st)) \<le>
+         length (enc_data st) + length (enc_pending st)"
+    and "length (enc_inst (flush_pending_spec sl st)) \<le>
+         length (enc_inst st) + length (enc_pending st)"
+    and "length (enc_addr (flush_pending_spec sl st)) =
+         length (enc_addr st)"
+proof -
+  have eq: "flush_pending_loop_spec sl (enc_pending st) 0 0 st =
+      flush_pending_spec sl st"
+    by (rule flush_pending_loop_spec_eq_flush_pending_spec[OF refl])
+  show "length (enc_data (flush_pending_spec sl st)) \<le>
+         length (enc_data st) + length (enc_pending st)"
+    using flush_pending_loop_spec_growth(1)[
+        of 0 0 "enc_pending st" sl st] pending32 eq
+    by simp
+  show "length (enc_inst (flush_pending_spec sl st)) \<le>
+         length (enc_inst st) + length (enc_pending st)"
+    using flush_pending_loop_spec_growth(2)[
+        of 0 0 "enc_pending st" sl st] pending32 eq
+    by simp
+  show "length (enc_addr (flush_pending_spec sl st)) =
+         length (enc_addr st)"
+    using flush_pending_loop_spec_growth(3)[
+        of 0 0 "enc_pending st" sl st] pending32 eq
+    by simp
+qed
+
+lemma emit_copy_spec_inst_growth_le_len:
+  assumes l_ge: "4 \<le> l" and l_lt: "l < 2 ^ 32"
+  shows "length (enc_inst (emit_copy_spec sl a l st)) \<le>
+         length (enc_inst st) + l"
+proof -
+  obtain md ab c' where ea:
+    "encode_address (enc_cache st) a (sl + enc_flushed st) = (md, ab, c')"
+    by (metis prod_cases3)
+  show ?thesis
+  proof (cases "l \<le> 18")
+    case True
+    have fo: "find_single_copy_opcode l md = (19 + md * 16 + l - 3, False)"
+      using l_ge True by (simp add: find_single_copy_opcode_def Let_def)
+    show ?thesis
+      using ea fo l_ge
+      by (simp add: emit_copy_spec_def emit_inst_spec_def Let_def)
+  next
+    case False
+    have fo: "find_single_copy_opcode l md = (19 + md * 16, True)"
+      using False by (simp add: find_single_copy_opcode_def Let_def)
+    have vlen: "length (varint_encode l) \<le> 5"
+      using varint_size_le_5_32[OF l_lt] by simp
+    show ?thesis
+      using ea fo vlen False
+      by (simp add: emit_copy_spec_def emit_inst_spec_def Let_def)
+  qed
+qed
+
+text \<open>The budget-tower flush-then-copy step: noop fused try, framed flush
+  of the pending buffer, emit_copy' keystone for the COPY, budget
+  preservation via the pure match-step lemma.\<close>
+
 lemma encode_window_flush_then_copy_step_topdown_budget:
   assumes rel:
     "encode_window_loop_budget_rel s src src_len tgt tgt_len
@@ -12882,7 +13975,666 @@ lemma encode_window_flush_then_copy_step_topdown_budget:
                 measure
                   (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
                      unat tgt_len - unat tp) \<rbrace>"
-  sorry
+proof -
+  let ?Q = "\<lambda>r t. \<exists>sec' tp' pend_len' spec_st'.
+              r = Result (pend_len', sec', tp') \<and>
+              encode_window_loop_budget_rel t src src_len tgt tgt_len
+                data data_cap inst inst_cap addr addr_cap pending pending_cap
+                sec' tp' pend_len' src_bytes tgt_bytes spec_st' \<and>
+              enc_tp spec_st < enc_tp spec_st' \<and>
+              (((pend_len', sec', tp'), t), ((pend_len, sec, tp), s)) \<in>
+                measure
+                  (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
+                     unat tgt_len - unat tp)"
+  let ?idx = "build_index_spec src_bytes"
+  let ?mp = "match_t_C.pos_C m"
+  let ?ml = "match_t_C.len_C m"
+  \<comment> \<open>--- components of the budget invariant ---\<close>
+  have src_heap: "heap_bytes s src (unat src_len) = src_bytes"
+    and tgt_heap: "heap_bytes s tgt (unat tgt_len) = tgt_bytes"
+    and src_len_eq: "length src_bytes = unat src_len"
+    and tgt_len_eq: "length tgt_bytes = unat tgt_len"
+    and pending_heap:
+      "heap_bytes_word s pending 0 pend_len = enc_pending spec_st"
+    and pending_len: "length (enc_pending spec_st) = unat pend_len"
+    and tp_eq: "enc_tp spec_st = unat tp"
+    and flushed_inv:
+      "enc_flushed spec_st + length (enc_pending spec_st) = enc_tp spec_st"
+    and sections_rel: "enc_sections_state_rel s data inst addr sec spec_st"
+    and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+    and pend_cap_le: "unat pend_len \<le> unat pending_cap"
+    and addr_pos_le: "unat (sections_t_C.addr_pos_C sec) \<le> unat addr_cap"
+    and budget0:
+      "encode_window_section_budget src_bytes tgt_bytes
+        data_cap inst_cap addr_cap spec_st"
+    and abs: "enc_cache_abs s (enc_cache spec_st)"
+    and cwf: "enc_cache_wf (enc_cache spec_st)"
+    using rel by (simp_all add: encode_window_loop_budget_rel_def)
+  have data_slack:
+    "unat (sections_t_C.data_pos_C sec) + unat pend_len +
+       (unat tgt_len - unat tp) + 64 \<le> unat data_cap"
+    using rel unfolding encode_window_loop_budget_rel_def by blast
+  have inst_slack:
+    "unat (sections_t_C.inst_pos_C sec) + unat pend_len +
+       (unat tgt_len - unat tp) + 64 \<le> unat inst_cap"
+    using rel unfolding encode_window_loop_budget_rel_def by blast
+  have dp_len0: "length (enc_data spec_st) = unat (sections_t_C.data_pos_C sec)"
+    and ip_len0: "length (enc_inst spec_st) = unat (sections_t_C.inst_pos_C sec)"
+    and ap_len0: "length (enc_addr spec_st) = unat (sections_t_C.addr_pos_C sec)"
+    using enc_sections_state_rel_lengths[OF sections_rel] by simp_all
+  \<comment> \<open>--- match facts ---\<close>
+  have tp_nat_lt: "unat tp < unat tgt_len"
+    using tp_lt by (simp add: word_less_nat_alt)
+  have tp_le_w: "tp \<le> tgt_len" using tp_lt by simp
+  have copy_ge: "(4 :: 32 word) \<le> ?ml"
+    using match_len by (simp add: min_match_def)
+  have copy_ge_nat: "4 \<le> unat ?ml"
+    using copy_ge by (simp add: word_le_nat_alt)
+  have len_nz: "unat ?ml \<noteq> 0" using copy_ge_nat by simp
+  have match_valid0:
+    "match_valid src_bytes tgt_bytes (unat tp) (unat ?mp) (unat ?ml)"
+    using match_rel match tp_le_w
+    unfolding encode_window_match_rel_def by blast
+  let ?best = "find_best_match_spec src_bytes tgt_bytes (unat tp) ?idx"
+  have m_eq0: "m =
+      (let best = find_best_match_spec src_bytes tgt_bytes (unat tp) ?idx
+       in match_t_C (of_nat (em_pos best)) (of_nat (em_len best)))"
+    using match_rel match tp_le_w
+    unfolding encode_window_match_rel_def by blast
+  have m_eq: "m = match_t_C (of_nat (em_pos ?best)) (of_nat (em_len ?best))"
+    using m_eq0 by (simp add: Let_def)
+  have not_short: "\<not> em_len ?best < min_match"
+  proof
+    assume short: "em_len ?best < min_match"
+    have "unat ?ml = em_len ?best"
+      using m_eq short by (simp add: min_match_def unat_of_nat_eq)
+    thus False using copy_ge_nat short by (simp add: min_match_def)
+  qed
+  have min_le: "min_match \<le> em_len ?best" using not_short by simp
+  have sound:
+    "em_pos ?best + em_len ?best \<le> length src_bytes \<and>
+     unat tp + em_len ?best \<le> length tgt_bytes \<and>
+     (\<forall>k < em_len ?best.
+        src_bytes ! (em_pos ?best + k) = tgt_bytes ! (unat tp + k))"
+    by (rule find_best_match_spec_sound[OF refl min_le])
+  have best_len32: "em_len ?best < 2 ^ 32"
+  proof -
+    have "em_len ?best \<le> unat tp + em_len ?best" by simp
+    also have "... \<le> length tgt_bytes" using sound by simp
+    also have "... = unat tgt_len" using tgt_len_eq by simp
+    also have "... < 2 ^ 32" using unat_lt2p[of tgt_len] by simp
+    finally show ?thesis .
+  qed
+  have best_pos32: "em_pos ?best < 2 ^ 32"
+  proof -
+    have "em_pos ?best \<le> em_pos ?best + em_len ?best" by simp
+    also have "... \<le> length src_bytes" using sound by simp
+    also have "... = unat src_len" using src_len_eq by simp
+    also have "... < 2 ^ 32" using unat_lt2p[of src_len] by simp
+    finally show ?thesis .
+  qed
+  have c_len: "unat ?ml = em_len ?best"
+    using m_eq best_len32 by (simp add: unat_of_nat_eq)
+  have c_pos: "unat ?mp = em_pos ?best"
+    using m_eq best_pos32 by (simp add: unat_of_nat_eq)
+  have tp_len_room_nat: "unat tp + unat ?ml \<le> unat tgt_len"
+    using match_validD(2)[OF match_valid0 len_nz] tgt_len_eq by simp
+  have tp_len_no_overflow: "unat tp + unat ?ml < 2 ^ 32"
+    using tp_len_room_nat unat_lt2p[of tgt_len] by simp
+  have tp_len_unat: "unat (tp + ?ml) = unat tp + unat ?ml"
+    by (rule unat_word_add_no_overflow[OF tp_len_no_overflow])
+  have tp_len_le_nat: "unat (tp + ?ml) \<le> unat tgt_len"
+    using tp_len_room_nat tp_len_unat by simp
+  have measure_progress:
+    "unat tgt_len - unat (tp + ?ml) < unat tgt_len - unat tp"
+    using tp_len_le_nat tp_len_unat copy_ge_nat tp_nat_lt by linarith
+  \<comment> \<open>--- the post-step spec state and its budget ---\<close>
+  define st1 where "st1 =
+    (if enc_pending spec_st = [] then spec_st
+     else flush_pending_spec (length src_bytes) spec_st)"
+  define spec2 where "spec2 =
+    emit_copy_spec (length src_bytes) (unat ?mp) (unat ?ml) st1"
+  have step_eq: "spec2 = encode_window_full_step src_bytes tgt_bytes ?idx spec_st"
+    using not_short fused_none c_pos c_len tp_eq
+    by (simp add: encode_window_full_step_def Let_def
+        flush_then_emit_copy_spec_def st1_def spec2_def)
+  have tp_spec_lt: "enc_tp spec_st < length tgt_bytes"
+    using tp_eq tp_nat_lt tgt_len_eq by simp
+  have not_short':
+    "\<not> em_len (find_best_match_spec src_bytes tgt_bytes (enc_tp spec_st)
+        ?idx) < min_match"
+    using not_short tp_eq by simp
+  have budget2:
+    "encode_window_section_budget src_bytes tgt_bytes
+      data_cap inst_cap addr_cap spec2"
+    by (rule encode_window_section_budget_match_step[
+          OF budget0 tp_spec_lt not_short' step_eq])
+  have caps2:
+    "length (enc_data spec2) \<le> unat data_cap \<and>
+     length (enc_inst spec2) \<le> unat inst_cap \<and>
+     length (enc_addr spec2) \<le> unat addr_cap"
+  proof -
+    let ?fin = "encode_window_final_spec_state src_bytes tgt_bytes"
+    have pfx: "length (enc_data spec2) \<le> length (enc_data ?fin) \<and>
+               length (enc_inst spec2) \<le> length (enc_inst ?fin) \<and>
+               length (enc_addr spec2) \<le> length (enc_addr ?fin)"
+      using budget2
+      by (simp add: encode_window_section_budget_def
+          encode_window_section_prefix_budget_def)
+    have fin: "length (enc_data ?fin) \<le> unat data_cap \<and>
+               length (enc_inst ?fin) \<le> unat inst_cap \<and>
+               length (enc_addr ?fin) \<le> unat addr_cap"
+      using budget2
+      by (simp add: encode_window_section_budget_def
+          encoder_final_section_caps_ok_def)
+    show ?thesis using pfx fin by linarith
+  qed
+  \<comment> \<open>--- pure facts about the flushed intermediate state ---\<close>
+  have pending_lt32: "length (enc_pending spec_st) < 2 ^ 32"
+    using pending_len unat_lt2p[of pend_len] by simp
+  have st1_pending: "enc_pending st1 = []"
+    by (simp add: st1_def flush_pending_spec_def)
+  have st1_tp: "enc_tp st1 = enc_tp spec_st"
+    by (simp add: st1_def flush_pending_spec_enc_tp)
+  have st1_flushed: "enc_flushed st1 = enc_tp spec_st"
+    using flushed_inv
+    by (auto simp: st1_def flush_pending_spec_flushed)
+  have st1_cache: "enc_cache st1 = enc_cache spec_st"
+    by (simp add: st1_def flush_pending_spec_cache)
+  have st1_data_le:
+    "length (enc_data st1) \<le> length (enc_data spec_st) + unat pend_len"
+    using flush_pending_spec_growth_bounds(1)[OF pending_lt32] pending_len
+    by (auto simp: st1_def)
+  have st1_inst_le:
+    "length (enc_inst st1) \<le> length (enc_inst spec_st) + unat pend_len"
+    using flush_pending_spec_growth_bounds(2)[OF pending_lt32] pending_len
+    by (auto simp: st1_def)
+  have mono1:
+    "length (enc_data st1) \<le> length (enc_data spec2) \<and>
+     length (enc_inst st1) \<le> length (enc_inst spec2) \<and>
+     length (enc_addr st1) \<le> length (enc_addr spec2)"
+    using emit_copy_spec_sections_mono[of st1 "length src_bytes"]
+    by (simp add: spec2_def)
+  have data_room1: "length (enc_data st1) \<le> unat data_cap"
+    using mono1 caps2 by linarith
+  have inst_room_k:
+    "length (enc_inst (emit_copy_spec (length src_bytes) (unat ?mp)
+       (unat ?ml) st1)) \<le> unat inst_cap"
+    using caps2 by (simp add: spec2_def)
+  have addr_room_k:
+    "length (enc_addr (emit_copy_spec (length src_bytes) (unat ?mp)
+       (unat ?ml) st1)) \<le> unat addr_cap"
+    using caps2 by (simp add: spec2_def)
+  \<comment> \<open>--- rooms for the framed flush ---\<close>
+  have flush_data_room64:
+    "length (enc_data (flush_pending_spec (length src_bytes) spec_st)) + 64
+      \<le> unat data_cap"
+    using flush_pending_spec_growth_bounds(1)[OF pending_lt32,
+        of "length src_bytes"]
+      pending_len dp_len0 data_slack
+    by linarith
+  have flush_inst_room64:
+    "length (enc_inst (flush_pending_spec (length src_bytes) spec_st)) + 64
+      \<le> unat inst_cap"
+    using flush_pending_spec_growth_bounds(2)[OF pending_lt32,
+        of "length src_bytes"]
+      pending_len ip_len0 inst_slack
+    by linarith
+  have flush_addr_room:
+    "length (enc_addr (flush_pending_spec (length src_bytes) spec_st))
+      \<le> unat addr_cap"
+    using flush_pending_spec_growth_bounds(3)[OF pending_lt32,
+        of "length src_bytes"]
+      ap_len0 addr_pos_le
+    by simp
+  \<comment> \<open>--- best mode facts for the noop ---\<close>
+  obtain bm where bm: "best_mode' ?mp (src_len + tp) s = Some bm"
+    by (rule best_mode'_some[OF abs cwf])
+  have mode_wf:
+    "enc_mode_arg_wf (enc_cache spec_st) ?mp (src_len + tp) bm"
+    by (rule best_mode'_encode_address_correct[OF abs cwf bm])
+  have mode_le8: "mode_t_C.mode_C bm \<le> (8 :: 32 word)"
+    by (rule enc_mode_arg_wf_mode_word_le8[OF mode_wf])
+  have src_tp_no: "unat src_len + unat tp < 2 ^ 32"
+    using src_len_eq tgt_len_eq src_tgt_bound tp_nat_lt by linarith
+  have here_eq: "unat (src_len + tp) = length src_bytes + enc_tp spec_st"
+    using src_len_eq tp_eq src_tp_no
+    by (simp add: unat_word_ariths)
+  have addr_exact:
+    "encode_address (enc_cache spec_st) (unat ?mp)
+       (length src_bytes + enc_tp spec_st) =
+     (unat (mode_t_C.mode_C bm),
+      enc_best_bytes (mode_t_C.mode_C bm) (mode_t_C.arg_C bm),
+      cache_update (enc_cache spec_st) (unat ?mp))"
+    using best_mode'_encode_address_exact[OF abs cwf bm] here_eq by simp
+  \<comment> \<open>--- spec facts about the post-copy state ---\<close>
+  have tp2_eq: "enc_tp spec2 = unat (tp + ?ml)"
+    using emit_copy_spec_components(2)[of "length src_bytes"] st1_tp tp_eq
+      tp_len_unat
+    by (simp add: spec2_def)
+  have flushed2_eq: "enc_flushed spec2 = enc_tp spec2"
+    using emit_copy_spec_components(2,3)[of "length src_bytes"]
+      st1_flushed st1_tp
+    by (simp add: spec2_def)
+  have pending2: "enc_pending spec2 = []"
+    using emit_copy_spec_components(1)[of "length src_bytes"] st1_pending
+    by (simp add: spec2_def)
+  have data2_len_le:
+    "length (enc_data spec2) \<le>
+     unat (sections_t_C.data_pos_C sec) + unat pend_len"
+    using emit_copy_spec_components(4)[of "length src_bytes"]
+      st1_data_le dp_len0
+    by (simp add: spec2_def)
+  have ml_lt32: "unat ?ml < 2 ^ 32"
+    using unat_lt2p[of ?ml] by simp
+  have inst2_len_le:
+    "length (enc_inst spec2) \<le>
+     unat (sections_t_C.inst_pos_C sec) + unat pend_len + unat ?ml"
+    using emit_copy_spec_inst_growth_le_len[OF copy_ge_nat ml_lt32,
+        of "length src_bytes" "unat ?mp" st1]
+      st1_inst_le ip_len0
+    by (simp add: spec2_def)
+  have tp_progress2: "enc_tp spec_st < enc_tp spec2"
+    using tp2_eq tp_eq tp_len_unat copy_ge_nat by simp
+  \<comment> \<open>--- budget invariant after the copy ---\<close>
+  have rel_after:
+    "\<And>u sec2. \<lbrakk>
+        sections_t_C.err_C sec2 = ENC_OK;
+        enc_sections_state_rel u data inst addr sec2 spec2;
+        enc_cache_abs u (enc_cache spec2);
+        enc_cache_wf (enc_cache spec2);
+        heap_bytes u src (unat src_len) = src_bytes;
+        heap_bytes u tgt (unat tgt_len) = tgt_bytes \<rbrakk> \<Longrightarrow>
+      encode_window_loop_budget_rel u src src_len tgt tgt_len
+        data data_cap inst inst_cap addr addr_cap pending pending_cap
+        sec2 (tp + ?ml) 0 src_bytes tgt_bytes spec2"
+  proof -
+    fix u sec2
+    assume ok2: "sections_t_C.err_C sec2 = ENC_OK"
+      and srel2: "enc_sections_state_rel u data inst addr sec2 spec2"
+      and cabs2: "enc_cache_abs u (enc_cache spec2)"
+      and cwf2: "enc_cache_wf (enc_cache spec2)"
+      and srcu: "heap_bytes u src (unat src_len) = src_bytes"
+      and tgtu: "heap_bytes u tgt (unat tgt_len) = tgt_bytes"
+    have dp2_len: "length (enc_data spec2) =
+        unat (sections_t_C.data_pos_C sec2)"
+      and ip2_len: "length (enc_inst spec2) =
+        unat (sections_t_C.inst_pos_C sec2)"
+      and ap2_len: "length (enc_addr spec2) =
+        unat (sections_t_C.addr_pos_C sec2)"
+      using enc_sections_state_rel_lengths[OF srel2] by simp_all
+    have pending_u: "heap_bytes_word u pending 0 0 = enc_pending spec2"
+      using pending2 by (simp add: heap_bytes_word_def)
+    have data_slack2:
+      "unat (sections_t_C.data_pos_C sec2) + unat (0 :: 32 word) +
+         (unat tgt_len - unat (tp + ?ml)) + 64 \<le> unat data_cap"
+    proof -
+      have z: "unat (0 :: 32 word) = 0" by simp
+      show ?thesis
+        using dp2_len data2_len_le data_slack tp_len_unat tp_len_le_nat z
+        by linarith
+    qed
+    have inst_slack2:
+      "unat (sections_t_C.inst_pos_C sec2) + unat (0 :: 32 word) +
+         (unat tgt_len - unat (tp + ?ml)) + 64 \<le> unat inst_cap"
+    proof -
+      have z: "unat (0 :: 32 word) = 0" by simp
+      show ?thesis
+        using ip2_len inst2_len_le inst_slack tp_len_unat tp_len_le_nat z
+        by linarith
+    qed
+    show "encode_window_loop_budget_rel u src src_len tgt tgt_len
+        data data_cap inst inst_cap addr addr_cap pending pending_cap
+        sec2 (tp + ?ml) 0 src_bytes tgt_bytes spec2"
+      using srcu tgtu src_len_eq tgt_len_eq pending_u pending2
+        tp2_eq flushed2_eq srel2 ok2 tp_len_le_nat
+        dp2_len ip2_len ap2_len caps2 data_slack2 inst_slack2
+        budget2 cabs2 cwf2
+      by (auto simp: encode_window_loop_budget_rel_def)
+  qed
+  \<comment> \<open>--- noop run of the fused try ---\<close>
+  have noop_run:
+    "try_emit_add_copy' sec data data_cap inst inst_cap addr addr_cap
+        pending pend_len ?mp (src_len + tp) ?ml \<bullet> s
+      \<lbrace> \<lambda>r t.
+          (\<exists>f. r = Result f \<and>
+               fused_t_C.s_C f = sec \<and>
+               fused_t_C.fused_C f = 0) \<and>
+          t = s \<rbrace>"
+    by (rule try_emit_add_copy'_spec_none_noop[
+          OF sections_rel pending_len copy_ge fused_none bm mode_le8
+             addr_exact])
+  \<comment> \<open>--- flush stage of the C else-branch ---\<close>
+  have flush_stage:
+    "condition (\<lambda>s. 0 < pend_len)
+       (do {
+          sec_run \<leftarrow> liftE
+            (flush_pending' sec data data_cap inst inst_cap
+              pending pend_len);
+          unless (sections_t_C.err_C sec_run = 0) (throw sec_run);
+          return (0, sec_run)
+        })
+       (return (pend_len, sec)) \<bullet> s
+     \<lbrace> \<lambda>r t1. \<exists>sec1.
+          r = Result ((0 :: 32 word), sec1) \<and>
+          enc_sections_state_rel t1 data inst addr sec1 st1 \<and>
+          sections_t_C.err_C sec1 = ENC_OK \<and>
+          heap_bytes t1 src (unat src_len) = src_bytes \<and>
+          heap_bytes t1 tgt (unat tgt_len) = tgt_bytes \<and>
+          enc_cache_abs t1 (enc_cache spec_st) \<and>
+          heap_typing t1 = heap_typing s \<rbrace>"
+  proof (cases "0 < pend_len")
+    case pend_pos: True
+    have pend_nz_nat: "0 < unat pend_len"
+      using pend_pos by (simp add: word_less_nat_alt)
+    have pending_ne: "enc_pending spec_st \<noteq> []"
+      using pending_len pend_nz_nat by auto
+    have st1_flush: "st1 = flush_pending_spec (length src_bytes) spec_st"
+      using pending_ne by (simp add: st1_def)
+    have FH:
+      "flush_pending' sec data data_cap inst inst_cap pending pend_len \<bullet> s
+       \<lbrace> \<lambda>r t1. \<exists>sec'.
+            r = Result sec' \<and>
+            enc_sections_state_rel t1 data inst addr sec'
+              (flush_pending_spec (length src_bytes) spec_st) \<and>
+            sections_t_C.err_C sec' = ENC_OK \<and>
+            heap_bytes_word t1 src 0 src_len =
+              heap_bytes_word s src 0 src_len \<and>
+            heap_bytes_word t1 tgt 0 tgt_len =
+              heap_bytes_word s tgt 0 tgt_len \<and>
+            enc_cache_abs t1 (enc_cache spec_st) \<and>
+            heap_typing t1 = heap_typing s \<rbrace>"
+      by (rule flush_pending'_loop_from_final_fits_framed[
+            OF buffers sections_rel abs cwf sec_ok pending_heap[symmetric]
+               pend_cap_le flush_data_room64 flush_inst_room64
+               flush_addr_room])
+    have FH_lifted:
+      "liftE (flush_pending' sec data data_cap inst inst_cap
+          pending pend_len) \<bullet> s
+       \<lbrace> \<lambda>r t1. \<exists>sec'.
+            r = Result sec' \<and>
+            enc_sections_state_rel t1 data inst addr sec' st1 \<and>
+            sections_t_C.err_C sec' = ENC_OK \<and>
+            heap_bytes t1 src (unat src_len) = src_bytes \<and>
+            heap_bytes t1 tgt (unat tgt_len) = tgt_bytes \<and>
+            enc_cache_abs t1 (enc_cache spec_st) \<and>
+            heap_typing t1 = heap_typing s \<rbrace>"
+      apply (rule runs_to_liftE)
+      apply (rule runs_to_weaken[OF FH])
+      using st1_flush src_heap tgt_heap
+      by (auto simp: heap_bytes_word_zero)
+    show ?thesis
+      using pend_pos
+      apply (simp add: runs_to_condition_iff)
+      apply (rule runs_to_bind)
+      apply (rule runs_to_weaken[OF FH_lifted])
+      by (auto simp: runs_to_bind_iff)
+  next
+    case False
+    have pend0: "pend_len = 0"
+      using False by (simp add: word_neq_0_conv not_less)
+    have pending_nil: "enc_pending spec_st = []"
+      using pending_len pend0 by simp
+    have st1_id: "st1 = spec_st"
+      using pending_nil by (simp add: st1_def)
+    show ?thesis
+      using False pend0 st1_id sections_rel sec_ok src_heap tgt_heap abs
+      by (auto simp: runs_to_condition_iff)
+  qed
+  \<comment> \<open>--- the else-branch continuation after the flush stage ---\<close>
+  let ?cont2 =
+    "\<lambda>(pend_len_run :: 32 word, sec_run). do {
+        sec_run2 \<leftarrow> liftE
+          (emit_copy' sec_run inst inst_cap addr addr_cap
+            ?mp (src_len + tp) ?ml);
+        unless (sections_t_C.err_C sec_run2 = 0) (throw sec_run2);
+        return (pend_len_run, sec_run2, tp + ?ml)
+      }"
+  have flush_for_bind:
+    "condition (\<lambda>s. 0 < pend_len)
+       (do {
+          sec_run \<leftarrow> liftE
+            (flush_pending' sec data data_cap inst inst_cap
+              pending pend_len);
+          unless (sections_t_C.err_C sec_run = 0) (throw sec_run);
+          return (0, sec_run)
+        })
+       (return (pend_len, sec)) \<bullet> s
+     \<lbrace> \<lambda>r t1.
+          (\<forall>v. r = Result v \<longrightarrow> ?cont2 v \<bullet> t1 \<lbrace> ?Q \<rbrace>) \<and>
+          (\<forall>e. r = Exception e \<longrightarrow> e \<noteq> default \<longrightarrow> ?Q (Exception e) t1) \<rbrace>"
+  proof (rule runs_to_weaken[OF flush_stage])
+    fix r t1
+    assume "\<exists>sec1.
+          r = Result ((0 :: 32 word), sec1) \<and>
+          enc_sections_state_rel t1 data inst addr sec1 st1 \<and>
+          sections_t_C.err_C sec1 = ENC_OK \<and>
+          heap_bytes t1 src (unat src_len) = src_bytes \<and>
+          heap_bytes t1 tgt (unat tgt_len) = tgt_bytes \<and>
+          enc_cache_abs t1 (enc_cache spec_st) \<and>
+          heap_typing t1 = heap_typing s"
+    then obtain sec1 where
+        r_def: "r = Result ((0 :: 32 word), sec1)"
+      and srel1: "enc_sections_state_rel t1 data inst addr sec1 st1"
+      and sec1_ok: "sections_t_C.err_C sec1 = ENC_OK"
+      and src_t1: "heap_bytes t1 src (unat src_len) = src_bytes"
+      and tgt_t1: "heap_bytes t1 tgt (unat tgt_len) = tgt_bytes"
+      and abs_t1: "enc_cache_abs t1 (enc_cache spec_st)"
+      and typing_t1: "heap_typing t1 = heap_typing s"
+      by blast
+    have abs_t1': "enc_cache_abs t1 (enc_cache st1)"
+      using abs_t1 st1_cache by simp
+    have cwf1: "enc_cache_wf (enc_cache st1)"
+      using cwf st1_cache by simp
+    have buffers_t1:
+      "encode_window_loop_buffers_ok t1 src src_len tgt tgt_len
+        pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      by (rule encode_window_loop_buffers_ok_heap_typing[OF buffers typing_t1])
+    obtain bm2 where bm2: "best_mode' ?mp (src_len + tp) t1 = Some bm2"
+      by (rule best_mode'_some[OF abs_t1' cwf1])
+    have here_eq1:
+      "unat (src_len + tp) = length src_bytes + enc_flushed st1"
+      using here_eq st1_flushed by simp
+    have addr_exact2:
+      "encode_address (enc_cache st1) (unat ?mp)
+         (length src_bytes + enc_flushed st1) =
+       (unat (mode_t_C.mode_C bm2),
+        enc_best_bytes (mode_t_C.mode_C bm2) (mode_t_C.arg_C bm2),
+        cache_update (enc_cache st1) (unat ?mp))"
+      using best_mode'_encode_address_exact[OF abs_t1' cwf1 bm2] here_eq1
+      by simp
+    have cache2_eq:
+      "enc_cache spec2 = cache_update (enc_cache st1) (unat ?mp)"
+      using emit_copy_spec_cache_of_encode_address[OF addr_exact2]
+      by (simp add: spec2_def)
+    have dpos_le1:
+      "unat (sections_t_C.data_pos_C sec1) \<le> unat data_cap"
+      using enc_sections_state_rel_lengths(1)[OF srel1] data_room1 by simp
+    have EK:
+      "emit_copy' sec1 inst inst_cap addr addr_cap
+         ?mp (src_len + tp) ?ml \<bullet> t1
+       \<lbrace> \<lambda>r u. \<exists>sec2.
+            r = Result sec2 \<and>
+            sections_t_C.err_C sec2 = ENC_OK \<and>
+            sections_t_C.data_pos_C sec2 = sections_t_C.data_pos_C sec1 \<and>
+            unat (sections_t_C.inst_pos_C sec2) \<le> unat inst_cap \<and>
+            unat (sections_t_C.addr_pos_C sec2) \<le> unat addr_cap \<and>
+            enc_sections_state_rel u data inst addr sec2
+              (emit_copy_spec (length src_bytes) (unat ?mp)
+                (unat ?ml) st1) \<and>
+            enc_cache_abs u
+              (cache_update (enc_cache st1) (unat ?mp)) \<and>
+            enc_cache_wf
+              (cache_update (enc_cache st1) (unat ?mp)) \<and>
+            heap_bytes u src (unat src_len) =
+              heap_bytes t1 src (unat src_len) \<and>
+            heap_bytes u tgt (unat tgt_len) =
+              heap_bytes t1 tgt (unat tgt_len) \<and>
+            heap_typing u = heap_typing t1 \<rbrace>"
+      by (rule emit_copy'_state_rel_cache_frame_from_loop[
+            OF buffers_t1 srel1 abs_t1' cwf1 bm2 addr_exact2 sec1_ok
+               dpos_le1 inst_room_k addr_room_k])
+    have EK_lifted:
+      "liftE (emit_copy' sec1 inst inst_cap addr addr_cap
+          ?mp (src_len + tp) ?ml) \<bullet> t1
+       \<lbrace> \<lambda>r u. \<exists>sec2. r = Result sec2 \<and>
+            sections_t_C.err_C sec2 = 0 \<and>
+            ?Q (Result (0, sec2, tp + ?ml)) u \<rbrace>"
+      apply (rule runs_to_liftE)
+      apply (rule runs_to_weaken[OF EK])
+      apply clarsimp
+      subgoal for secx u
+        apply (rule exI[where x = spec2])
+        using rel_after[of secx u] cache2_eq spec2_def src_t1 tgt_t1
+          tp_progress2 measure_progress
+        by auto
+      done
+    show "(\<forall>v. r = Result v \<longrightarrow> ?cont2 v \<bullet> t1 \<lbrace> ?Q \<rbrace>) \<and>
+          (\<forall>e. r = Exception e \<longrightarrow> e \<noteq> default \<longrightarrow> ?Q (Exception e) t1)"
+    proof (intro conjI allI impI)
+      fix v
+      assume rv: "r = Result v"
+      have v_eq: "v = ((0 :: 32 word), sec1)"
+        using r_def rv by simp
+      have body:
+        "?cont2 ((0 :: 32 word), sec1) \<bullet> t1 \<lbrace> ?Q \<rbrace>"
+        apply simp
+        apply (rule runs_to_bind)
+        apply (rule runs_to_weaken[OF EK_lifted])
+        by (auto simp: runs_to_bind_iff)
+      show "?cont2 v \<bullet> t1 \<lbrace> ?Q \<rbrace>"
+        using v_eq body by simp
+    next
+      fix e
+      assume "r = Exception e" and "e \<noteq> default"
+      then show "?Q (Exception e) t1"
+        using r_def by simp
+    qed
+  qed
+  \<comment> \<open>--- the continuation of the C match branch after the fused try ---\<close>
+  let ?cont =
+    "\<lambda>f. do {
+        unless (sections_t_C.err_C (fused_t_C.s_C f) = 0)
+          (throw (fused_t_C.s_C f));
+        condition (\<lambda>s. fused_t_C.fused_C f \<noteq> 0)
+          (do {
+            (sec_run, tp_run) \<leftarrow>
+              condition
+                (\<lambda>s. fused_t_C.fused_C f < match_t_C.len_C m)
+                (do {
+                  sec_run \<leftarrow> liftE
+                    (emit_copy' (fused_t_C.s_C f) inst
+                      inst_cap addr addr_cap
+                      (match_t_C.pos_C m + fused_t_C.fused_C f)
+                      (src_len + (tp + fused_t_C.fused_C f))
+                      (match_t_C.len_C m - fused_t_C.fused_C f));
+                  unless (sections_t_C.err_C sec_run = 0)
+                    (throw sec_run);
+                  return (sec_run, tp + match_t_C.len_C m)
+                })
+                (return (fused_t_C.s_C f,
+                  tp + fused_t_C.fused_C f));
+            return (0, sec_run, tp_run)
+          })
+          (do {
+            (pend_len_run, sec_run) \<leftarrow>
+              condition (\<lambda>s. 0 < pend_len)
+                (do {
+                  sec_run \<leftarrow> liftE
+                    (flush_pending' sec data data_cap inst
+                      inst_cap pending pend_len);
+                  unless (sections_t_C.err_C sec_run = 0)
+                    (throw sec_run);
+                  return (0, sec_run)
+                })
+                (return (pend_len, sec));
+            sec_run \<leftarrow> liftE
+              (emit_copy' sec_run inst inst_cap addr addr_cap
+                (match_t_C.pos_C m) (src_len + tp)
+                (match_t_C.len_C m));
+            unless (sections_t_C.err_C sec_run = 0)
+              (throw sec_run);
+            return (pend_len_run, sec_run,
+              tp + match_t_C.len_C m)
+          })
+      }"
+  have none_cont:
+    "\<And>f. \<lbrakk> fused_t_C.s_C f = sec; fused_t_C.fused_C f = 0 \<rbrakk> \<Longrightarrow>
+        ?cont f \<bullet> s \<lbrace> ?Q \<rbrace>"
+  proof -
+    fix f
+    assume scf: "fused_t_C.s_C f = sec"
+      and fz0: "fused_t_C.fused_C f = 0"
+    have B_run:
+      "(do {
+          (pend_len_run, sec_run) \<leftarrow>
+            condition (\<lambda>s. 0 < pend_len)
+              (do {
+                sec_run \<leftarrow> liftE
+                  (flush_pending' sec data data_cap inst
+                    inst_cap pending pend_len);
+                unless (sections_t_C.err_C sec_run = 0)
+                  (throw sec_run);
+                return (0, sec_run)
+              })
+              (return (pend_len, sec));
+          sec_run2 \<leftarrow> liftE
+            (emit_copy' sec_run inst inst_cap addr addr_cap
+              ?mp (src_len + tp) ?ml);
+          unless (sections_t_C.err_C sec_run2 = 0)
+            (throw sec_run2);
+          return (pend_len_run, sec_run2, tp + ?ml)
+        }) \<bullet> s \<lbrace> ?Q \<rbrace>"
+      by (rule runs_to_bind[OF flush_for_bind])
+    show "?cont f \<bullet> s \<lbrace> ?Q \<rbrace>"
+      using B_run by (simp add: scf fz0 sec_ok)
+  qed
+  \<comment> \<open>--- assemble the branch ---\<close>
+  have noop_lifted:
+    "liftE (try_emit_add_copy' sec data data_cap inst inst_cap
+        addr addr_cap pending pend_len ?mp (src_len + tp) ?ml) \<bullet> s
+     \<lbrace> \<lambda>r t. \<exists>f.
+          r = Result f \<and>
+          fused_t_C.s_C f = sec \<and>
+          fused_t_C.fused_C f = 0 \<and>
+          t = s \<rbrace>"
+    apply (rule runs_to_liftE)
+    apply (rule runs_to_weaken[OF noop_run])
+    by auto
+  have noop_for_bind:
+    "liftE (try_emit_add_copy' sec data data_cap inst inst_cap
+        addr addr_cap pending pend_len ?mp (src_len + tp) ?ml) \<bullet> s
+     \<lbrace> \<lambda>r t.
+          (\<forall>v. r = Result v \<longrightarrow> ?cont v \<bullet> t \<lbrace> ?Q \<rbrace>) \<and>
+          (\<forall>e. r = Exception e \<longrightarrow> e \<noteq> default \<longrightarrow> ?Q (Exception e) t) \<rbrace>"
+  proof (rule runs_to_weaken[OF noop_lifted])
+    fix r t
+    assume "\<exists>f. r = Result f \<and> fused_t_C.s_C f = sec \<and>
+        fused_t_C.fused_C f = 0 \<and> t = s"
+    then obtain f where r_def: "r = Result f"
+      and scf: "fused_t_C.s_C f = sec"
+      and fz0: "fused_t_C.fused_C f = 0"
+      and t_eq: "t = s"
+      by blast
+    have cont_f: "?cont f \<bullet> t \<lbrace> ?Q \<rbrace>"
+      using none_cont[OF scf fz0] t_eq by simp
+    show "(\<forall>v. r = Result v \<longrightarrow> ?cont v \<bullet> t \<lbrace> ?Q \<rbrace>) \<and>
+          (\<forall>e. r = Exception e \<longrightarrow> e \<noteq> default \<longrightarrow> ?Q (Exception e) t)"
+      using r_def cont_f by auto
+  qed
+  have branch_unfold:
+    "encode_window_c_match_branch src_len
+       data data_cap inst inst_cap addr addr_cap
+       pending pend_len sec tp m =
+     bind (liftE
+       (try_emit_add_copy' sec data data_cap inst inst_cap
+         addr addr_cap pending pend_len ?mp (src_len + tp) ?ml)) ?cont"
+    by (simp add: encode_window_c_match_branch_def)
+  show ?thesis
+    apply (subst branch_unfold)
+    apply (rule runs_to_bind[OF noop_for_bind])
+    done
+qed
 
 lemma encode_window_match_step_topdown_budget:
   assumes rel:

@@ -2,6 +2,53 @@
 
 ## Progress log
 
+**2026-07-06 (session 2, cont.).** **Work item 1 DONE**:
+`encode_window_flush_then_copy_step_topdown_budget` is proved (sorry count
+8 → 7). Full session rebuilds clean (~5.5min). New in
+`VcdiffEnc_Serialize.thy`:
+
+- `flush_pending'_loop_from_final_fits_framed` — the framed flush. Copy of
+  the non-framed helper threaded through
+  `flush_pending'_enc_sections_state_rel_branch_pre_frame` with
+  `P u = src/tgt heap_bytes_word frames ∧ enc_cache_abs u c`; at each of the
+  four emit sites (tail add, run-only, add+run) the chunk lemma is conjoined
+  with `emit_add'/emit_run'_loop_buffers_heap_word_cache_frame` (out = src
+  and out = tgt) via runs_to_conj. The addr premise is weakened to
+  `length (enc_addr (flush_pending_spec sl st)) ≤ addr_cap` (the old +64 was
+  slack and is NOT available from the semantic budget); data/inst keep +64,
+  discharged from the retained linear slacks + flush growth ≤ pend_len.
+- Pure: `flush_pending_spec_cache` (via `flush_pending_insts_no_copy`),
+  `flush_pending_spec_flushed` (= +length pending, via
+  `emit_insts_spec_enc_flushed_exec` + `flush_pending_insts_exec` with a
+  replicate accumulator), `flush_pending_spec_growth_bounds` (loop-growth
+  lemma transported by `flush_pending_loop_spec_eq_flush_pending_spec[OF
+  refl]`), `emit_copy_spec_inst_growth_le_len` (inst growth ≤ copy len:
+  small opcode +1, large +6 ≤ 19 ≤ len — this is what makes the inst linear
+  slack inductive for the plain-COPY branch).
+- The budget lemma: `try_emit_add_copy'_spec_none_noop` → flush stage
+  (condition on `0 < pend_len`; framed helper, or identity when pending is
+  empty) → emit_copy' keystone at the flushed state (st1: pending = [],
+  flushed = tp, cache unchanged) → budget via
+  `encode_window_section_budget_match_step` with
+  `spec2 = emit_copy_spec … st1 = flush_then_emit_copy_spec … =
+  encode_window_full_step` (None branch).
+- Extra plumbing gotcha: don't `simp` the branch continuation before
+  `runs_to_bind[OF …]` — simp normalizes the postcondition ?Q and the OF no
+  longer matches. Prove the reduced block's runs_to first with ?Q verbatim,
+  then close the full continuation with `using B_run by (simp add: <branch
+  booleans>)`.
+
+**Remaining sorries (7)**, per plan items 3–6 below:
+- 14855 `encode_window_while_loop_topdown_budget` (item 3, next)
+- 14896 `encode_window_final_flush_topdown_budget` (item 4 — the framed
+  flush helper's room premises fit; final flush needs only data/inst)
+- 14936 `encode_window_phase_core_topdown_budget`,
+  16106 `vcdiff_encode'_encode_window_phase_topdown_budget`,
+  17005 `vcdiff_encode'_compose_phases_topdown` (item 5 glue)
+- 8309 `encode_window_flush_then_copy_step_topdown`,
+  14966 `encode_window_while_loop_topdown` — FALSE non-budget lemmas,
+  DELETE in item 6 (do not prove).
+
 **2026-07-06 (session 2).** **Work item 2 DONE**:
 `encode_window_try_fused_copy_step_topdown_budget` is proved (sorry count
 9 → 8). All in `VcdiffEnc_Serialize.thy`, full session rebuilt clean (~5.5min):
