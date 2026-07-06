@@ -14852,6 +14852,740 @@ proof -
   qed
 qed
 
+text \<open>Partial-correctness frame: the encode-window loop body only writes the
+  byte heap and the address-cache globals, so the 32-bit word heap (holding
+  the source index arrays) and the heap typing are untouched.  Proved
+  bottom-up through the emit layer; combined with the total budget step via
+  runs_to_of_runs_to_partial_runs_to' to thread encoder_index_post through
+  the loop.\<close>
+
+lemma write_byte'_w32_typing_frame:
+  "write_byte' buf cap pos b \<bullet> s ?\<lbrace> \<lambda>r t.
+      heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding write_byte'_def
+  by runs_to_vcg
+
+lemma write_varint'_w32_typing_frame:
+  "write_varint' buf cap pos v \<bullet> s ?\<lbrace> \<lambda>r t.
+      heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding write_varint'_def
+  apply runs_to_vcg
+  apply (rule runs_to_partial_whileLoop_res[
+     where I = "\<lambda>_ t. heap_w32 t = heap_w32 s \<and>
+                      heap_typing t = heap_typing s"])
+    apply simp
+   apply auto[1]
+  apply runs_to_vcg
+  done
+
+lemma write_bytes'_w32_typing_frame:
+  "write_bytes' buf cap pos src src_off len \<bullet> s ?\<lbrace> \<lambda>r t.
+      heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding write_bytes'_def
+  apply runs_to_vcg
+  apply (rule runs_to_partial_whileLoop_res[
+     where I = "\<lambda>_ t. heap_w32 t = heap_w32 s \<and>
+                      heap_typing t = heap_typing s"])
+    apply simp
+   apply auto[1]
+  apply runs_to_vcg
+  done
+
+lemma emit_address'_w32_typing_frame:
+  "emit_address' addr_buf addr_cap addr_pos m \<bullet> s ?\<lbrace> \<lambda>r t.
+      heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding emit_address'_def
+  supply write_byte'_w32_typing_frame[runs_to_vcg]
+  supply write_varint'_w32_typing_frame[runs_to_vcg]
+  by runs_to_vcg
+
+lemma cache_update'_w32_typing_frame:
+  "cache_update' a \<bullet> s ?\<lbrace> \<lambda>r t.
+      heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding cache_update'_def
+  by runs_to_vcg
+
+lemma emit_add'_w32_typing_frame:
+  "emit_add' sec data data_cap inst inst_cap pending off sz \<bullet> s ?\<lbrace> \<lambda>r t.
+      heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding emit_add'_def
+  supply write_byte'_w32_typing_frame[runs_to_vcg]
+  supply write_varint'_w32_typing_frame[runs_to_vcg]
+  supply write_bytes'_w32_typing_frame[runs_to_vcg]
+  by runs_to_vcg auto
+
+lemma emit_run'_w32_typing_frame:
+  "emit_run' sec data data_cap inst inst_cap fill sz \<bullet> s ?\<lbrace> \<lambda>r t.
+      heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding emit_run'_def
+  supply write_byte'_w32_typing_frame[runs_to_vcg]
+  supply write_varint'_w32_typing_frame[runs_to_vcg]
+  by runs_to_vcg auto
+
+lemma emit_copy'_w32_typing_frame:
+  "emit_copy' sec inst inst_cap addr_buf addr_cap copy_addr here copy_len
+     \<bullet> s ?\<lbrace> \<lambda>r t.
+      heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding emit_copy'_def
+  supply write_byte'_w32_typing_frame[runs_to_vcg]
+  supply write_varint'_w32_typing_frame[runs_to_vcg]
+  supply emit_address'_w32_typing_frame[runs_to_vcg]
+  supply cache_update'_w32_typing_frame[runs_to_vcg]
+  by runs_to_vcg auto
+
+lemma add_copy_opcode'_w32_typing_frame:
+  "add_copy_opcode' add_sz copy_sz mode \<bullet> s ?\<lbrace> \<lambda>r t.
+      heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding add_copy_opcode'_def
+  by runs_to_vcg
+
+lemma try_emit_add_copy'_w32_typing_frame:
+  "try_emit_add_copy' sec data data_cap inst inst_cap addr_buf addr_cap
+      pending pend_len copy_addr here copy_len \<bullet> s ?\<lbrace> \<lambda>r t.
+      heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding try_emit_add_copy'_def
+  supply add_copy_opcode'_w32_typing_frame[runs_to_vcg]
+  supply write_byte'_w32_typing_frame[runs_to_vcg]
+  supply write_bytes'_w32_typing_frame[runs_to_vcg]
+  supply emit_address'_w32_typing_frame[runs_to_vcg]
+  supply cache_update'_w32_typing_frame[runs_to_vcg]
+  by runs_to_vcg auto
+
+lemma flush_pending_scan_loop_w32_typing_frame:
+  "(whileLoop (\<lambda>(j, ret) s. ret \<noteq> (0 :: 32 word))
+      (\<lambda>(j, ret). do {
+         x \<leftarrow> guard (\<lambda>s. j + 1 < len \<longrightarrow>
+                IS_VALID(8 word) s (pending +\<^sub>p uint (j + 1)));
+         ret \<leftarrow> gets (\<lambda>s. j + 1 < len \<and>
+                heap_w8 s (pending +\<^sub>p uint (j + 1)) = b);
+         return (j + 1, if ret then (1 :: 32 word) else 0)
+       }) jr0 :: (32 word \<times> 32 word, lifted_globals) res_monad) \<bullet> s
+   ?\<lbrace> \<lambda>r t. heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  apply (rule runs_to_partial_whileLoop_res[
+    where I = "\<lambda>_ t. heap_w32 t = heap_w32 s \<and>
+                     heap_typing t = heap_typing s"])
+    apply simp
+   apply simp
+  subgoal for a t
+    apply (cases a)
+    apply clarsimp
+    apply runs_to_vcg
+    done
+  done
+
+lemma flush_pending'_w32_typing_frame:
+  "flush_pending' sec data data_cap inst inst_cap pending pend_len
+     \<bullet> s ?\<lbrace> \<lambda>r t.
+      heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding flush_pending'_def
+  supply emit_add'_w32_typing_frame[runs_to_vcg]
+  supply emit_run'_w32_typing_frame[runs_to_vcg]
+  apply runs_to_vcg
+  apply (rule runs_to_partial_whileLoop_exn[
+     where I = "\<lambda>r t. heap_w32 t = heap_w32 s \<and>
+                      heap_typing t = heap_typing s"])
+     apply simp
+    apply (runs_to_vcg, (auto)?)
+   apply (runs_to_vcg, (auto)?)
+  apply (runs_to_vcg, (auto)?)
+  subgoal for a aa b sa
+    apply (rule runs_to_partial_weaken)
+     apply (rule runs_to_partial_whileLoop_res[
+       where P = "\<lambda>r (u :: lifted_globals).
+                    heap_w32 u = heap_w32 s \<and>
+                    heap_typing u = heap_typing s"
+         and I = "\<lambda>_ (u :: lifted_globals).
+                    heap_w32 u = heap_w32 s \<and>
+                    heap_typing u = heap_typing s"])
+       apply simp
+      apply simp
+     subgoal for x u
+       apply (cases x)
+       apply clarsimp
+       apply runs_to_vcg
+       done
+    apply clarsimp
+    apply (runs_to_vcg, (auto)?)
+    done
+  subgoal for a aa b sa
+    apply (rule runs_to_partial_weaken)
+     apply (rule runs_to_partial_whileLoop_res[
+       where P = "\<lambda>r (u :: lifted_globals).
+                    heap_w32 u = heap_w32 s \<and>
+                    heap_typing u = heap_typing s"
+         and I = "\<lambda>_ (u :: lifted_globals).
+                    heap_w32 u = heap_w32 s \<and>
+                    heap_typing u = heap_typing s"])
+       apply simp
+      apply simp
+     subgoal for x u
+       apply (cases x)
+       apply clarsimp
+       apply runs_to_vcg
+       done
+    apply clarsimp
+    apply (runs_to_vcg, (auto)?)
+    done
+  subgoal for a aa b sa
+    apply (rule runs_to_partial_weaken)
+     apply (rule runs_to_partial_whileLoop_res[
+       where P = "\<lambda>r (u :: lifted_globals).
+                    heap_w32 u = heap_w32 s \<and>
+                    heap_typing u = heap_typing s"
+         and I = "\<lambda>_ (u :: lifted_globals).
+                    heap_w32 u = heap_w32 s \<and>
+                    heap_typing u = heap_typing s"])
+       apply simp
+      apply simp
+     subgoal for x u
+       apply (cases x)
+       apply clarsimp
+       apply runs_to_vcg
+       done
+    apply clarsimp
+    apply (runs_to_vcg, (auto)?)
+    done
+  subgoal for a aa b sa
+    apply (rule runs_to_partial_weaken)
+     apply (rule runs_to_partial_whileLoop_res[
+       where P = "\<lambda>r (u :: lifted_globals).
+                    heap_w32 u = heap_w32 s \<and>
+                    heap_typing u = heap_typing s"
+         and I = "\<lambda>_ (u :: lifted_globals).
+                    heap_w32 u = heap_w32 s \<and>
+                    heap_typing u = heap_typing s"])
+       apply simp
+      apply simp
+     subgoal for x u
+       apply (cases x)
+       apply clarsimp
+       apply runs_to_vcg
+       done
+    apply clarsimp
+    apply (runs_to_vcg, (auto)?)
+    done
+  subgoal for a aa b sa
+    apply (rule runs_to_partial_weaken)
+     apply (rule runs_to_partial_whileLoop_res[
+       where P = "\<lambda>r (u :: lifted_globals).
+                    heap_w32 u = heap_w32 s \<and>
+                    heap_typing u = heap_typing s"
+         and I = "\<lambda>_ (u :: lifted_globals).
+                    heap_w32 u = heap_w32 s \<and>
+                    heap_typing u = heap_typing s"])
+       apply simp
+      apply simp
+     subgoal for x u
+       apply (cases x)
+       apply clarsimp
+       apply runs_to_vcg
+       done
+    apply clarsimp
+    apply (runs_to_vcg, (auto)?)
+    done
+  done
+
+lemma encode_window_c_loop_body_w32_typing_frame:
+  "encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
+      data data_cap inst inst_cap addr addr_cap pending pending_cap
+      (pl0, sc0, tp0) \<bullet> s ?\<lbrace> \<lambda>r t.
+      heap_w32 t = heap_w32 s \<and> heap_typing t = heap_typing s \<rbrace>"
+  unfolding encode_window_c_loop_body_def case_prod_conv
+  supply try_emit_add_copy'_w32_typing_frame[runs_to_vcg]
+  supply emit_copy'_w32_typing_frame[runs_to_vcg]
+  supply flush_pending'_w32_typing_frame[runs_to_vcg]
+  apply runs_to_vcg
+  apply auto
+  done
+
+text \<open>encoder_index_post transports along the w32/typing frame, given the
+  src/tgt byte contents are re-established (they come from the budget
+  invariant).\<close>
+
+lemma encoder_index_post_w32_typing_transport:
+  assumes index:
+      "encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+        src_bytes tgt_bytes"
+    and w32: "heap_w32 u = heap_w32 t"
+    and typing: "heap_typing u = heap_typing t"
+    and src_u: "heap_bytes u src (unat src_len) = src_bytes"
+    and tgt_u: "heap_bytes u tgt (unat tgt_len) = tgt_bytes"
+  shows "encoder_index_post s0 u src src_len tgt tgt_len head_arr next_arr
+        src_bytes tgt_bytes"
+  using index w32 typing src_u tgt_u
+  by (simp add: encoder_index_post_def source_index_heap_rel_def
+      source_index_heap_nexts_wf_def source_index_heap_chains_closed_def
+      heap_w32_list_def)
+
+text \<open>Totality of the match finder: under the index invariants and buffer
+  validity, common_prefix' and find_best_match' never return None.  This is
+  what lets the encode-window loop's gets_the succeed at every iteration.\<close>
+
+lemma common_prefix'_isSome:
+  fixes a_buf b_buf :: "8 word ptr"
+    and a_pos a_end b_pos b_end :: "32 word"
+  assumes a_valid: "buf_valid s a_buf (unat a_end)"
+      and b_valid: "buf_valid s b_buf (unat b_end)"
+      and a_le: "a_pos \<le> a_end"
+      and b_le: "b_pos \<le> b_end"
+  shows "\<exists>l. common_prefix' a_buf a_pos a_end b_buf b_pos b_end s = Some l"
+proof -
+  define limit where "limit =
+    (if a_end - a_pos < b_end - b_pos then a_end - a_pos else b_end - b_pos)"
+  have limit_le_a: "limit \<le> a_end - a_pos"
+    by (auto simp: limit_def linorder_not_less)
+  have limit_le_b: "limit \<le> b_end - b_pos"
+    by (auto simp: limit_def linorder_not_less)
+  have VA: "\<And>k :: 32 word. k < limit \<Longrightarrow>
+      ptr_valid (heap_typing s) (a_buf +\<^sub>p uint (a_pos + k))"
+  proof -
+    fix k :: "32 word"
+    assume k_lt: "k < limit"
+    have k_lt_a: "k < a_end - a_pos"
+      using k_lt limit_le_a by simp
+    have k_nat: "unat k < unat a_end - unat a_pos"
+      using k_lt_a a_le
+      by (simp add: word_less_nat_alt unat_sub)
+    have no: "unat a_pos + unat k < unat a_end"
+      using k_nat by linarith
+    have no32: "unat a_pos + unat k < 2 ^ 32"
+      using no unat_lt2p[of a_end] by simp
+    have unat_eq: "unat (a_pos + k) = unat a_pos + unat k"
+      by (rule unat_word_add_no_overflow[OF no32])
+    have lt: "unat (a_pos + k) < unat a_end"
+      using unat_eq no by simp
+    show "ptr_valid (heap_typing s) (a_buf +\<^sub>p uint (a_pos + k))"
+      by (rule buf_valid_uintD[OF a_valid lt])
+  qed
+  have VB: "\<And>k :: 32 word. k < limit \<Longrightarrow>
+      ptr_valid (heap_typing s) (b_buf +\<^sub>p uint (b_pos + k))"
+  proof -
+    fix k :: "32 word"
+    assume k_lt: "k < limit"
+    have k_lt_b: "k < b_end - b_pos"
+      using k_lt limit_le_b by simp
+    have k_nat: "unat k < unat b_end - unat b_pos"
+      using k_lt_b b_le
+      by (simp add: word_less_nat_alt unat_sub)
+    have no: "unat b_pos + unat k < unat b_end"
+      using k_nat by linarith
+    have no32: "unat b_pos + unat k < 2 ^ 32"
+      using no unat_lt2p[of b_end] by simp
+    have unat_eq: "unat (b_pos + k) = unat b_pos + unat k"
+      by (rule unat_word_add_no_overflow[OF no32])
+    have lt: "unat (b_pos + k) < unat b_end"
+      using unat_eq no by simp
+    show "ptr_valid (heap_typing s) (b_buf +\<^sub>p uint (b_pos + k))"
+      by (rule buf_valid_uintD[OF b_valid lt])
+  qed
+  let ?C = "\<lambda>(n :: 32 word, ret :: int) s. ret \<noteq> 0"
+  let ?B = "\<lambda>(n :: 32 word, ret :: int).
+    do {
+      ret <-
+        ocondition
+          (\<lambda>s. n + 1 < limit)
+          (do {
+             oguard
+              (\<lambda>st.
+                  IS_VALID(8 word) st
+                    (b_buf +\<^sub>p uint (b_pos + (n + 1))) \<and>
+                  IS_VALID(8 word) st
+                    (a_buf +\<^sub>p uint (a_pos + (n + 1))));
+             ogets
+              (\<lambda>s. if heap_w8 s (a_buf +\<^sub>p uint (a_pos + (n + 1))) =
+                      heap_w8 s (b_buf +\<^sub>p uint (b_pos + (n + 1)))
+                   then 1 else 0)
+           })
+          (oreturn 0);
+      oreturn (n + 1, ret)
+    }"
+  let ?Init =
+    "ocondition
+      (\<lambda>s. 0 < limit)
+      (do {
+         oguard
+          (\<lambda>st.
+              IS_VALID(8 word) st (b_buf +\<^sub>p uint b_pos) \<and>
+              IS_VALID(8 word) st (a_buf +\<^sub>p uint a_pos));
+         ogets
+          (\<lambda>s. if heap_w8 s (a_buf +\<^sub>p uint a_pos) =
+                  heap_w8 s (b_buf +\<^sub>p uint b_pos)
+               then 1 else 0)
+       })
+      (oreturn 0)"
+  let ?I = "\<lambda>(n :: 32 word, ret :: int) s. ret \<noteq> 0 \<longrightarrow> n < limit"
+  have unfolded:
+    "common_prefix' a_buf a_pos a_end b_buf b_pos b_end s =
+      (do {
+         ret <- ?Init;
+         (n, ret) <- owhile ?C ?B (0, ret);
+         oreturn n
+       }) s"
+    unfolding common_prefix'_def limit_def[symmetric]
+    by (simp add: fun_eq_iff split_def)
+  have init_some: "\<exists>r0 :: int. ?Init s = Some r0 \<and> (r0 \<noteq> 0 \<longrightarrow> 0 < limit)"
+  proof (cases "0 < limit")
+    case True
+    have va0: "ptr_valid (heap_typing s) (a_buf +\<^sub>p uint a_pos)"
+      using VA[of 0] True by simp
+    have vb0: "ptr_valid (heap_typing s) (b_buf +\<^sub>p uint b_pos)"
+      using VB[of 0] True by simp
+    show ?thesis
+      using True va0 vb0
+      by (auto simp: ocondition_def obind_def oreturn_def ogets_def
+                     oguard_def K_def)
+  next
+    case False
+    then show ?thesis
+      by (auto simp: ocondition_def oreturn_def K_def)
+  qed
+  obtain r0 :: int where r0_some: "?Init s = Some r0"
+    and r0_lt: "r0 \<noteq> 0 \<longrightarrow> 0 < limit"
+    using init_some by blast
+  have loop_not_none: "owhile ?C ?B (0, r0) s \<noteq> None"
+  proof (rule Reader_Monad.owhile_rule[
+      where I = ?I
+        and M = "measure (\<lambda>(n :: 32 word, ret :: int).
+          unat limit - unat n)"])
+    show "?I (0, r0) s"
+      using r0_lt by simp
+  next
+    show "wf (measure (\<lambda>(n :: 32 word, ret :: int).
+          unat limit - unat n))"
+      by simp
+  next
+    fix r r' :: "32 word \<times> int"
+    assume inv: "?I r s" and cond: "?C r s" and body: "?B r s = Some r'"
+    obtain n ret where r_eq: "r = (n, ret)" by (cases r) auto
+    obtain n' ret' where r'_eq: "r' = (n', ret')" by (cases r') auto
+    have n_lt: "n < limit" using inv cond r_eq by simp
+    have n_suc: "unat (n + 1) = Suc (unat n)"
+      by (rule unat_suc_word_less[OF n_lt])
+    have n'_eq: "n' = n + 1"
+      using body r_eq r'_eq
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: if_splits)
+    have n_lt_nat: "unat n < unat limit"
+      using n_lt by (simp add: word_less_nat_alt)
+    show "(r', r) \<in> measure (\<lambda>(n :: 32 word, ret :: int).
+          unat limit - unat n)"
+      using r_eq r'_eq n'_eq n_suc n_lt_nat by simp
+  next
+    fix r r' :: "32 word \<times> int"
+    assume inv: "?I r s" and cond: "?C r s" and body: "?B r s = Some r'"
+    obtain n ret where r_eq: "r = (n, ret)" by (cases r) auto
+    obtain n' ret' where r'_eq: "r' = (n', ret')" by (cases r') auto
+    have ret'_lt: "ret' \<noteq> 0 \<longrightarrow> n' < limit"
+      using body r_eq r'_eq
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: if_splits)
+    show "?I r' s"
+      using ret'_lt r'_eq by simp
+  next
+    fix r :: "32 word \<times> int"
+    assume inv: "?I r s" and cond: "?C r s" and body: "?B r s = None"
+    obtain n ret where r_eq: "r = (n, ret)" by (cases r) auto
+    have cond_lt: "n + 1 < limit"
+      and guard_fail:
+        "\<not> (IS_VALID(8 word) s (b_buf +\<^sub>p uint (b_pos + (n + 1))) \<and>
+            IS_VALID(8 word) s (a_buf +\<^sub>p uint (a_pos + (n + 1))))"
+      using body r_eq
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: if_splits)
+    have False
+      using guard_fail VA[OF cond_lt] VB[OF cond_lt] by simp
+    thus "None \<noteq> (None :: (32 word \<times> int) option)" by simp
+  next
+    fix r :: "32 word \<times> int"
+    assume "?I r s" and "\<not> ?C r s"
+    show "Some r \<noteq> None" by simp
+  qed
+  obtain n' ret' where loop_some: "owhile ?C ?B (0, r0) s = Some (n', ret')"
+    using loop_not_none by (cases "owhile ?C ?B (0, r0) s") auto
+  show ?thesis
+    using unfolded r0_some loop_some
+    by (auto simp: obind_def oreturn_def K_def)
+qed
+
+lemma find_best_match'_isSome:
+  fixes src tgt :: "8 word ptr"
+    and src_len tgt_len tp :: "32 word"
+  assumes rel:
+    "source_index_heap_rel s (heap_bytes s src (unat src_len))
+      head_arr next_arr"
+      and nexts_wf:
+    "source_index_heap_nexts_wf s (heap_bytes s src (unat src_len)) next_arr"
+      and tp_le: "tp \<le> tgt_len"
+      and src_valid: "buf_valid s src (unat src_len)"
+      and tgt_valid: "buf_valid s tgt (unat tgt_len)"
+      and head_valid:
+        "\<And>h. h < hash_size \<Longrightarrow>
+          ptr_valid (heap_typing s) (head_arr +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p. p < unat src_len \<Longrightarrow>
+          ptr_valid (heap_typing s) (next_arr +\<^sub>p int p)"
+  shows "\<exists>m. find_best_match' src src_len tgt tgt_len tp head_arr next_arr s
+          = Some m"
+proof (cases "src_len < 4 \<or> tgt_len - tp < 4")
+  case True
+  then show ?thesis
+    unfolding find_best_match'_def
+    by (auto simp: ocondition_def oreturn_def K_def)
+next
+  case not_early: False
+  let ?src_bytes = "heap_bytes s src (unat src_len)"
+  let ?tgt_bytes = "heap_bytes s tgt (unat tgt_len)"
+  let ?cand_ok = "\<lambda>cand :: 32 word.
+    cand = no_entry32 \<or> unat cand + min_match \<le> length ?src_bytes"
+  have src_len_word_le:
+    "length ?src_bytes \<le> unat (no_entry32 :: 32 word)"
+    using unat_lt2p[of src_len] by simp
+  have rel_from:
+    "source_index_heap_rel_from s ?src_bytes 0 head_arr next_arr"
+    using rel by (simp add: source_index_heap_rel_from_0)
+  have initial_cand_ok:
+    "\<And>hv :: 32 word.
+      heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF)) = no_entry32 \<or>
+      unat (heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF))) + min_match
+        \<le> length ?src_bytes"
+  proof -
+    fix hv :: "32 word"
+    let ?h = "unat (hv && 0xFFFF)"
+    have h_lt: "?h < hash_size"
+      by (rule hash_mask_word_unat_lt_hash_size)
+    have head_ok_int:
+      "heap_w32 s (head_arr +\<^sub>p int ?h) = no_entry32 \<or>
+       unat (heap_w32 s (head_arr +\<^sub>p int ?h)) + min_match \<le> length ?src_bytes"
+      by (rule source_index_heap_rel_from_head_wf[
+          OF rel_from h_lt src_len_word_le])
+    have heap_eq:
+      "heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF)) =
+       heap_w32 s (head_arr +\<^sub>p int ?h)"
+      by (simp only: uint_nat)
+    show "heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF)) = no_entry32 \<or>
+      unat (heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF))) + min_match
+        \<le> length ?src_bytes"
+      using head_ok_int by (simp only: heap_eq)
+  qed
+  have next_cand_ok:
+    "\<And>cand. \<lbrakk>?cand_ok cand; cand \<noteq> no_entry32\<rbrakk> \<Longrightarrow>
+      ?cand_ok (heap_w32 s (next_arr +\<^sub>p uint cand))"
+  proof -
+    fix cand :: "32 word"
+    assume cand_ok: "?cand_ok cand"
+    assume cand_not_noentry: "cand \<noteq> no_entry32"
+    have cand_match: "unat cand + min_match \<le> length ?src_bytes"
+      using cand_ok cand_not_noentry by simp
+    have next_ok_int:
+      "heap_w32 s (next_arr +\<^sub>p int (unat cand)) = no_entry32 \<or>
+       unat (heap_w32 s (next_arr +\<^sub>p int (unat cand))) + min_match
+          \<le> length ?src_bytes"
+      by (rule source_index_heap_nexts_wfD[OF nexts_wf cand_match])
+    have heap_eq:
+      "heap_w32 s (next_arr +\<^sub>p uint cand) =
+       heap_w32 s (next_arr +\<^sub>p int (unat cand))"
+      by (simp only: uint_nat)
+    show "?cand_ok (heap_w32 s (next_arr +\<^sub>p uint cand))"
+      using next_ok_int by (simp only: heap_eq)
+  qed
+  \<comment> \<open>hash4' is defined at tp\<close>
+  have tgt_not_early_nat: "unat tp + min_match \<le> length ?tgt_bytes"
+    using find_best_match'_not_early_tgt_bound[OF tp_le not_early] by simp
+  have tgt_len32: "length ?tgt_bytes < 2 ^ 32"
+    using unat_lt2p[of tgt_len] by simp
+  have hash_valid: "\<And>k. k < min_match \<Longrightarrow>
+      ptr_valid (heap_typing s) (tgt +\<^sub>p uint (tp + of_nat k :: 32 word))"
+  proof -
+    fix k
+    assume k_lt: "k < min_match"
+    have k_nat: "unat tp + k < unat tgt_len"
+      using tgt_not_early_nat k_lt by simp
+    have no32: "unat tp + k < 2 ^ 32"
+      using k_nat unat_lt2p[of tgt_len] by simp
+    have unat_eq: "unat (tp + of_nat k :: 32 word) = unat tp + k"
+      using no32 by (simp add: unat_word_ariths unat_of_nat_eq)
+    have lt: "unat (tp + of_nat k :: 32 word) < unat tgt_len"
+      using unat_eq k_nat by simp
+    show "ptr_valid (heap_typing s) (tgt +\<^sub>p uint (tp + of_nat k :: 32 word))"
+      by (rule buf_valid_uintD[OF tgt_valid lt])
+  qed
+  have hash_some:
+    "hash4' tgt tp s = Some (of_nat (hash4_spec ?tgt_bytes (unat tp)) :: 32 word)"
+    apply (rule hash4'_heap_bytes[OF refl tgt_not_early_nat tgt_len32])
+    using hash_valid by simp
+  let ?hv = "of_nat (hash4_spec ?tgt_bytes (unat tp)) :: 32 word"
+  let ?cand0 = "heap_w32 s (head_arr +\<^sub>p uint (?hv && 0xFFFF))"
+  have head_ptr_ok:
+    "ptr_valid (heap_typing s) (head_arr +\<^sub>p uint (?hv && 0xFFFF))"
+  proof -
+    have h_lt: "unat (?hv && 0xFFFF) < hash_size"
+      by (rule hash_mask_word_unat_lt_hash_size)
+    show ?thesis
+      using head_valid[OF h_lt] by (simp only: uint_nat)
+  qed
+  let ?C = "\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+                 cand :: 32 word, checked :: 32 word) s.
+      cand \<noteq> no_entry32 \<and> checked < 0x10"
+  let ?B = "\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+                 cand :: 32 word, checked :: 32 word).
+      do {
+        (best_len, best_pos) <-
+          ocondition (\<lambda>s. cand + 4 \<le> src_len)
+            (do {
+              l <- common_prefix' src cand src_len tgt tp tgt_len;
+              oreturn
+                (if 4 \<le> l \<and> best_len < l then (l, cand)
+                 else (best_len, best_pos))
+            })
+            (oreturn (best_len, best_pos));
+        oguard (\<lambda>s. IS_VALID(32 word) s (next_arr +\<^sub>p uint cand));
+        ogets
+          (\<lambda>s. (best_len, best_pos,
+                heap_w32 s (next_arr +\<^sub>p uint cand), checked + 1))
+      }"
+  let ?I = "\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+                 cand :: 32 word, checked :: 32 word) (s :: lifted_globals).
+      ?cand_ok cand"
+  have loop_not_none:
+    "owhile ?C ?B (0, 0, ?cand0, 0) s \<noteq> None"
+  proof (rule Reader_Monad.owhile_rule[
+      where I = ?I
+        and M = "measure
+          (\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+               cand :: 32 word, checked :: 32 word). 16 - unat checked)"])
+    show "?I (0, 0, ?cand0, 0) s"
+      using initial_cand_ok[of ?hv] by simp
+  next
+    show "wf (measure
+      (\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+          cand :: 32 word, checked :: 32 word). 16 - unat checked))"
+      by simp
+  next
+    fix r r' :: "32 word \<times> 32 word \<times> 32 word \<times> 32 word"
+    assume inv: "?I r s" and cond: "?C r s" and body: "?B r s = Some r'"
+    obtain bl bp cand checked where r_eq: "r = (bl, bp, cand, checked)"
+      by (cases r) auto
+    obtain bl' bp' cand' checked' where r'_eq: "r' = (bl', bp', cand', checked')"
+      by (cases r') auto
+    have checked'_eq: "checked' = checked + 1"
+      using body r_eq r'_eq
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: if_splits option.splits)
+    have checked_lt: "checked < 0x10"
+      using cond r_eq by simp
+    have checked_lt_nat: "unat checked < 16"
+      using checked_lt by (simp add: word_less_nat_alt)
+    have suc: "unat (checked + 1) = Suc (unat checked)"
+      by (rule unat_suc_word_less[OF checked_lt])
+    show "(r', r) \<in> measure
+        (\<lambda>(best_len :: 32 word, best_pos :: 32 word,
+            cand :: 32 word, checked :: 32 word). 16 - unat checked)"
+      using r_eq r'_eq checked'_eq suc checked_lt_nat by simp
+  next
+    fix r r' :: "32 word \<times> 32 word \<times> 32 word \<times> 32 word"
+    assume inv: "?I r s" and cond: "?C r s" and body: "?B r s = Some r'"
+    obtain bl bp cand checked where r_eq: "r = (bl, bp, cand, checked)"
+      by (cases r) auto
+    obtain bl' bp' cand' checked' where r'_eq: "r' = (bl', bp', cand', checked')"
+      by (cases r') auto
+    have cand_ok: "?cand_ok cand" using inv r_eq by simp
+    have cand_ne: "cand \<noteq> no_entry32" using cond r_eq by simp
+    have cand'_eq: "cand' = heap_w32 s (next_arr +\<^sub>p uint cand)"
+      using body r_eq r'_eq
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: if_splits option.splits)
+    show "?I r' s"
+      using next_cand_ok[OF cand_ok cand_ne] cand'_eq r'_eq by simp
+  next
+    fix r :: "32 word \<times> 32 word \<times> 32 word \<times> 32 word"
+    assume inv: "?I r s" and cond: "?C r s" and body: "?B r s = None"
+    obtain bl bp cand checked where r_eq: "r = (bl, bp, cand, checked)"
+      by (cases r) auto
+    have cand_ok: "?cand_ok cand" using inv r_eq by simp
+    have cand_ne: "cand \<noteq> no_entry32" using cond r_eq by simp
+    have cand_match: "unat cand + min_match \<le> length ?src_bytes"
+      using cand_ok cand_ne by simp
+    have cand_nat_lt: "unat cand < unat src_len"
+      using cand_match by (simp add: min_match_def)
+    have next_ok:
+      "ptr_valid (heap_typing s) (next_arr +\<^sub>p uint cand)"
+      using next_valid[OF cand_nat_lt] by (simp only: uint_nat)
+    have cand_le_w: "cand \<le> src_len"
+      using cand_nat_lt by (simp add: word_le_nat_alt)
+    obtain l where cp_some:
+      "common_prefix' src cand src_len tgt tp tgt_len s = Some l"
+      using common_prefix'_isSome[OF src_valid tgt_valid cand_le_w tp_le]
+      by blast
+    have False
+      using body r_eq cp_some next_ok
+      by (auto simp: obind_def ocondition_def oreturn_def ogets_def
+                     oguard_def K_def
+               split: if_splits option.splits)
+    thus "None \<noteq> (None :: (32 word \<times> 32 word \<times> 32 word \<times> 32 word) option)"
+      by simp
+  next
+    fix r :: "32 word \<times> 32 word \<times> 32 word \<times> 32 word"
+    assume "?I r s" and "\<not> ?C r s"
+    show "Some r \<noteq> None" by simp
+  qed
+  obtain bl bp cand checked where loop_some:
+    "owhile ?C ?B (0, 0, ?cand0, 0) s = Some (bl, bp, cand, checked)"
+    using loop_not_none
+    by (cases "owhile ?C ?B (0, 0, ?cand0, 0) s") auto
+  have unfolded:
+    "find_best_match' src src_len tgt tgt_len tp head_arr next_arr s =
+      (do {
+         hv <- hash4' tgt tp;
+         oguard (\<lambda>sb. IS_VALID(32 word) sb
+             (head_arr +\<^sub>p uint (hv && 0xFFFF)));
+         cand0 <- ogets (\<lambda>s. heap_w32 s (head_arr +\<^sub>p uint (hv && 0xFFFF)));
+         (best_len, best_pos, cand, checked) <-
+           owhile ?C ?B (0, 0, cand0, 0);
+         oreturn (match_t_C best_pos best_len)
+       }) s"
+    using not_early
+    unfolding find_best_match'_def
+    by (simp add: fun_eq_iff split_def ocondition_def K_def)
+  show ?thesis
+    using unfolded hash_some head_ptr_ok loop_some
+    by (auto simp: obind_def oreturn_def ogets_def oguard_def K_def)
+qed
+
+text \<open>At loop exit the remaining fuel of the semantic budget is one, so a
+  single flush reaches the final spec state.\<close>
+
+lemma encode_window_section_budget_exit_flush:
+  assumes budget:
+    "encode_window_section_budget src_bytes tgt_bytes
+      data_cap inst_cap addr_cap spec_st"
+      and tp_ge: "length tgt_bytes \<le> enc_tp spec_st"
+  shows "flush_pending_spec (length src_bytes) spec_st =
+         encode_window_final_spec_state src_bytes tgt_bytes"
+proof -
+  have reaches:
+    "encode_window_full_loop (length tgt_bytes + 1 - enc_tp spec_st)
+       src_bytes tgt_bytes (build_index_spec src_bytes) spec_st =
+     encode_window_final_spec_state src_bytes tgt_bytes"
+    using budget
+    by (simp add: encode_window_section_budget_def
+        encode_window_spec_reaches_final_def)
+  show ?thesis
+  proof (cases "length tgt_bytes + 1 - enc_tp spec_st")
+    case 0
+    then show ?thesis
+      using reaches tp_ge by (simp add: linorder_not_less)
+  next
+    case (Suc n)
+    then show ?thesis
+      using reaches tp_ge by (simp add: linorder_not_less)
+  qed
+qed
+
 lemma encode_window_while_loop_topdown_budget:
   fixes src tgt data inst addr pending :: "8 word ptr"
     and src_len tgt_len data_cap inst_cap addr_cap pending_cap :: "32 word"
@@ -14871,6 +15605,12 @@ lemma encode_window_while_loop_topdown_budget:
     "encoder_final_section_caps_ok src_bytes tgt_bytes
       data_cap inst_cap addr_cap"
       and src_tgt_bound: "length src_bytes + length tgt_bytes < 2 ^ 32"
+      and head_valid:
+        "\<And>h. h < hash_size \<Longrightarrow>
+          ptr_valid (heap_typing s0) (head_arr +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p. p < unat src_len \<Longrightarrow>
+          ptr_valid (heap_typing s0) (next_arr +\<^sub>p int p)"
       and init:
     "encode_window_loop_budget_rel s src src_len tgt tgt_len
       data data_cap inst inst_cap addr addr_cap pending pending_cap
@@ -14891,7 +15631,290 @@ lemma encode_window_while_loop_topdown_budget:
                 encode_window_final_spec_state src_bytes tgt_bytes \<and>
               encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
                 src_bytes tgt_bytes \<rbrace>"
-  sorry
+proof -
+  let ?INV = "\<lambda>(pend_len :: 32 word) (sec :: sections_t_C) (tp :: 32 word)
+                (t :: lifted_globals).
+      (\<exists>spec_st. encode_window_loop_budget_rel t src src_len tgt tgt_len
+          data data_cap inst inst_cap addr addr_cap pending pending_cap
+          sec tp pend_len src_bytes tgt_bytes spec_st) \<and>
+      encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+        src_bytes tgt_bytes"
+  let ?I = "\<lambda>(r :: (sections_t_C option,
+                    32 word \<times> sections_t_C \<times> 32 word) exception_or_result)
+              (t :: lifted_globals).
+      (\<forall>e :: sections_t_C. r \<noteq> Exn e) \<and>
+      (\<forall>pend_len sec tp. r = Result (pend_len, sec, tp) \<longrightarrow>
+         ?INV pend_len sec tp t)"
+  let ?R = "measure
+      (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word),
+         _ :: lifted_globals). unat tgt_len - unat tp)"
+  have loop_buffers0:
+    "encode_window_loop_buffers_ok s0 src src_len tgt tgt_len
+      pending pending_cap data data_cap inst inst_cap addr addr_cap"
+    by (rule encoder_buffers_ok_encode_window_loop_buffers_ok[OF buffers])
+  have body_step:
+    "\<And>pend_len sec tp t.
+      ?INV pend_len sec tp t \<Longrightarrow> tp < tgt_len \<Longrightarrow>
+      encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
+        data data_cap inst inst_cap addr addr_cap pending pending_cap
+        (pend_len, sec, tp) \<bullet> t
+      \<lbrace> \<lambda>r u. ?I r u \<and>
+           (\<forall>b. r = Result b \<longrightarrow>
+              ((b, u), ((pend_len, sec, tp), t)) \<in> ?R) \<rbrace>"
+  proof -
+    fix pend_len sec tp t
+    assume inv: "?INV pend_len sec tp t" and tp_lt: "tp < tgt_len"
+    obtain spec_st where budget_t:
+      "encode_window_loop_budget_rel t src src_len tgt tgt_len
+        data data_cap inst inst_cap addr addr_cap pending pending_cap
+        sec tp pend_len src_bytes tgt_bytes spec_st"
+      using inv by blast
+    have index_t:
+      "encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+        src_bytes tgt_bytes"
+      using inv by blast
+    have typing_t: "heap_typing t = heap_typing s0"
+      using index_t by (simp add: encoder_index_post_def)
+    have buffers_t:
+      "encode_window_loop_buffers_ok t src src_len tgt tgt_len
+        pending pending_cap data data_cap inst inst_cap addr addr_cap"
+      by (rule encode_window_loop_buffers_ok_heap_typing[
+            OF loop_buffers0 typing_t])
+    have match_rel_t:
+      "encode_window_match_rel t src src_len tgt tgt_len head_arr next_arr
+        src_bytes tgt_bytes"
+      by (rule encoder_index_post_encode_window_match_rel[OF buffers index_t])
+    have pending_len_t: "length (enc_pending spec_st) = unat pend_len"
+      and tp_eq_t: "enc_tp spec_st = unat tp"
+      and flushed_inv_t:
+        "enc_flushed spec_st + length (enc_pending spec_st) = enc_tp spec_st"
+      using budget_t by (simp_all add: encode_window_loop_budget_rel_def)
+    have tgt_pending_cap: "unat tgt_len \<le> unat pending_cap"
+      using buffers_t by (simp add: encode_window_loop_buffers_ok_def)
+    have pend_lt: "pend_len < pending_cap"
+    proof -
+      have "unat pend_len \<le> unat tp"
+        using pending_len_t flushed_inv_t tp_eq_t by linarith
+      also have "... < unat tgt_len"
+        using tp_lt by (simp add: word_less_nat_alt)
+      also have "... \<le> unat pending_cap"
+        by (rule tgt_pending_cap)
+      finally show ?thesis by (simp add: word_less_nat_alt)
+    qed
+    have src_valid_t: "buf_valid t src (unat src_len)"
+      and tgt_valid_t: "buf_valid t tgt (unat tgt_len)"
+      using buffers_t by (simp_all add: encode_window_loop_buffers_ok_def)
+    have rel_t:
+      "source_index_heap_rel t (heap_bytes t src (unat src_len))
+        head_arr next_arr"
+      using index_t by (simp add: encoder_index_post_def)
+    have nexts_wf_t:
+      "source_index_heap_nexts_wf t (heap_bytes t src (unat src_len))
+        next_arr"
+      using index_t by (simp add: encoder_index_post_def)
+    have exm:
+      "\<exists>m. find_best_match' src src_len tgt tgt_len tp head_arr next_arr t =
+        Some m"
+    proof (rule find_best_match'_isSome[OF rel_t nexts_wf_t _ src_valid_t
+        tgt_valid_t])
+      show "tp \<le> tgt_len" using tp_lt by simp
+    next
+      fix h assume "h < hash_size"
+      then show "ptr_valid (heap_typing t) (head_arr +\<^sub>p int h)"
+        using head_valid typing_t by simp
+    next
+      fix p assume "p < unat src_len"
+      then show "ptr_valid (heap_typing t) (next_arr +\<^sub>p int p)"
+        using next_valid typing_t by simp
+    qed
+    have total:
+      "encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
+        data data_cap inst inst_cap addr addr_cap pending pending_cap
+        (pend_len, sec, tp) \<bullet> t
+      \<lbrace> \<lambda>r u. \<exists>sec' tp' pend_len' spec_st'.
+           r = Result (pend_len', sec', tp') \<and>
+           encode_window_loop_budget_rel u src src_len tgt tgt_len
+             data data_cap inst inst_cap addr addr_cap pending pending_cap
+             sec' tp' pend_len' src_bytes tgt_bytes spec_st' \<and>
+           enc_tp spec_st < enc_tp spec_st' \<and>
+           (((pend_len', sec', tp'), u), ((pend_len, sec, tp), t)) \<in>
+             measure
+               (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
+                  unat tgt_len - unat tp) \<rbrace>"
+      by (rule encode_window_loop_body_topdown_budget[
+            OF budget_t match_rel_t buffers_t src_tgt_bound pend_lt tp_lt
+               exm])
+    have frame:
+      "encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
+        data data_cap inst inst_cap addr addr_cap pending pending_cap
+        (pend_len, sec, tp) \<bullet> t
+      ?\<lbrace> \<lambda>r u. heap_w32 u = heap_w32 t \<and>
+              heap_typing u = heap_typing t \<rbrace>"
+      by (rule encode_window_c_loop_body_w32_typing_frame)
+    have partial_conj:
+      "encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
+        data data_cap inst inst_cap addr addr_cap pending pending_cap
+        (pend_len, sec, tp) \<bullet> t
+      ?\<lbrace> \<lambda>r u. (\<exists>sec' tp' pend_len' spec_st'.
+           r = Result (pend_len', sec', tp') \<and>
+           encode_window_loop_budget_rel u src src_len tgt tgt_len
+             data data_cap inst inst_cap addr addr_cap pending pending_cap
+             sec' tp' pend_len' src_bytes tgt_bytes spec_st' \<and>
+           enc_tp spec_st < enc_tp spec_st' \<and>
+           (((pend_len', sec', tp'), u), ((pend_len, sec, tp), t)) \<in>
+             measure
+               (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
+                  unat tgt_len - unat tp)) \<and>
+           (heap_w32 u = heap_w32 t \<and>
+            heap_typing u = heap_typing t) \<rbrace>"
+      by (rule runs_to_partial_conj[OF runs_to_partial_of_runs_to[OF total]
+            frame])
+    have both:
+      "encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
+        data data_cap inst inst_cap addr addr_cap pending pending_cap
+        (pend_len, sec, tp) \<bullet> t
+      \<lbrace> \<lambda>r u. (\<exists>sec' tp' pend_len' spec_st'.
+           r = Result (pend_len', sec', tp') \<and>
+           encode_window_loop_budget_rel u src src_len tgt tgt_len
+             data data_cap inst inst_cap addr addr_cap pending pending_cap
+             sec' tp' pend_len' src_bytes tgt_bytes spec_st' \<and>
+           enc_tp spec_st < enc_tp spec_st' \<and>
+           (((pend_len', sec', tp'), u), ((pend_len, sec, tp), t)) \<in>
+             measure
+               (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
+                  unat tgt_len - unat tp)) \<and>
+           (heap_w32 u = heap_w32 t \<and>
+            heap_typing u = heap_typing t) \<rbrace>"
+      by (rule runs_to_of_runs_to_partial_runs_to'[OF total partial_conj])
+    show "encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
+        data data_cap inst inst_cap addr addr_cap pending pending_cap
+        (pend_len, sec, tp) \<bullet> t
+      \<lbrace> \<lambda>r u. ?I r u \<and>
+           (\<forall>b. r = Result b \<longrightarrow>
+              ((b, u), ((pend_len, sec, tp), t)) \<in> ?R) \<rbrace>"
+    proof (rule runs_to_weaken[OF both])
+      fix r :: "(sections_t_C option,
+                 32 word \<times> sections_t_C \<times> 32 word) exception_or_result"
+        and u :: lifted_globals
+      assume H: "(\<exists>sec' tp' pend_len' spec_st'.
+           r = Result (pend_len', sec', tp') \<and>
+           encode_window_loop_budget_rel u src src_len tgt tgt_len
+             data data_cap inst inst_cap addr addr_cap pending pending_cap
+             sec' tp' pend_len' src_bytes tgt_bytes spec_st' \<and>
+           enc_tp spec_st < enc_tp spec_st' \<and>
+           (((pend_len', sec', tp'), u), ((pend_len, sec, tp), t)) \<in>
+             measure
+               (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
+                  unat tgt_len - unat tp)) \<and>
+           (heap_w32 u = heap_w32 t \<and>
+            heap_typing u = heap_typing t)"
+      obtain sec' tp' pend_len' spec_st' where
+          r_def: "r = Result (pend_len', sec', tp')"
+        and budget_u:
+          "encode_window_loop_budget_rel u src src_len tgt tgt_len
+            data data_cap inst inst_cap addr addr_cap pending pending_cap
+            sec' tp' pend_len' src_bytes tgt_bytes spec_st'"
+        and meas:
+          "(((pend_len', sec', tp'), u), ((pend_len, sec, tp), t)) \<in>
+             measure
+               (\<lambda>((_ :: 32 word, _ :: sections_t_C, tp :: 32 word), _).
+                  unat tgt_len - unat tp)"
+        and w32_u: "heap_w32 u = heap_w32 t"
+        and typing_u: "heap_typing u = heap_typing t"
+        using H by blast
+      have src_u: "heap_bytes u src (unat src_len) = src_bytes"
+        and tgt_u: "heap_bytes u tgt (unat tgt_len) = tgt_bytes"
+        using budget_u by (simp_all add: encode_window_loop_budget_rel_def)
+      have index_u:
+        "encoder_index_post s0 u src src_len tgt tgt_len head_arr next_arr
+          src_bytes tgt_bytes"
+        by (rule encoder_index_post_w32_typing_transport[
+              OF index_t w32_u typing_u src_u tgt_u])
+      show "?I r u \<and>
+           (\<forall>b. r = Result b \<longrightarrow>
+              ((b, u), ((pend_len, sec, tp), t)) \<in> ?R)"
+        using r_def budget_u index_u meas by auto
+    qed
+  qed
+  show ?thesis
+  proof (rule runs_to_whileLoop_exn'[where R = ?R and I = ?I])
+    fix a :: "32 word \<times> sections_t_C \<times> 32 word" and t
+    assume I_a: "?I (Result a) t"
+      and C_a: "(case a of (pend_len, sec, tp) \<Rightarrow> \<lambda>s. tp < tgt_len) t"
+    obtain pend_len sec tp where a_eq: "a = (pend_len, sec, tp)"
+      by (cases a) auto
+    have inv: "?INV pend_len sec tp t"
+      using I_a a_eq by simp
+    have tp_lt: "tp < tgt_len"
+      using C_a a_eq by simp
+    show "encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
+        data data_cap inst inst_cap addr addr_cap pending pending_cap a
+        \<bullet> t
+      \<lbrace> \<lambda>r u. ?I r u \<and> (\<forall>b. r = Result b \<longrightarrow> ((b, u), (a, t)) \<in> ?R) \<rbrace>"
+      using body_step[OF inv tp_lt] a_eq by simp
+  next
+    fix a :: "32 word \<times> sections_t_C \<times> 32 word" and t
+    assume I_a: "?I (Result a) t"
+      and nC_a: "\<not> (case a of (pend_len, sec, tp) \<Rightarrow> \<lambda>s. tp < tgt_len) t"
+    obtain pend_len sec tp where a_eq: "a = (pend_len, sec, tp)"
+      by (cases a) auto
+    have inv: "?INV pend_len sec tp t"
+      using I_a a_eq by simp
+    have tp_ge: "\<not> tp < tgt_len"
+      using nC_a a_eq by simp
+    obtain spec_st where budget_t:
+      "encode_window_loop_budget_rel t src src_len tgt tgt_len
+        data data_cap inst inst_cap addr addr_cap pending pending_cap
+        sec tp pend_len src_bytes tgt_bytes spec_st"
+      using inv by blast
+    have index_t:
+      "encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+        src_bytes tgt_bytes"
+      using inv by blast
+    have budget0:
+      "encode_window_section_budget src_bytes tgt_bytes
+        data_cap inst_cap addr_cap spec_st"
+      and tp_eq: "enc_tp spec_st = unat tp"
+      and tgt_len_eq: "length tgt_bytes = unat tgt_len"
+      using budget_t by (simp_all add: encode_window_loop_budget_rel_def)
+    have tp_ge_nat: "length tgt_bytes \<le> enc_tp spec_st"
+      using tp_ge tp_eq tgt_len_eq by (simp add: word_less_nat_alt)
+    have flush_eq:
+      "flush_pending_spec (length src_bytes) spec_st =
+        encode_window_final_spec_state src_bytes tgt_bytes"
+      by (rule encode_window_section_budget_exit_flush[OF budget0 tp_ge_nat])
+    show "\<exists>pend_len sec tp spec_st.
+        Result a = Result (pend_len, sec, tp) \<and>
+        \<not> tp < tgt_len \<and>
+        encode_window_loop_budget_rel t src src_len tgt tgt_len
+          data data_cap inst inst_cap addr addr_cap pending pending_cap
+          sec tp pend_len src_bytes tgt_bytes spec_st \<and>
+        flush_pending_spec (length src_bytes) spec_st =
+          encode_window_final_spec_state src_bytes tgt_bytes \<and>
+        encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+          src_bytes tgt_bytes"
+      using a_eq tp_ge budget_t flush_eq index_t by blast
+  next
+    fix a :: sections_t_C and t
+    assume "?I (Exn a) t"
+    then show "\<exists>pend_len sec tp spec_st.
+        Exn a = Result (pend_len, sec, tp) \<and>
+        \<not> tp < tgt_len \<and>
+        encode_window_loop_budget_rel t src src_len tgt tgt_len
+          data data_cap inst inst_cap addr addr_cap pending pending_cap
+          sec tp pend_len src_bytes tgt_bytes spec_st \<and>
+        flush_pending_spec (length src_bytes) spec_st =
+          encode_window_final_spec_state src_bytes tgt_bytes \<and>
+        encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+          src_bytes tgt_bytes"
+      by simp
+  next
+    show "wf ?R" by simp
+  next
+    show "?I (Result (0, sec0, 0)) s"
+      using init index by auto
+  qed
+qed
 
 lemma encode_window_final_flush_topdown_budget:
   fixes src tgt data inst addr pending :: "8 word ptr"

@@ -2,6 +2,49 @@
 
 ## Progress log
 
+**2026-07-06 (session 2, cont. 2).** **Work item 3 DONE**:
+`encode_window_while_loop_topdown_budget` is proved (sorry count 7 → 6).
+Its statement gained two assumptions — `head_valid`/`next_valid` (ptr
+validity of the index arrays at `heap_typing s0`) — which the budget glue
+lemmas (items 5) must now thread through; the proved top-level theorem has
+them in scope (it already feeds them to the build-index phase). Three new
+pieces of infrastructure, all in `VcdiffEnc_Serialize.thy`:
+
+1. **w32/typing partial frame stack**: `?⦃heap_w32 t = heap_w32 s ∧
+   heap_typing t = heap_typing s⦄` for every emit-layer function up to
+   `encode_window_c_loop_body`. The loop body only writes the byte heap and
+   cache globals, so the index arrays are physically untouched — but no
+   total lemma exposed that. Partial correctness makes these ~free: no
+   guard/termination obligations, `runs_to_vcg` + record simps do almost
+   everything. Loops need `runs_to_partial_whileLoop_res/_exn` applied
+   manually with the frame as invariant. Gotchas: noted `[runs_to_vcg]`
+   partial loop rules do NOT auto-weaken against concrete continuation
+   posts — apply `runs_to_partial_weaken` + the while rule in place with
+   P/I stated relative to the outer state (available via the invariant
+   premises); state the body lemma with an explicit tuple pattern
+   (`(pl0, sc0, tp0)`), since vcg cannot enter `case st0 of …` on a
+   variable.
+2. **Totality of the match finder** (`common_prefix'_isSome`,
+   `find_best_match'_isSome`): previously MISSING — every eq-lemma takes
+   `= Some m` as a premise, but the loop's `gets_the` needs definedness.
+   Proved via `Reader_Monad.owhile_rule` with Q := (≠ None): the fail case
+   (body = None) is refuted from buffer validity + the index wellformedness
+   invariant (`cand_ok`, carried exactly as in the nonearly eq proof whose
+   `initial_cand_ok`/`next_cand_ok` blocks were lifted verbatim).
+3. `encoder_index_post_w32_typing_transport` + the loop-level combination:
+   total budget step ∧ partial frame → total conj via
+   `runs_to_partial_conj` + `runs_to_of_runs_to_partial_runs_to'`. The
+   while induction itself is `runs_to_whileLoop_exn'` with
+   I := (no Exn) ∧ (∃spec_st. budget_rel) ∧ index_post, measure
+   `unat tgt_len − unat tp`; exit gives `flush_pending_spec spec_st =
+   final` via the fuel-1 lemma `encode_window_section_budget_exit_flush`.
+
+**Next: item 4** (`encode_window_final_flush_topdown_budget`, one sorry
+below the while lemma) — the framed flush helper's premises fit; then the
+glue (items 5–6). Remaining sorries: final_flush_budget, phase_core_budget,
+window_phase_budget, compose_phases, and the two FALSE non-budget lemmas to
+delete (8309 flush_then_copy, while_loop non-budget).
+
 **2026-07-06 (session 2, cont.).** **Work item 1 DONE**:
 `encode_window_flush_then_copy_step_topdown_budget` is proved (sorry count
 8 → 7). Full session rebuilds clean (~5.5min). New in
