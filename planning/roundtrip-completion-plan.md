@@ -1,5 +1,54 @@
 # Roundtrip completion plan (2026-07-06)
 
+## Progress log
+
+**2026-07-06 (session 1).** Confirmed the diagnosis below by building. Committed,
+all in `proof/encoder-correctness/VcdiffEnc_Serialize.thy`, verified with
+`quick_and_dirty` (session still has the pre-existing 9 sorries):
+
+- `5942d88` — pure budget-step infrastructure + reusable flush helper:
+  - `emit_inst_spec_sections_mono`, `flush_pending_spec_sections_mono`,
+    `emit_copy_spec_sections_mono`, `flush_then_emit_copy_spec_sections_mono`
+    (section-length monotonicity of the spec steps).
+  - `encode_window_full_step_match_tp_le` (match step keeps `tp ≤ length tgt`,
+    from `find_best_match_spec_sound`, no trace_inv needed).
+  - `encode_window_full_loop_fuel_stable` (loop result independent of fuel once
+    fuel > remaining) and `encode_window_full_loop_sections_mono`.
+  - **`encode_window_section_budget_match_step`** — the KEY pure lemma: a
+    match-branch spec step preserves `reaches_final` + section prefix budget.
+    (Pending-byte analogue `encode_window_section_budget_buffer_pending_byte`
+    already existed.)
+  - **`flush_pending'_loop_from_final_fits`** + `encode_window_loop_buffers_ok_pending_ptr_valid`
+    — reusable C flush lemma: discharges the flush_pending' branch emit_pre from
+    "final section lengths + 64 ≤ caps" (data/inst) / "≤ cap" (addr). Lifted from
+    the proved `encode_window_final_flush_topdown`. Used by BOTH flush-then-copy
+    and final-flush-budget.
+- `363bda2` — `try_emit_add_copy'_spec_none_noop`: spec None ⟹ C `try_emit_add_copy'`
+  is a noop (fused=0, unchanged sections). Case split on pend_len/mode dispatching
+  to the existing noop lemmas; spec success lemmas rule out the rest.
+
+Scratch session for fast iteration: `.build-tmp/scratch/{ROOT,Scratch.thy}`,
+build with `isabelle build -d . -d .build-tmp/scratch CdeltaScratch` (~12s once the
+CdeltaEncoderCorrectness heap is warm; a full session rebuild is ~5.5–9min).
+
+**Remaining for sorry #1 (flush_then_copy_budget), still open:** the C-side
+assembly. Needs an `emit_copy'` loop-context helper giving
+`enc_sections_state_rel u … (emit_copy_spec …)` — dispatches to the four
+`emit_copy'_{small,large}_addr_{byte,varint}_success_enc_sections_state_rel`
+lemmas (VcdiffEnc_Emit ~8268), each with ~25 disjointness/validity premises
+discharged from `encode_window_loop_buffers_ok` + inst_pos+6/addr_pos+5 room
+(same discharge pattern as the fused proof's `loop_frame_facts`, ~6390–6733).
+Then assemble the branch: `try_noop` → (skip fused branch) → conditional
+`flush_pending'_loop_from_final_fits` → `emit_copy'` helper → re-establish
+`encode_window_loop_budget_rel` with `spec_st' = flush_then_emit_copy_spec …`
+(= the full step; budget via `encode_window_section_budget_match_step`).
+The flush room facts come from the budget_rel linear data/inst slack
+(`data_pos + pend_len + (tgt_len−tp) + 64 ≤ data_cap`) + `flush_pending_loop_spec_growth`;
+addr room is just `addr_pos ≤ addr_cap` (flush doesn't touch addr).
+
+---
+
+
 Status assessment and the concrete path to a sorry-free
 `vcdiff_encode'_then_decode_roundtrip_topdown` (C encoder → C decoder roundtrip).
 
