@@ -2,6 +2,61 @@
 
 ## Progress log
 
+**2026-07-06 (session 2).** **Work item 2 DONE**:
+`encode_window_try_fused_copy_step_topdown_budget` is proved (sorry count
+9 → 8). All in `VcdiffEnc_Serialize.thy`, full session rebuilt clean (~5.5min):
+
+- Generalized `emit_copy'_state_rel_cache_frame_from_loop`: dropped the
+  `copy_ge` premise; inner case split is now `4 ≤ copy_len ∧ copy_len ≤ 18`,
+  so 1–3-byte remainder copies route to the large/varint leaf lemmas (which
+  only need the negation). Needed because the fused branch emits a remainder
+  of `m.len − 6 ∈ {1,2,3}` when `m.len ∈ {7,8,9}`.
+- New `try_emit_add_copy'_mode_le5_success_heap_bytes2_cache_frame`
+  (src/tgt frame + cache for the mode≤5 fused path, varint address write) —
+  mirrors the gt5 one at ~4919.
+- New keystone `try_emit_add_copy'_state_rel_cache_frame_from_loop`:
+  loop-context packaging of the fused emit. Given budget-rel ingredients +
+  spec-side `try_emit_add_copy_spec … = Some spec_st'` + section room from
+  `length (enc_* spec_st') ≤ caps`, concludes Result f with
+  `unat (fused_C f) = enc_tp spec_st' − enc_tp spec_st`, err OK,
+  `state_rel t (s_C f) spec_st'`, cache_abs of `enc_cache spec_st'`,
+  src/tgt frame, typing. Dispatches {mode≤5, mode>5} × {state_rel, cache,
+  emitted_sections (for err/pos), frame} via runs_to_conj; all disjointness
+  from `encode_window_loop_buffers_ok`.
+- Pure helpers: `try_emit_add_copy_spec_Some_shape` (pending'=[], flushed
+  invariant, data/inst length deltas), `try_emit_add_copy_spec_Some_partial_six`
+  (partial fuse ⟹ consumed = 6, hence remainder ⟹ m.len ≥ 7 — this closes
+  the inst linear-slack arithmetic), `emit_copy_spec_components`/`_cache_of_
+  encode_address`/`_inst_growth` (≤ +6), `encode_window_loop_buffers_ok_heap_typing`
+  (buffers_ok transports along heap_typing equality).
+- The budget lemma itself: try_emit keystone → (if `fused_C f < m.len`)
+  emit_copy' keystone at intermediate state (spec_st'' = `emit_copy_spec` of
+  the remainder) → re-establish budget_rel. Budget via
+  `encode_window_section_budget_match_step` with `spec_st'' =
+  encode_window_full_step` (match_rel bridge gives `em_pos/em_len ?best =
+  unat m.pos/m.len` via find_best_match_spec_sound + of_nat/unat).
+  Addr room comes purely from the semantic budget (spec_st' ≤ spec_st'' ≤
+  final ≤ caps); data/inst linear slacks re-proved from spec section lengths.
+
+Proof-plumbing notes (reusable for item 1, flush_then_copy at 12851):
+- `runs_to_liftE` must be applied to a liftE goal (rule), then weaken —
+  it does NOT compose via OF.
+- After `simp add: <branch booleans>`, nested do-blocks need `runs_to_bind`
+  applied once per bind layer before weakening with the C-call lemma; the
+  trailing pure control flow closes with
+  `(auto simp: runs_to_bind_iff runs_to_condition_iff)`.
+- `[of …]` instantiation order for locally-proved ⋀-facts follows first
+  occurrence in the proposition, not binder order.
+- Beware `simp` loops from `cn_def`+`tp'_eq` style circular rewrites — use
+  linarith on the raw facts instead.
+
+**Next: work item 1** — `encode_window_flush_then_copy_step_topdown_budget`
+(now at 12851). The framed-flush helper described below is still the blocker;
+the emit_copy' keystone + budget re-establishment pattern from this session
+carries over directly (the None-branch: `try_emit_add_copy'_spec_none_noop` →
+conditional `flush_pending'` (framed) → emit_copy' keystone → budget via the
+same match-step lemma with `spec_st'' = flush_then_emit_copy_spec …`).
+
 **2026-07-06 (session 1).** Confirmed the diagnosis below by building. Committed,
 all in `proof/encoder-correctness/VcdiffEnc_Serialize.thy`, verified with
 `quick_and_dirty` (session still has the pre-existing 9 sorries):
