@@ -31,6 +31,28 @@ Scratch session for fast iteration: `.build-tmp/scratch/{ROOT,Scratch.thy}`,
 build with `isabelle build -d . -d .build-tmp/scratch CdeltaScratch` (~12s once the
 CdeltaEncoderCorrectness heap is warm; a full session rebuild is ~5.5–9min).
 
+**2026-07-06 (session 1, cont.).** Committed `4932cdb`:
+`emit_copy'_state_rel_cache_frame_from_loop` — the emit_copy' loop-context
+keystone (reused by flush_then_copy AND try_fused). Produces enc_sections_state_rel
+(exact emit_copy_spec), updated cache, and src/tgt frame, using EXACT section room
+(budget grants no addr headroom), across all 4 {small,large}×{addr byte,varint}
+cases, conjoining per-case state_rel + cache_abs + heap_bytes2_frame via
+runs_to_conj. Disjointness premises discharged once as conditional facts (ibp,
+avv, avid, siv, …) from encode_window_loop_buffers_ok.
+
+**Next blocker for flush_then_copy:** the budget_rel result needs
+`heap_bytes t src = src_bytes` (and tgt), which must survive the FLUSH. The
+emit-chunk lemmas (`emit_pending_add/run_chunk_from_loop_buffers`) frame only the
+`pending` buffer, not src/tgt. Fix: a FRAMED flush helper — extend
+`flush_pending'_loop_from_final_fits` to also conclude
+`heap_bytes_word t src 0 src_len = heap_bytes_word s src 0 src_len` (and tgt), via
+`flush_pending'_enc_sections_state_rel_branch_pre_frame` (VcdiffEnc_Emit 15251)
+with `P = src/tgt frame`, discharging run_pre/tail_pre's P by conjoining
+`emit_add'_loop_buffers_heap_word_cache_frame` / `emit_run'_..._frame`
+(Serialize 3334/3511, which frame arbitrary out-buffers disjoint from data/inst,
+out1=src out2=tgt). Convert heap_bytes_word↔heap_bytes via `heap_bytes_word_zero`
+(Writers 1422). This framed flush also unblocks final_flush_budget (task 4).
+
 **Remaining for sorry #1 (flush_then_copy_budget), still open:** the C-side
 assembly. Needs an `emit_copy'` loop-context helper giving
 `enc_sections_state_rel u … (emit_copy_spec …)` — dispatches to the four
