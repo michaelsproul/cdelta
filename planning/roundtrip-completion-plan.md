@@ -61,16 +61,32 @@ statements (the top theorem already had them). The BUDGET TOWER IS
 COMPLETE: `vcdiff_encode'_writes_encode_spec_topdown_budget` is sorry-free
 end to end.
 
-**Next: item 6 (rewire and delete).** The only remaining sorries are the
-two FALSE non-budget lemmas: `encode_window_flush_then_copy_step_topdown`
-(8343) and `encode_window_while_loop_topdown` (16353). Delete them together
-with the rest of the redundant non-budget tower (their dependents:
-match_step/loop_body/phase_core/window_phase/writes_encode_spec non-budget
-versions), rename the `_budget` lemmas to the plain names, and add
-`final_caps` (+ the assumption set of the budget theorem) to the two
-encoder-facing theorems in `VcdiffC_Roundtrip.thy`. Then the acceptance
-gates (item 7): full CdeltaCRoundtrip build, rg for sorry/oops, flip
-`quick_and_dirty = false`.
+**Items 6 + 7 DONE — PROJECT GOAL REACHED.** The rewire:
+- Deleted the entire redundant non-budget lemma chain (10 lemmas, ~4,000
+  lines), including the two FALSE sorried ones
+  (`encode_window_flush_then_copy_step_topdown`,
+  `encode_window_while_loop_topdown`).
+- Renamed all `_budget` lemmas to the plain names (the definitions
+  `encode_window_loop_budget_rel` etc. keep their names).
+- Added `final_caps` (`enc.encoder_final_section_caps_ok`) to
+  `vcdiff_encode'_writes_encode_spec_roundtrip_context` and
+  `vcdiff_encode'_then_decode_roundtrip_topdown` in
+  `VcdiffC_Roundtrip.thy`.
+- Documented the budget-invariant rationale + harness allocation note in
+  `planning/encoder-correctness.md`.
+
+Acceptance gates all pass:
+- `rg "^\s*(sorry|oops)" proof spec` → EMPTY.
+- `quick_and_dirty = false` flipped for CdeltaEncoderCorrectness,
+  CdeltaSpecRoundtrip, CdeltaRefine, CdeltaCRoundtrip in ROOT.
+- Full `CdeltaCRoundtrip` build green under quick_and_dirty = false
+  (SpecRoundtrip 0:08, RefineBase 4:11, Refine 5:34, CRoundtrip 2:26 —
+  the c-roundtrip session re-elaborates all encoder-correctness theories),
+  plus the standalone CdeltaEncoderCorrectness session (1:20).
+
+`vcdiff_encode'_then_decode_roundtrip_topdown` — the C encoder → C decoder
+roundtrip — is now proved sorry-free end to end, under the semantic
+`final_caps` capacity assumption.
 
 **2026-07-06 (session 2, cont.).** **Work item 1 DONE**:
 `encode_window_flush_then_copy_step_topdown_budget` is proved (sorry count

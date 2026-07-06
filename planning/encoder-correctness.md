@@ -243,3 +243,52 @@ rg -n "^\s*(sorry|oops)\b" proof spec
 - Keep current C encoder behavior, including COPY, RUN, and ADD+COPY fusion.
 - Use conservative capacity, disjointness, and 32-bit no-overflow premises
   first; tighten them only after the proof exposes unnecessary slack.
+
+## The section budget invariant (2026-07-06)
+
+The encode-window loop's original invariant (`encode_window_loop_rel`)
+carried a *linear* capacity bound per section:
+
+    pos + pend_len + (tgt_len - tp) + 64 <= cap
+
+This is inductive for the data and inst sections (flushes are self-funded
+by the released `pend_len` term; a COPY's inst bytes are bounded by the
+target advance, see `emit_copy_spec_inst_growth_le_len`), but **not for the
+addr section**: a plain COPY advances `tp` by `MIN_MATCH = 4` yet can write
+a 5-byte address varint, a net +1 per iteration. Worse, the top-level
+theorem over that invariant was *false* — its only capacity assumption was
+`encoder_buffers_ok` (`tgt_len + 64 <= addr_cap`), and an adversarial
+input (>= 256 MiB, tiled 4-byte matches at cache-missing >= 2^28
+addresses) legitimately overflows the addr section, so the C encoder
+correctly returns ENC_OVERFLOW where the theorem demanded success.
+
+The fix is the *semantic budget* (`encode_window_loop_budget_rel`), which
+replaces the addr linear term with `encode_window_section_budget`:
+
+- `encode_window_spec_reaches_final`: running the pure loop from the
+  current spec state reaches `encode_window_final_spec_state` (fuel
+  `length tgt + 1 - enc_tp`, re-normalised after each step via
+  `encode_window_full_loop_fuel_stable`);
+- `encode_window_section_prefix_budget`: current section lengths are
+  bounded by the final ones (loop-monotonicity);
+- `encoder_final_section_caps_ok`: the final spec section lengths fit the
+  C caps — a **top-level assumption** threaded through
+  `vcdiff_encode'_writes_encode_spec_topdown` and both theorems in
+  `VcdiffC_Roundtrip.thy`. It cannot be derived from `encoder_buffers_ok`
+  without grossly over-allocating (addr worst case ~1.25x tgt_len); it is
+  a semantic property of the input the caller must ensure (real harness
+  allocations satisfy it; adversarial inputs where the encoder reports
+  overflow are simply outside the theorem).
+
+Every C-side capacity obligation for addr is discharged by chaining
+"current <= post-step spec length <= final length <= cap"; the data/inst
+linear terms were retained because they are inductive and fund the flushes
+directly. The linear-invariant lemma tower was deleted (its two unprovable
+members had been sorried); the budget lemmas carry the original names.
+
+Harness note: `harness/src/lib.rs` allocates `section_cap = target.len() + 64`
+for all three sections. That satisfies `encoder_buffers_ok`, and on realistic
+inputs also `encoder_final_section_caps_ok` (address bytes are a small
+fraction of the target); on adversarial inputs (tiled 4-byte matches at
+large addresses) the final addr section can exceed the cap, the encoder
+correctly returns ENC_OVERFLOW, and the success theorem does not apply.

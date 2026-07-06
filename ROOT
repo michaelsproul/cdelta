@@ -33,7 +33,7 @@ session CdeltaEncoder in "spec/cenc" = AutoCorres2 +
     VcdiffEnc
 
 session CdeltaEncoderCorrectness in "proof/encoder-correctness" = CdeltaEncoder +
-  options [timeout = 1800, quick_and_dirty = true]
+  options [timeout = 1800, quick_and_dirty = false]
   sessions
     CdeltaSpecRoundtrip
   theories
@@ -50,7 +50,7 @@ session TestAdd in "proof/test-add" = AutoCorres2 +
     Add
 
 session CdeltaSpecRoundtrip in "proof/roundtrip" = CdeltaSpecBase +
-  options [timeout = 1800, quick_and_dirty = true]
+  options [timeout = 1800, quick_and_dirty = false]
   theories
     Spec_Roundtrip
 
@@ -70,12 +70,12 @@ session CdeltaRefineBase = CdeltaSpecRoundtrip +
     "CdeltaDecoder.VcdiffDec"
 
 session CdeltaRefine in "proof/decoder-refine" = CdeltaRefineBase +
-  options [timeout = 1800, quick_and_dirty = true]
+  options [timeout = 1800, quick_and_dirty = false]
   theories
     VcdiffDec_Refine
 
 session CdeltaCRoundtrip in "proof/c-roundtrip" = CdeltaRefine +
-  options [timeout = 1800, quick_and_dirty = true]
+  options [timeout = 1800, quick_and_dirty = false]
   sessions
     CdeltaEncoderCorrectness
   theories

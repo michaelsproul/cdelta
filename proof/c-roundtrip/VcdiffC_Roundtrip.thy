@@ -501,6 +501,9 @@ lemma vcdiff_encode'_writes_encode_spec_roundtrip_context:
     "enc.encoder_buffers_ok enc_s enc_out enc_out_cap enc_src enc_src_len enc_tgt
        enc_tgt_len enc_head_arr enc_next_arr enc_pending enc_pending_cap
        enc_data enc_data_cap enc_inst enc_inst_cap enc_addr enc_addr_cap"
+      and final_caps:
+    "enc.encoder_final_section_caps_ok src_bytes tgt_bytes
+       enc_data_cap enc_inst_cap enc_addr_cap"
       and pending_cap_ok: "unat enc_tgt_len \<le> unat enc_pending_cap"
       and src_len_word:
     "unat enc_src_len < unat (no_entry32 :: 32 word)"
@@ -543,8 +546,9 @@ lemma vcdiff_encode'_writes_encode_spec_roundtrip_context:
             enc.encoder_success_post enc_out src_bytes tgt_bytes enc_n enc_s
               enc_t \<rbrace>"
   apply (rule enc.vcdiff_encode'_writes_encode_spec_topdown)
-              apply (rule input)
-             apply (rule buffers)
+               apply (rule input)
+              apply (rule buffers)
+             apply (rule final_caps)
             apply (rule pending_cap_ok)
            apply (rule src_len_word)
           apply (blast intro: head_valid)
@@ -575,6 +579,9 @@ theorem vcdiff_encode'_then_decode_roundtrip_topdown:
     "enc.encoder_buffers_ok enc_s enc_out enc_out_cap enc_src enc_src_len enc_tgt
        enc_tgt_len enc_head_arr enc_next_arr enc_pending enc_pending_cap
        enc_data enc_data_cap enc_inst enc_inst_cap enc_addr enc_addr_cap"
+      and final_caps:
+    "enc.encoder_final_section_caps_ok src_bytes tgt_bytes
+       enc_data_cap enc_inst_cap enc_addr_cap"
       and pending_cap_ok: "unat enc_tgt_len \<le> unat enc_pending_cap"
       and src_len_word:
     "unat enc_src_len < unat (no_entry32 :: 32 word)"
@@ -650,7 +657,8 @@ theorem vcdiff_encode'_then_decode_roundtrip_topdown:
               dec_out dec_out_cap dec_out_len dec_s tgt_bytes \<rbrace>"
 proof (rule runs_to_weaken[
     OF vcdiff_encode'_writes_encode_spec_roundtrip_context[
-      OF input buffers pending_cap_ok src_len_word head_valid next_valid
+      OF input buffers final_caps pending_cap_ok src_len_word head_valid
+         next_valid
 	         head_no_alias next_no_alias next_head_disjoint head_next_disjoint
 	         fit src_tgt_bound enc_out_cap_ok encoded_len_word]])
   fix r enc_t
