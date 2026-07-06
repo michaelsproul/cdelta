@@ -49,10 +49,28 @@ empty-pending case is `flush_pending_spec_empty_sections`, and the
 `liftE/condition/throw` plumbing reuses
 `runs_to_liftE_bind_throw_exn_result` from the non-budget tail.
 
-**Next: item 5 glue.** Remaining sorries (5): phase_core_budget (needs
-head_valid/next_valid threaded), window_phase_budget, compose_phases, and
-the two FALSE non-budget lemmas to delete in item 6 (flush_then_copy
-non-budget, while_loop non-budget).
+**Work item 5 DONE** (same session): all three glue proofs
+(`encode_window_phase_core_topdown_budget`,
+`vcdiff_encode'_encode_window_phase_topdown_budget`,
+`vcdiff_encode'_writes_encode_spec_topdown_budget`) are proved (sorries
+5 → 2). Each is a near-verbatim copy of its proved non-budget twin with:
+initial budget via `encode_window_initial_loop_budget_rel[… final_caps]`,
+the budget while/final-flush lemmas swapped in, and
+`final_caps`/`head_valid`/`next_valid` added to the two phase lemmas'
+statements (the top theorem already had them). The BUDGET TOWER IS
+COMPLETE: `vcdiff_encode'_writes_encode_spec_topdown_budget` is sorry-free
+end to end.
+
+**Next: item 6 (rewire and delete).** The only remaining sorries are the
+two FALSE non-budget lemmas: `encode_window_flush_then_copy_step_topdown`
+(8343) and `encode_window_while_loop_topdown` (16353). Delete them together
+with the rest of the redundant non-budget tower (their dependents:
+match_step/loop_body/phase_core/window_phase/writes_encode_spec non-budget
+versions), rename the `_budget` lemmas to the plain names, and add
+`final_caps` (+ the assumption set of the budget theorem) to the two
+encoder-facing theorems in `VcdiffC_Roundtrip.thy`. Then the acceptance
+gates (item 7): full CdeltaCRoundtrip build, rg for sorry/oops, flip
+`quick_and_dirty = false`.
 
 **2026-07-06 (session 2, cont.).** **Work item 1 DONE**:
 `encode_window_flush_then_copy_step_topdown_budget` is proved (sorry count

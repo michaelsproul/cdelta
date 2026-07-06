@@ -16124,16 +16124,158 @@ lemma encode_window_phase_core_topdown_budget:
         "encoder_final_section_caps_ok src_bytes tgt_bytes
           data_cap inst_cap addr_cap"
       and src_tgt_bound: "length src_bytes + length tgt_bytes < 2 ^ 32"
+      and head_valid:
+        "\<And>h. h < hash_size \<Longrightarrow>
+          ptr_valid (heap_typing s0) (head_arr +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p. p < unat src_len \<Longrightarrow>
+          ptr_valid (heap_typing s0) (next_arr +\<^sub>p int p)"
   shows "encode_window' src src_len tgt tgt_len head_arr next_arr
             data data_cap inst inst_cap addr addr_cap pending pending_cap \<bullet> s
            \<lbrace> \<lambda>r t. \<exists>sec spec_st.
                r = Result sec \<and>
-               spec_st = encode_window_final_spec_state src_bytes tgt_bytes \<and>
-               enc_sections_state_rel t data inst addr sec spec_st \<and>
-               sections_t_C.err_C sec = ENC_OK \<and>
-               encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
-               heap_typing t = heap_typing s \<rbrace>"
-  sorry
+	               spec_st = encode_window_final_spec_state src_bytes tgt_bytes \<and>
+	               enc_sections_state_rel t data inst addr sec spec_st \<and>
+	               sections_t_C.err_C sec = ENC_OK \<and>
+	               encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
+	               heap_typing t = heap_typing s \<rbrace>"
+proof -
+  have match_rel:
+    "encode_window_match_rel s src src_len tgt tgt_len head_arr next_arr
+      src_bytes tgt_bytes"
+    by (rule encoder_index_post_encode_window_match_rel[OF buffers index])
+  have loop_buffers0:
+    "encode_window_loop_buffers_ok s0 src src_len tgt tgt_len
+      pending pending_cap data data_cap inst inst_cap addr addr_cap"
+    by (rule encoder_buffers_ok_encode_window_loop_buffers_ok[OF buffers])
+  have src_heap_s:
+    "heap_bytes s src (unat src_len) = src_bytes"
+    using index by (simp add: encoder_index_post_def)
+  have tgt_heap_s:
+    "heap_bytes s tgt (unat tgt_len) = tgt_bytes"
+    using index by (simp add: encoder_index_post_def)
+  have typing_s:
+    "heap_typing s = heap_typing s0"
+    using index by (simp add: encoder_index_post_def)
+  have input_lens:
+    "length src_bytes = unat src_len"
+    "length tgt_bytes = unat tgt_len"
+    using input by (simp_all add: encoder_input_rel_def)
+  let ?sec0 = "sections_t_C 0 0 0 ENC_OK"
+  have reset_src:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           enc_cache_abs t cache_init \<and>
+           enc_cache_wf cache_init \<and>
+           heap_typing t = heap_typing s \<and>
+           heap_bytes t src (unat src_len) = heap_bytes s src (unat src_len) \<rbrace>"
+    by (rule cache_reset'_enc_cache_abs)
+  have reset_tgt:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           enc_cache_abs t cache_init \<and>
+           enc_cache_wf cache_init \<and>
+           heap_typing t = heap_typing s \<and>
+           heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len) \<rbrace>"
+    by (rule cache_reset'_enc_cache_abs)
+  have reset_bytes:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           enc_cache_abs t cache_init \<and>
+           enc_cache_wf cache_init \<and>
+           heap_typing t = heap_typing s \<and>
+           heap_bytes t src (unat src_len) = heap_bytes s src (unat src_len) \<and>
+           heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len) \<rbrace>"
+    using reset_src reset_tgt
+    by (simp add: runs_to_conj)
+  have reset_index:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+          encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+            src_bytes tgt_bytes \<rbrace>"
+    by (rule cache_reset'_preserves_encoder_index_post[OF index])
+  have reset:
+    "cache_reset' \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           enc_cache_abs t cache_init \<and>
+           enc_cache_wf cache_init \<and>
+           heap_typing t = heap_typing s \<and>
+           heap_bytes t src (unat src_len) = heap_bytes s src (unat src_len) \<and>
+           heap_bytes t tgt (unat tgt_len) = heap_bytes s tgt (unat tgt_len) \<and>
+           encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+             src_bytes tgt_bytes \<rbrace>"
+    using reset_bytes reset_index
+    by (simp add: runs_to_conj)
+  show ?thesis
+    unfolding encode_window'_def
+    apply (simp add: Let_def)
+    apply (rule runs_to_bind)
+     apply (rule runs_to_weaken[OF reset])
+    apply clarsimp
+    subgoal premises reset_post for s_reset
+    proof -
+      have typing_reset:
+        "heap_typing s_reset = heap_typing s0"
+        using reset_post typing_s by simp
+      have buffers_reset:
+        "encoder_buffers_ok s_reset out out_cap src src_len tgt tgt_len
+          head_arr next_arr pending pending_cap data data_cap inst inst_cap
+          addr addr_cap"
+        by (rule encoder_buffers_ok_heap_typing_eq[
+            OF typing_reset buffers])
+      have loop_buffers_reset:
+        "encode_window_loop_buffers_ok s_reset src src_len tgt tgt_len
+          pending pending_cap data data_cap inst inst_cap addr addr_cap"
+        by (rule encoder_buffers_ok_encode_window_loop_buffers_ok[
+            OF buffers_reset])
+      have index_reset:
+        "encoder_index_post s0 s_reset src src_len tgt tgt_len head_arr
+          next_arr src_bytes tgt_bytes"
+        using reset_post by simp
+      have init_rel:
+        "encode_window_loop_budget_rel s_reset src src_len tgt tgt_len
+          data data_cap inst inst_cap addr addr_cap pending pending_cap
+          ?sec0 0 0 src_bytes tgt_bytes enc_full_init"
+        by (rule encode_window_initial_loop_budget_rel[
+            OF input loop_buffers_reset final_caps])
+           (use reset_post src_heap_s tgt_heap_s input_lens in
+              \<open>simp_all add: enc_full_init_def\<close>)
+      have while_run:
+        "(whileLoop (\<lambda>(pend_len, sec, tp) s. tp < tgt_len)
+           (encode_window_c_loop_body src src_len tgt tgt_len head_arr next_arr
+             data data_cap inst inst_cap addr addr_cap pending pending_cap)
+           (0, ?sec0, 0) ::
+          (sections_t_C, 32 word \<times> sections_t_C \<times> 32 word,
+           lifted_globals) exn_monad) \<bullet> s_reset
+         \<lbrace> \<lambda>r t. \<exists>pend_len sec tp spec_st.
+              r = Result (pend_len, sec, tp) \<and>
+              \<not> tp < tgt_len \<and>
+              encode_window_loop_budget_rel t src src_len tgt tgt_len
+                data data_cap inst inst_cap addr addr_cap pending pending_cap
+                sec tp pend_len src_bytes tgt_bytes spec_st \<and>
+              flush_pending_spec (length src_bytes) spec_st =
+                encode_window_final_spec_state src_bytes tgt_bytes \<and>
+              encoder_index_post s0 t src src_len tgt tgt_len head_arr next_arr
+                src_bytes tgt_bytes \<rbrace>"
+	        by (rule encode_window_while_loop_topdown_budget[
+	            OF input buffers index_reset fit final_caps src_tgt_bound
+	               head_valid next_valid init_rel])
+      show ?thesis
+        apply (rule runs_to_finally)
+        apply (rule runs_to_bind_exception[split_tuple g arity: 3])
+         apply (rule runs_to_weaken[
+           OF while_run[
+             unfolded encode_window_c_loop_body_def,
+             simplified Spec_Monad.return_bind]])
+         apply clarsimp
+        apply (rule runs_to_weaken[
+          OF encode_window_final_flush_topdown_budget[
+            OF input buffers _ fit final_caps _ _ _]])
+        using typing_s
+        by (auto simp: encoder_index_post_def)
+    qed
+    done
+qed
 
 lemma encode_window_while_loop_topdown:
   fixes src tgt data inst addr pending :: "8 word ptr"
@@ -17294,14 +17436,58 @@ lemma vcdiff_encode'_encode_window_phase_topdown_budget:
         "encoder_final_section_caps_ok src_bytes tgt_bytes
           data_cap inst_cap addr_cap"
       and src_tgt_bound: "length src_bytes + length tgt_bytes < 2 ^ 32"
+      and head_valid:
+        "\<And>h. h < hash_size \<Longrightarrow>
+          ptr_valid (heap_typing s0) (head_arr +\<^sub>p int h)"
+      and next_valid:
+        "\<And>p. p < unat src_len \<Longrightarrow>
+          ptr_valid (heap_typing s0) (next_arr +\<^sub>p int p)"
   shows "encode_window' src src_len tgt tgt_len head_arr next_arr
             data data_cap inst inst_cap addr addr_cap pending pending_cap \<bullet> s
            \<lbrace> \<lambda>r t. \<exists>sec.
-               r = Result sec \<and>
-               encoder_window_post t data inst addr sec src_bytes tgt_bytes \<and>
-               encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
-               heap_typing t = heap_typing s \<rbrace>"
-  sorry
+	               r = Result sec \<and>
+	               encoder_window_post t data inst addr sec src_bytes tgt_bytes \<and>
+	               encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
+	               heap_typing t = heap_typing s \<rbrace>"
+proof (rule runs_to_weaken[
+    OF encode_window_phase_core_topdown_budget[
+      OF input buffers index fit final_caps src_tgt_bound
+         head_valid next_valid]])
+  fix r t
+  assume post:
+    "\<exists>sec spec_st.
+      r = Result sec \<and>
+      spec_st = encode_window_final_spec_state src_bytes tgt_bytes \<and>
+	      enc_sections_state_rel t data inst addr sec spec_st \<and>
+	      sections_t_C.err_C sec = ENC_OK \<and>
+	      encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
+	      heap_typing t = heap_typing s"
+  then obtain sec spec_st where
+      r_def: "r = Result sec"
+    and spec_st:
+      "spec_st = encode_window_final_spec_state src_bytes tgt_bytes"
+	    and rel: "enc_sections_state_rel t data inst addr sec spec_st"
+	    and sec_ok: "sections_t_C.err_C sec = ENC_OK"
+	    and caps: "encoder_window_caps_ok sec data_cap inst_cap addr_cap"
+	    and typing: "heap_typing t = heap_typing s"
+    by blast
+  have emitted:
+    "emitted_sections t data inst addr sec
+      (efr_data (encode_window_full_spec src_bytes tgt_bytes))
+      (efr_inst (encode_window_full_spec src_bytes tgt_bytes))
+      (efr_addr (encode_window_full_spec src_bytes tgt_bytes))"
+    using rel spec_st
+    by (simp add: enc_sections_state_rel_def
+      encode_window_final_spec_state_def encode_window_full_spec_def
+      enc_full_result_of_state_def Let_def)
+  show "\<exists>sec.
+	      r = Result sec \<and>
+	      encoder_window_post t data inst addr sec src_bytes tgt_bytes \<and>
+	      encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
+	      heap_typing t = heap_typing s"
+	    using r_def fit sec_ok emitted caps typing
+	    by (auto simp: encoder_window_post_def)
+qed
 
 lemma vcdiff_encode'_serialize_phase_topdown:
   fixes out data inst addr :: "8 word ptr"
@@ -18174,7 +18360,83 @@ theorem vcdiff_encode'_writes_encode_spec_topdown_budget:
            \<lbrace> \<lambda>r t. \<exists>n.
                r = Result n \<and>
                encoder_success_post out src_bytes tgt_bytes n s t \<rbrace>"
-  sorry
+proof -
+  have spec_eq:
+    "encode_spec src_bytes tgt_bytes =
+      serialize src_bytes tgt_bytes
+        (efr_data (encode_window_full_spec src_bytes tgt_bytes))
+        (efr_inst (encode_window_full_spec src_bytes tgt_bytes))
+        (efr_addr (encode_window_full_spec src_bytes tgt_bytes))"
+    by (rule encode_spec_fast_path_topdown[OF fit])
+  have build_phase:
+    "build_index' src src_len head_arr next_arr \<bullet> s
+       \<lbrace> \<lambda>r t. r = Result () \<and>
+           encoder_index_post s t src src_len tgt tgt_len head_arr next_arr
+             src_bytes tgt_bytes \<rbrace>"
+    by (rule vcdiff_encode'_build_index_phase_topdown[
+        OF input buffers src_len_word head_valid next_valid head_no_alias
+          next_no_alias next_head_disjoint head_next_disjoint])
+  have window_phase:
+    "\<And>s_index. encoder_index_post s s_index src src_len tgt tgt_len
+       head_arr next_arr src_bytes tgt_bytes \<Longrightarrow>
+     encode_window' src src_len tgt tgt_len head_arr next_arr
+       data data_cap inst inst_cap addr addr_cap pending pending_cap \<bullet> s_index
+     \<lbrace> \<lambda>r t. \<exists>sec.
+	         r = Result sec \<and>
+	         encoder_window_post t data inst addr sec src_bytes tgt_bytes \<and>
+	         encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
+	         heap_typing t = heap_typing s_index \<rbrace>"
+  proof -
+    fix s_index
+    assume index:
+      "encoder_index_post s s_index src src_len tgt tgt_len head_arr next_arr
+        src_bytes tgt_bytes"
+    show "encode_window' src src_len tgt tgt_len head_arr next_arr
+       data data_cap inst inst_cap addr addr_cap pending pending_cap \<bullet> s_index
+     \<lbrace> \<lambda>r t. \<exists>sec.
+	         r = Result sec \<and>
+	         encoder_window_post t data inst addr sec src_bytes tgt_bytes \<and>
+	         encoder_window_caps_ok sec data_cap inst_cap addr_cap \<and>
+	         heap_typing t = heap_typing s_index \<rbrace>"
+      by (rule vcdiff_encode'_encode_window_phase_topdown_budget[
+          OF input buffers index fit final_caps src_tgt_bound
+             head_valid next_valid])
+  qed
+  have serialize_phase:
+    "\<And>s_window sec. \<lbrakk>
+       encoder_window_post s_window data inst addr sec src_bytes tgt_bytes;
+       encoder_window_caps_ok sec data_cap inst_cap addr_cap;
+       heap_typing s_window = heap_typing s
+     \<rbrakk> \<Longrightarrow>
+     serialize' out out_cap src_len tgt_len
+       data (sections_t_C.data_pos_C sec)
+       inst (sections_t_C.inst_pos_C sec)
+       addr (sections_t_C.addr_pos_C sec) \<bullet> s_window
+     \<lbrace> \<lambda>r t. \<exists>n.
+         r = Result n \<and>
+         encoder_success_post out src_bytes tgt_bytes n s_window t \<rbrace>"
+  proof -
+    fix s_window sec
+    assume window:
+      "encoder_window_post s_window data inst addr sec src_bytes tgt_bytes"
+    assume window_caps:
+      "encoder_window_caps_ok sec data_cap inst_cap addr_cap"
+    assume typing: "heap_typing s_window = heap_typing s"
+    show "serialize' out out_cap src_len tgt_len
+       data (sections_t_C.data_pos_C sec)
+       inst (sections_t_C.inst_pos_C sec)
+       addr (sections_t_C.addr_pos_C sec) \<bullet> s_window
+     \<lbrace> \<lambda>r t. \<exists>n.
+         r = Result n \<and>
+         encoder_success_post out src_bytes tgt_bytes n s_window t \<rbrace>"
+      by (rule vcdiff_encode'_serialize_phase_topdown[
+          OF input buffers fit out_cap_ok encoded_len_word typing window window_caps])
+  qed
+  show ?thesis
+    by (rule vcdiff_encode'_compose_phases_topdown[
+        OF input buffers pending_cap_ok src_len_word fit out_cap_ok
+          encoded_len_word spec_eq build_phase window_phase serialize_phase])
+qed
 
 end
 
