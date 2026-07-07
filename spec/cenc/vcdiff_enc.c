@@ -655,12 +655,15 @@ static unsigned int serialize(unsigned char *out, unsigned int out_cap,
 
 /* Public entrypoint.
  *
- * Caller-provided scratch buffer sizes:
+ * Caller-provided scratch buffer sizes (proven sufficient for every
+ * input by proof/encoder-bounds/Encoder_Bounds.thy):
  *   head     : HASH_SIZE words
  *   next_arr : >= src_len (or >= 1 if src_len == 0; pass any non-null ptr)
  *   pending  : >= tgt_len  (+1 for the tail byte of a degenerate case)
- *   data_sec, inst_sec, addr_sec : each tgt_len + 64 bytes is enough.
- *   out      : tgt_len + src_len-ish; a safe cap is tgt_len * 2 + 1024.
+ *   data_sec, inst_sec : >= tgt_len bytes each.
+ *   addr_sec : >= 5*tgt_len/4 bytes (tgt_len + 64 is NOT enough for
+ *              adversarial inputs tiled with small far-address copies).
+ *   out      : >= 2*tgt_len + 38 bytes.
  *
  * Returns bytes written to `out` on success, or 0 on any overflow. */
 unsigned int vcdiff_encode(unsigned char *out, unsigned int out_cap,

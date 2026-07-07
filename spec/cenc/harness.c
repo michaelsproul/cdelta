@@ -69,13 +69,15 @@ static int run_xdelta3_decode(const char *vcdiff_path, const char *out_path)
 static int round_trip(const char *name,
                       const unsigned char *target, size_t target_len)
 {
-    unsigned char out[65536];
+    /* Caps proven sufficient for every input (Encoder_Bounds.thy):
+     * data/inst <= tgt_len, 4*addr <= 5*tgt_len, out <= 2*tgt_len + 38. */
+    unsigned char out[2 * 65536 + 64];
     unsigned int head[65536];
     unsigned int next_arr[1];
     unsigned char pending[65536];
     unsigned char data[65536 + 64];
     unsigned char inst[65536 + 64];
-    unsigned char addr[65536 + 64];
+    unsigned char addr[65536 + 16384 + 64];
     unsigned int out_len;
     if (target_len > 65536U) {
         fprintf(stderr, "[%s] target too large for harness scratch\n", name);
@@ -89,7 +91,7 @@ static int round_trip(const char *name,
                             pending, 65536U,
                             data, 65536U + 64U,
                             inst, 65536U + 64U,
-                            addr, 65536U + 64U);
+                            addr, 65536U + 16384U + 64U);
     if (out_len == 0) {
         fprintf(stderr, "[%s] encode failed (buffer full)\n", name);
         return 1;

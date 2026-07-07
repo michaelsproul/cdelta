@@ -70,15 +70,19 @@ pub mod cdelta {
 
         fn encode(target: &[u8], source: &[u8]) -> Result<Bytes, Error> {
             let _g = LOCK.lock().unwrap();
+            // Caps proven sufficient for every input in
+            // proof/encoder-bounds/Encoder_Bounds.thy: data/inst <= tgt_len,
+            // 4*addr <= 5*tgt_len, total output <= 2*tgt_len + 38.
             let margin: usize = 64;
             let section_cap = target.len() + margin;
-            let out_cap = target.len() + source.len() / 8 + 1024;
+            let addr_cap = target.len() + target.len() / 4 + margin;
+            let out_cap = 2 * target.len() + margin;
             let mut head = vec![0u32; 1usize << 16];
             let mut next_arr = vec![0u32; source.len().max(4)];
             let mut pending = vec![0u8; target.len().max(1)];
             let mut data_sec = vec![0u8; section_cap];
             let mut inst_sec = vec![0u8; section_cap];
-            let mut addr_sec = vec![0u8; section_cap];
+            let mut addr_sec = vec![0u8; addr_cap];
             let mut out = vec![0u8; out_cap];
             let n = unsafe {
                 ffi::vcdiff_encode(
@@ -93,7 +97,7 @@ pub mod cdelta {
                     pending.as_mut_ptr(), pending.len() as u32,
                     data_sec.as_mut_ptr(), section_cap as u32,
                     inst_sec.as_mut_ptr(), section_cap as u32,
-                    addr_sec.as_mut_ptr(), section_cap as u32,
+                    addr_sec.as_mut_ptr(), addr_cap as u32,
                 )
             };
             if n == 0 {

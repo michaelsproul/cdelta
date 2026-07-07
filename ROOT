@@ -55,6 +55,17 @@ session CdeltaSpecRoundtrip in "proof/roundtrip" = CdeltaSpecBase +
     Spec_Roundtrip
 
 (*
+  Pure output-length bounds for the encoder spec. Kept as its own
+  session (rather than a theory inside CdeltaSpecRoundtrip) so that
+  adding/editing the bounds does not invalidate the CdeltaSpecRoundtrip
+  heap and force a rebuild of the decoder-refinement chain.
+*)
+session CdeltaEncoderBounds in "proof/encoder-bounds" = CdeltaSpecRoundtrip +
+  options [timeout = 1800, quick_and_dirty = false]
+  theories
+    Encoder_Bounds
+
+(*
   Image-only parent for CdeltaRefine. Exists so the Isabelle MCP
   (`isabelle vscode_server`) can be launched with `-l CdeltaRefineBase`
   and then re-elaborate VcdiffDec_Refine.thy live — if the MCP is
@@ -78,5 +89,6 @@ session CdeltaCRoundtrip in "proof/c-roundtrip" = CdeltaRefine +
   options [timeout = 1800, quick_and_dirty = false]
   sessions
     CdeltaEncoderCorrectness
+    CdeltaEncoderBounds
   theories
     VcdiffC_Roundtrip
