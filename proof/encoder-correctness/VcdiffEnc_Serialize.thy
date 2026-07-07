@@ -14221,6 +14221,12 @@ lemma vcdiff_encode'_compose_phases_topdown:
           pending pending_cap data data_cap inst inst_cap addr addr_cap"
       and pending_cap_ok: "unat tgt_len \<le> unat pending_cap"
       and src_len_word: "unat src_len < unat (no_entry32 :: 32 word)"
+      and tgt_len_small: "\<not> (0x7FFFFFE0 :: 32 word) \<le> tgt_len"
+      and src_tgt_word: "\<not> 0xFFFFFFFF - tgt_len < src_len"
+      and data_cap_word: "\<not> data_cap < tgt_len + 64"
+      and inst_cap_word: "\<not> inst_cap < tgt_len + 64"
+      and addr_cap_word: "\<not> addr_cap < tgt_len + tgt_len div 4 + 64"
+      and out_cap_word: "\<not> out_cap < 2 * tgt_len + 38"
       and fit:
         "sections_fit_32 src_bytes tgt_bytes
           (encode_window_full_spec src_bytes tgt_bytes)"
@@ -14271,6 +14277,8 @@ lemma vcdiff_encode'_compose_phases_topdown:
 proof -
   have cap_ok: "\<not> pending_cap < tgt_len"
     using pending_cap_ok by (simp add: word_less_nat_alt)
+  have src_sentinel: "\<not> (0xFFFFFFFF :: 32 word) \<le> src_len"
+    using src_len_word by (simp add: word_le_nat_alt not_le)
   have success_from_window:
     "\<And>s_index s_window n t.
       encoder_index_post s s_index src src_len tgt tgt_len head_arr next_arr
@@ -14281,7 +14289,8 @@ proof -
     by (auto simp: encoder_index_post_def encoder_success_post_def)
   show ?thesis
     unfolding vcdiff_encode'_def
-    apply (simp add: cap_ok)
+    apply (simp add: cap_ok src_sentinel tgt_len_small src_tgt_word
+                     data_cap_word inst_cap_word addr_cap_word out_cap_word)
     apply (rule runs_to_bind)
      apply (rule runs_to_weaken[OF build_phase])
      apply simp
@@ -14317,6 +14326,12 @@ theorem vcdiff_encode'_writes_encode_spec_topdown:
           data_cap inst_cap addr_cap"
       and pending_cap_ok: "unat tgt_len \<le> unat pending_cap"
       and src_len_word: "unat src_len < unat (no_entry32 :: 32 word)"
+      and tgt_len_small: "\<not> (0x7FFFFFE0 :: 32 word) \<le> tgt_len"
+      and src_tgt_word: "\<not> 0xFFFFFFFF - tgt_len < src_len"
+      and data_cap_word: "\<not> data_cap < tgt_len + 64"
+      and inst_cap_word: "\<not> inst_cap < tgt_len + 64"
+      and addr_cap_word: "\<not> addr_cap < tgt_len + tgt_len div 4 + 64"
+      and out_cap_word: "\<not> out_cap < 2 * tgt_len + 38"
       and head_valid:
         "\<And>h. h < hash_size \<Longrightarrow>
           ptr_valid (heap_typing s) (head_arr +\<^sub>p int h)"
@@ -14422,8 +14437,10 @@ proof -
   qed
   show ?thesis
     by (rule vcdiff_encode'_compose_phases_topdown[
-        OF input buffers pending_cap_ok src_len_word fit out_cap_ok
-          encoded_len_word spec_eq build_phase window_phase serialize_phase])
+        OF input buffers pending_cap_ok src_len_word tgt_len_small
+          src_tgt_word data_cap_word inst_cap_word addr_cap_word out_cap_word
+          fit out_cap_ok encoded_len_word spec_eq build_phase window_phase
+          serialize_phase])
 qed
 
 end

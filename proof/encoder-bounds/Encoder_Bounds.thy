@@ -935,4 +935,75 @@ corollary encode_spec_length_lt_2p32:
   shows "length (encode_spec src tgt) < 2 ^ 32"
   using encode_spec_length_le[OF assms] tgt_bd pow31_nat pow32_nat by linarith
 
+(* ---------- Caller-checkable capacity envelope ---------- *)
+
+(*
+  The exact arithmetic envelope enforced by the C entrypoint's upfront
+  check (vcdiff_enc.c). A caller meeting it is guaranteed a successful
+  encode: the section bounds above show no internal overflow can occur.
+
+  The addr conjunct uses the division form the C can compute in 32 bits;
+  it implies the tight 4*addr_cap >= 5*tgt_len bound (and tgt_len + 64
+  <= addr_cap, required by the window-loop budget invariant).
+*)
+definition encoder_bounds_ok ::
+  "nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool" where
+  "encoder_bounds_ok out_cap src_len tgt_len pending_cap
+      data_cap inst_cap addr_cap \<longleftrightarrow>
+     tgt_len < 2 ^ 31 - 32 \<and>
+     src_len < 2 ^ 32 - 1 \<and>
+     src_len + tgt_len < 2 ^ 32 \<and>
+     tgt_len \<le> pending_cap \<and>
+     tgt_len + 64 \<le> data_cap \<and>
+     tgt_len + 64 \<le> inst_cap \<and>
+     tgt_len + tgt_len div 4 + 64 \<le> addr_cap \<and>
+     2 * tgt_len + 38 \<le> out_cap"
+
+lemma encoder_bounds_ok_addr_arith:
+  assumes ok: "encoder_bounds_ok out_cap src_len tgt_len pending_cap
+                 data_cap inst_cap addr_cap"
+  shows "5 * tgt_len \<le> 4 * addr_cap"
+    and "tgt_len + 64 \<le> addr_cap"
+proof -
+  have acap: "tgt_len + tgt_len div 4 + 64 \<le> addr_cap"
+    using ok by (simp add: encoder_bounds_ok_def)
+  have division: "4 * (tgt_len div 4) + tgt_len mod 4 = tgt_len"
+    by simp
+  have mod_lt: "tgt_len mod 4 < 4"
+    by simp
+  show "5 * tgt_len \<le> 4 * addr_cap"
+    using acap division mod_lt by linarith
+  show "tgt_len + 64 \<le> addr_cap"
+    using acap by linarith
+qed
+
+lemma encoder_bounds_ok_out_cap:
+  assumes ok: "encoder_bounds_ok out_cap (length src) (length tgt) pending_cap
+                 data_cap inst_cap addr_cap"
+  shows "length (encode_spec src tgt) \<le> out_cap"
+proof -
+  have src_bd': "length src < 2 ^ 32 - 1"
+    using ok by (simp add: encoder_bounds_ok_def)
+  have src_bd: "length src < 2 ^ 32"
+    using src_bd' pow32_nat by linarith
+  have tgt_bd: "length tgt < 2 ^ 31 - 32"
+    using ok by (simp add: encoder_bounds_ok_def)
+  have "length (encode_spec src tgt) \<le> 2 * length tgt + 38"
+    by (rule encode_spec_length_le[OF src_bd tgt_bd])
+  moreover have "2 * length tgt + 38 \<le> out_cap"
+    using ok by (simp add: encoder_bounds_ok_def)
+  ultimately show ?thesis by linarith
+qed
+
+(* The encoder never emits an empty patch: serialize always begins with
+   the 4-byte magic. Distinguishes success (n > 0) from the 0 reject. *)
+lemma serialize_nonempty:
+  "serialize src tgt data inst addr \<noteq> []"
+  by (simp add: serialize_def Let_def magic_bytes_def)
+
+lemma encode_spec_length_pos:
+  "0 < length (encode_spec src tgt)"
+  by (auto simp: encode_spec_def encode_spec_full_def encode_spec_run_def
+                 serialize_from_insts_def Let_def serialize_nonempty)
+
 end

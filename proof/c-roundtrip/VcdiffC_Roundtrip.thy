@@ -1,8 +1,7 @@
 theory VcdiffC_Roundtrip
   imports
-    CdeltaEncoderCorrectness.VcdiffEnc_Serialize
+    CdeltaEncoderCorrectness.VcdiffEnc_Checked
     CdeltaRefine.VcdiffDec_Refine
-    CdeltaEncoderBounds.Encoder_Bounds
 begin
 
 locale vcdiff_c_roundtrip_global_addresses =
@@ -499,15 +498,13 @@ lemma vcdiff_encode'_writes_encode_spec_roundtrip_context:
     "enc.encoder_input_rel enc_s enc_src enc_src_len enc_tgt enc_tgt_len
        src_bytes tgt_bytes"
       and buffers:
-    "enc.encoder_buffers_ok enc_s enc_out enc_out_cap enc_src enc_src_len enc_tgt
-       enc_tgt_len enc_head_arr enc_next_arr enc_pending enc_pending_cap
-       enc_data enc_data_cap enc_inst enc_inst_cap enc_addr enc_addr_cap"
-      and final_caps:
-    "enc.encoder_final_section_caps_ok src_bytes tgt_bytes
+    "enc.encoder_buffers_valid enc_s enc_out enc_out_cap enc_src enc_src_len
+       enc_tgt enc_tgt_len enc_head_arr enc_next_arr enc_pending
+       enc_pending_cap enc_data enc_data_cap enc_inst enc_inst_cap enc_addr
+       enc_addr_cap"
+      and arith:
+    "enc.encoder_arith_ok enc_out_cap enc_src_len enc_tgt_len enc_pending_cap
        enc_data_cap enc_inst_cap enc_addr_cap"
-      and pending_cap_ok: "unat enc_tgt_len \<le> unat enc_pending_cap"
-      and src_len_word:
-    "unat enc_src_len < unat (no_entry32 :: 32 word)"
       and head_valid:
     "\<And>h. h < hash_size \<Longrightarrow>
        vcdiff_enc.ptr_valid (VcdiffEnc.lifted_globals.heap_typing enc_s)
@@ -528,14 +525,6 @@ lemma vcdiff_encode'_writes_encode_spec_roundtrip_context:
       and head_next_disjoint:
     "\<And>q bucket. \<lbrakk>q < unat enc_src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
        enc_next_arr +\<^sub>p int q \<noteq> enc_head_arr +\<^sub>p int bucket"
-      and fit:
-    "sections_fit_32 src_bytes tgt_bytes
-       (encode_window_full_spec src_bytes tgt_bytes)"
-      and src_tgt_bound: "length src_bytes + length tgt_bytes < 2 ^ 32"
-      and enc_out_cap_ok:
-    "length (encode_spec src_bytes tgt_bytes) \<le> unat enc_out_cap"
-      and encoded_len_word:
-    "length (encode_spec src_bytes tgt_bytes) < 2 ^ 32"
   shows
     "vcdiff_encode' enc_out enc_out_cap enc_src enc_src_len enc_tgt
        enc_tgt_len enc_head_arr enc_next_arr enc_pending enc_pending_cap
@@ -543,27 +532,27 @@ lemma vcdiff_encode'_writes_encode_spec_roundtrip_context:
        enc_s
      \<lbrace> \<lambda>r enc_t.
           \<exists>enc_n.
-            r = Result enc_n \<and>
+            r = Result enc_n \<and> 0 < unat enc_n \<and>
             enc.encoder_success_post enc_out src_bytes tgt_bytes enc_n enc_s
               enc_t \<rbrace>"
-  apply (rule enc.vcdiff_encode'_writes_encode_spec_topdown)
-               apply (rule input)
-              apply (rule buffers)
-             apply (rule final_caps)
-            apply (rule pending_cap_ok)
-           apply (rule src_len_word)
-          apply (blast intro: head_valid)
-         apply (blast intro: next_valid)
-        apply (metis head_no_alias)
-       apply (metis next_no_alias)
-      apply (metis next_head_disjoint)
-	    apply (metis head_next_disjoint)
-	    apply (rule fit)
-	   apply (rule src_tgt_bound)
-	   apply (rule enc_out_cap_ok)
-	  apply (rule encoded_len_word)
+  apply (rule enc.vcdiff_encode'_writes_encode_spec_of_arith)
+          apply (rule input)
+         apply (rule buffers)
+        apply (rule arith)
+       apply (blast intro: head_valid)
+      apply (blast intro: next_valid)
+     apply (metis head_no_alias)
+    apply (metis next_no_alias)
+   apply (metis next_head_disjoint)
+  apply (metis head_next_disjoint)
   done
 
+(*
+  End-to-end roundtrip under the arithmetic envelope. All hypotheses are
+  either structural (pointer validity, disjointness, heap-byte relation)
+  or the single caller-checkable `encoder_arith_ok` predicate, matching
+  the C entrypoint's runtime check exactly.
+*)
 theorem vcdiff_encode'_then_decode_roundtrip_topdown:
   fixes enc_out enc_src enc_tgt enc_pending enc_data enc_inst enc_addr ::
       "8 word ptr"
@@ -577,15 +566,14 @@ theorem vcdiff_encode'_then_decode_roundtrip_topdown:
     "enc.encoder_input_rel enc_s enc_src enc_src_len enc_tgt enc_tgt_len
        src_bytes tgt_bytes"
       and buffers:
-    "enc.encoder_buffers_ok enc_s enc_out enc_out_cap enc_src enc_src_len enc_tgt
-       enc_tgt_len enc_head_arr enc_next_arr enc_pending enc_pending_cap
-       enc_data enc_data_cap enc_inst enc_inst_cap enc_addr enc_addr_cap"
-      and final_caps:
-    "enc.encoder_final_section_caps_ok src_bytes tgt_bytes
+    "enc.encoder_buffers_valid enc_s enc_out enc_out_cap enc_src enc_src_len
+       enc_tgt enc_tgt_len enc_head_arr enc_next_arr enc_pending
+       enc_pending_cap enc_data enc_data_cap enc_inst enc_inst_cap enc_addr
+       enc_addr_cap"
+      and arith:
+    "enc.encoder_arith_ok enc_out_cap enc_src_len enc_tgt_len enc_pending_cap
        enc_data_cap enc_inst_cap enc_addr_cap"
-      and pending_cap_ok: "unat enc_tgt_len \<le> unat enc_pending_cap"
-      and src_len_word:
-    "unat enc_src_len < unat (no_entry32 :: 32 word)"
+      and src_len_eq: "unat enc_src_len = length src_bytes"
       and head_valid:
     "\<And>h. h < hash_size \<Longrightarrow>
        vcdiff_enc.ptr_valid (VcdiffEnc.lifted_globals.heap_typing enc_s)
@@ -606,17 +594,6 @@ theorem vcdiff_encode'_then_decode_roundtrip_topdown:
       and head_next_disjoint:
     "\<And>q bucket. \<lbrakk>q < unat enc_src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
        enc_next_arr +\<^sub>p int q \<noteq> enc_head_arr +\<^sub>p int bucket"
-      and fit:
-    "sections_fit_32 src_bytes tgt_bytes
-       (encode_window_full_spec src_bytes tgt_bytes)"
-      and enc_out_cap_ok:
-    "length (encode_spec src_bytes tgt_bytes) \<le> unat enc_out_cap"
-      and encoded_len_word:
-    "length (encode_spec src_bytes tgt_bytes) < 2 ^ 32"
-      and src_len_eq: "unat enc_src_len = length src_bytes"
-      and src_bound: "length src_bytes < 2 ^ 32"
-      and tgt_bound: "length tgt_bytes < 2 ^ 32 - 32"
-      and src_tgt_bound: "length src_bytes + length tgt_bytes < 2 ^ 32"
       and dec_input:
     "\<And>enc_n enc_t. enc.encoder_success_post enc_out src_bytes tgt_bytes enc_n
        enc_s enc_t \<Longrightarrow>
@@ -653,85 +630,61 @@ theorem vcdiff_encode'_then_decode_roundtrip_topdown:
        enc_s
      \<lbrace> \<lambda>r enc_t.
           \<exists>enc_n.
-            r = Result enc_n \<and>
+            r = Result enc_n \<and> 0 < unat enc_n \<and>
             decoder_roundtrip_runs dec_patch enc_n dec_src enc_src_len
               dec_out dec_out_cap dec_out_len dec_s tgt_bytes \<rbrace>"
-proof (rule runs_to_weaken[
-    OF vcdiff_encode'_writes_encode_spec_roundtrip_context[
-      OF input buffers final_caps pending_cap_ok src_len_word head_valid
-         next_valid
-	         head_no_alias next_no_alias next_head_disjoint head_next_disjoint
-	         fit src_tgt_bound enc_out_cap_ok encoded_len_word]])
-  fix r enc_t
-  assume post:
-    "\<exists>n. r = Result n \<and>
-      enc.encoder_success_post enc_out src_bytes tgt_bytes n enc_s enc_t"
-  then obtain enc_n where
-      r_def: "r = Result enc_n"
-    and enc_success:
-      "enc.encoder_success_post enc_out src_bytes tgt_bytes enc_n enc_s enc_t"
-    by blast
-  have dec_run:
-    "decoder_roundtrip_runs dec_patch enc_n dec_src enc_src_len dec_out
-       dec_out_cap dec_out_len dec_s tgt_bytes"
-    unfolding decoder_roundtrip_runs_def
-    by (rule vcdiff_encoded_patch_decodes_to_target_topdown[
-        OF enc_success dec_input[OF enc_success] src_len_eq src_bound
-           tgt_bound src_tgt_bound out_len_ok patch_ok[OF enc_success]
-           src_ok src_nonnull out_ok code_tbl_matches_ready
-           code_tbl_tags_ready out_patch_disj[OF enc_success] out_src_disj
-           out_inj dec_out_cap_enough])
-  show "\<exists>enc_n.
-      r = Result enc_n \<and>
-      decoder_roundtrip_runs dec_patch enc_n dec_src enc_src_len dec_out
-        dec_out_cap dec_out_len dec_s tgt_bytes"
-    using r_def dec_run by blast
-qed
-
-(*
-  Discharge the semantic caps assumption from arithmetic on the caller's
-  buffer capacities, via the tight section bounds of Encoder_Bounds:
-      data <= tgt_len,  inst <= tgt_len,  4*addr <= 5*tgt_len.
-*)
-lemma encoder_final_section_caps_ok_of_arith:
-  assumes src_bound: "length src_bytes < 2 ^ 32"
-      and data_cap_ok: "length tgt_bytes \<le> unat enc_data_cap"
-      and inst_cap_ok: "length tgt_bytes \<le> unat enc_inst_cap"
-      and addr_cap_ok: "5 * length tgt_bytes \<le> 4 * unat enc_addr_cap"
-  shows "enc.encoder_final_section_caps_ok src_bytes tgt_bytes
-           enc_data_cap enc_inst_cap enc_addr_cap"
 proof -
-  define fin where
-    "fin = encode_window_full_loop (length tgt_bytes + 1) src_bytes tgt_bytes
-             (build_index_spec src_bytes) enc_full_init"
-  note b = encode_window_final_state_section_bounds
-             [OF src_bound, of tgt_bytes, folded fin_def]
-  have d: "length (enc_data fin) \<le> unat enc_data_cap"
-    using b(1) data_cap_ok by linarith
-  have i: "length (enc_inst fin) \<le> unat enc_inst_cap"
-    using b(2) inst_cap_ok by linarith
-  have a: "length (enc_addr fin) \<le> unat enc_addr_cap"
-    using b(3) addr_cap_ok by linarith
+  note B = arith[unfolded enc.encoder_arith_ok_unat_iff]
+  have tgt_len_eq: "unat enc_tgt_len = length tgt_bytes"
+    using input by (simp add: enc.encoder_input_rel_def)
+  have src_bound: "length src_bytes < 2 ^ 32"
+    using src_len_eq unat_lt2p[of enc_src_len] by simp
+  have tgt_small: "length tgt_bytes < 2 ^ 31 - 32"
+    using B tgt_len_eq by (simp add: encoder_bounds_ok_def)
+  have tgt_bound: "length tgt_bytes < 2 ^ 32 - 32"
+    using tgt_small pow31_nat pow32_nat by linarith
+  have src_tgt_bound: "length src_bytes + length tgt_bytes < 2 ^ 32"
+    using B src_len_eq tgt_len_eq by (simp add: encoder_bounds_ok_def)
   show ?thesis
-    using d i a
-    by (simp add: enc.encoder_final_section_caps_ok_def
-                  enc.encode_window_final_spec_state_def fin_def)
+  proof (rule runs_to_weaken[
+      OF vcdiff_encode'_writes_encode_spec_roundtrip_context[
+        OF input buffers arith head_valid next_valid
+           head_no_alias next_no_alias next_head_disjoint head_next_disjoint]])
+    fix r enc_t
+    assume post:
+      "\<exists>n. r = Result n \<and> 0 < unat n \<and>
+        enc.encoder_success_post enc_out src_bytes tgt_bytes n enc_s enc_t"
+    then obtain enc_n where
+        r_def: "r = Result enc_n"
+      and n_pos: "0 < unat enc_n"
+      and enc_success:
+        "enc.encoder_success_post enc_out src_bytes tgt_bytes enc_n enc_s enc_t"
+      by blast
+    have dec_run:
+      "decoder_roundtrip_runs dec_patch enc_n dec_src enc_src_len dec_out
+         dec_out_cap dec_out_len dec_s tgt_bytes"
+      unfolding decoder_roundtrip_runs_def
+      by (rule vcdiff_encoded_patch_decodes_to_target_topdown[
+          OF enc_success dec_input[OF enc_success] src_len_eq src_bound
+             tgt_bound src_tgt_bound out_len_ok patch_ok[OF enc_success]
+             src_ok src_nonnull out_ok code_tbl_matches_ready
+             code_tbl_tags_ready out_patch_disj[OF enc_success] out_src_disj
+             out_inj dec_out_cap_enough])
+    show "\<exists>enc_n.
+        r = Result enc_n \<and> 0 < unat enc_n \<and>
+        decoder_roundtrip_runs dec_patch enc_n dec_src enc_src_len dec_out
+          dec_out_cap dec_out_len dec_s tgt_bytes"
+      using r_def n_pos dec_run by blast
+  qed
 qed
 
 (*
-  The roundtrip theorem with all spec-referencing hypotheses replaced by
-  arithmetic side-conditions a caller can check:
-
-    - `final_caps` follows from data/inst caps >= tgt_len and
-      4*addr_cap >= 5*tgt_len;
-    - `fit`, `encoded_len_word` follow from tgt_len < 2^31 - 32
-      (which also subsumes the old tgt_bound < 2^32 - 32);
-    - `enc_out_cap_ok` follows from out_cap >= 2*tgt_len + 38.
-
-  Everything else (pointer validity, disjointness, index arrays,
-  decoder-side buffers) is passed through verbatim.
+  The headline roundtrip theorem: ONLY structural hypotheses. The
+  encoder either rejects (Result 0) or its output provably decodes back
+  to the target. A successful encode is always covered by the
+  correctness theorems.
 *)
-theorem vcdiff_encode'_then_decode_roundtrip_sized:
+theorem vcdiff_encode'_then_decode_roundtrip_checked:
   fixes enc_out enc_src enc_tgt enc_pending enc_data enc_inst enc_addr ::
       "8 word ptr"
     and enc_out_cap enc_src_len enc_tgt_len enc_pending_cap enc_data_cap
@@ -744,12 +697,11 @@ theorem vcdiff_encode'_then_decode_roundtrip_sized:
     "enc.encoder_input_rel enc_s enc_src enc_src_len enc_tgt enc_tgt_len
        src_bytes tgt_bytes"
       and buffers:
-    "enc.encoder_buffers_ok enc_s enc_out enc_out_cap enc_src enc_src_len enc_tgt
-       enc_tgt_len enc_head_arr enc_next_arr enc_pending enc_pending_cap
-       enc_data enc_data_cap enc_inst enc_inst_cap enc_addr enc_addr_cap"
-      and pending_cap_ok: "unat enc_tgt_len \<le> unat enc_pending_cap"
-      and src_len_word:
-    "unat enc_src_len < unat (no_entry32 :: 32 word)"
+    "enc.encoder_buffers_valid enc_s enc_out enc_out_cap enc_src enc_src_len
+       enc_tgt enc_tgt_len enc_head_arr enc_next_arr enc_pending
+       enc_pending_cap enc_data enc_data_cap enc_inst enc_inst_cap enc_addr
+       enc_addr_cap"
+      and src_len_eq: "unat enc_src_len = length src_bytes"
       and head_valid:
     "\<And>h. h < hash_size \<Longrightarrow>
        vcdiff_enc.ptr_valid (VcdiffEnc.lifted_globals.heap_typing enc_s)
@@ -770,14 +722,6 @@ theorem vcdiff_encode'_then_decode_roundtrip_sized:
       and head_next_disjoint:
     "\<And>q bucket. \<lbrakk>q < unat enc_src_len; bucket < hash_size\<rbrakk> \<Longrightarrow>
        enc_next_arr +\<^sub>p int q \<noteq> enc_head_arr +\<^sub>p int bucket"
-      and src_len_eq: "unat enc_src_len = length src_bytes"
-      and src_bound: "length src_bytes < 2 ^ 32"
-      and src_tgt_bound: "length src_bytes + length tgt_bytes < 2 ^ 32"
-      and tgt_small: "length tgt_bytes < 2 ^ 31 - 32"
-      and data_cap_ok: "length tgt_bytes \<le> unat enc_data_cap"
-      and inst_cap_ok: "length tgt_bytes \<le> unat enc_inst_cap"
-      and addr_cap_ok: "5 * length tgt_bytes \<le> 4 * unat enc_addr_cap"
-      and out_cap_arith: "2 * length tgt_bytes + 38 \<le> unat enc_out_cap"
       and dec_input:
     "\<And>enc_n enc_t. enc.encoder_success_post enc_out src_bytes tgt_bytes enc_n
        enc_s enc_t \<Longrightarrow>
@@ -815,36 +759,28 @@ theorem vcdiff_encode'_then_decode_roundtrip_sized:
      \<lbrace> \<lambda>r enc_t.
           \<exists>enc_n.
             r = Result enc_n \<and>
-            decoder_roundtrip_runs dec_patch enc_n dec_src enc_src_len
-              dec_out dec_out_cap dec_out_len dec_s tgt_bytes \<rbrace>"
-proof -
-  have final_caps:
-    "enc.encoder_final_section_caps_ok src_bytes tgt_bytes
-       enc_data_cap enc_inst_cap enc_addr_cap"
-    by (rule encoder_final_section_caps_ok_of_arith
-         [OF src_bound data_cap_ok inst_cap_ok addr_cap_ok])
-  have fit:
-    "sections_fit_32 src_bytes tgt_bytes
-       (encode_window_full_spec src_bytes tgt_bytes)"
-    by (rule encode_window_full_spec_fits_32[OF src_bound tgt_small])
-  have encoded_len_word:
-    "length (encode_spec src_bytes tgt_bytes) < 2 ^ 32"
-    by (rule encode_spec_length_lt_2p32[OF src_bound tgt_small])
-  have enc_out_cap_ok:
-    "length (encode_spec src_bytes tgt_bytes) \<le> unat enc_out_cap"
-    using encode_spec_length_le[OF src_bound tgt_small] out_cap_arith
-    by linarith
-  have tgt_bound: "length tgt_bytes < 2 ^ 32 - 32"
-    using tgt_small pow31_nat pow32_nat by linarith
+            (enc_n = 0 \<or>
+             (0 < unat enc_n \<and>
+              enc.encoder_arith_ok enc_out_cap enc_src_len enc_tgt_len
+                enc_pending_cap enc_data_cap enc_inst_cap enc_addr_cap \<and>
+              decoder_roundtrip_runs dec_patch enc_n dec_src enc_src_len
+                dec_out dec_out_cap dec_out_len dec_s tgt_bytes)) \<rbrace>"
+proof (cases "enc.encoder_arith_ok enc_out_cap enc_src_len enc_tgt_len
+                enc_pending_cap enc_data_cap enc_inst_cap enc_addr_cap")
+  case False
   show ?thesis
-    by (rule vcdiff_encode'_then_decode_roundtrip_topdown[
-        OF input buffers final_caps pending_cap_ok src_len_word
-           head_valid next_valid head_no_alias next_no_alias
-           next_head_disjoint head_next_disjoint fit enc_out_cap_ok
-           encoded_len_word src_len_eq src_bound tgt_bound src_tgt_bound
-           dec_input out_len_ok patch_ok src_ok src_nonnull out_ok
-           code_tbl_matches_ready code_tbl_tags_ready out_patch_disj
-           out_src_disj out_inj dec_out_cap_enough])
+    by (rule runs_to_weaken[OF enc.vcdiff_encode'_rejects_arith_fail[OF False]])
+       auto
+next
+  case True
+  show ?thesis
+    by (rule runs_to_weaken[OF vcdiff_encode'_then_decode_roundtrip_topdown[
+          OF input buffers True src_len_eq head_valid next_valid head_no_alias
+             next_no_alias next_head_disjoint head_next_disjoint
+             dec_input out_len_ok patch_ok src_ok src_nonnull out_ok
+             code_tbl_matches_ready code_tbl_tags_ready out_patch_disj
+             out_src_disj out_inj dec_out_cap_enough]])
+       (use True in auto)
 qed
 
 end

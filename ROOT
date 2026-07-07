@@ -36,6 +36,7 @@ session CdeltaEncoderCorrectness in "proof/encoder-correctness" = CdeltaEncoder 
   options [timeout = 1800, quick_and_dirty = false]
   sessions
     CdeltaSpecRoundtrip
+    CdeltaEncoderBounds
   theories
     VcdiffEnc_Writers
     VcdiffEnc_Wire
@@ -43,6 +44,7 @@ session CdeltaEncoderCorrectness in "proof/encoder-correctness" = CdeltaEncoder 
     VcdiffEnc_Match
     VcdiffEnc_Emit
     VcdiffEnc_Serialize
+    VcdiffEnc_Checked
 
 session TestAdd in "proof/test-add" = AutoCorres2 +
   options [timeout = 600]

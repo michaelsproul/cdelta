@@ -655,17 +655,26 @@ static unsigned int serialize(unsigned char *out, unsigned int out_cap,
 
 /* Public entrypoint.
  *
- * Caller-provided scratch buffer sizes (proven sufficient for every
- * input by proof/encoder-bounds/Encoder_Bounds.thy):
- *   head     : HASH_SIZE words
- *   next_arr : >= src_len (or >= 1 if src_len == 0; pass any non-null ptr)
- *   pending  : >= tgt_len  (+1 for the tail byte of a degenerate case)
- *   data_sec, inst_sec : >= tgt_len bytes each.
- *   addr_sec : >= 5*tgt_len/4 bytes (tgt_len + 64 is NOT enough for
- *              adversarial inputs tiled with small far-address copies).
- *   out      : >= 2*tgt_len + 38 bytes.
+ * Performs an explicit upfront size/capacity check and returns 0
+ * (rejecting the input) unless all of the following hold. The envelope
+ * is proven sufficient for every input by
+ * proof/encoder-bounds/Encoder_Bounds.thy, so a caller meeting it is
+ * guaranteed a successful encode:
+ *   tgt_len           <  2^31 - 32   (0x7FFFFFE0)
+ *   src_len           <  0xFFFFFFFF  (NO_ENTRY sentinel)
+ *   src_len + tgt_len <  2^32        (no wrap)
+ *   pending_cap       >= tgt_len
+ *   data_cap          >= tgt_len + 64
+ *   inst_cap          >= tgt_len + 64
+ *   addr_cap          >= tgt_len + tgt_len/4 + 64
+ *                        (implies 4*addr_cap >= 5*tgt_len, the tight
+ *                         adversarial addr-section bound)
+ *   out_cap           >= 2*tgt_len + 38
+ * head must have HASH_SIZE entries; next_arr >= src_len entries
+ * (>= 1 if src_len == 0; pass any non-null pointer).
  *
- * Returns bytes written to `out` on success, or 0 on any overflow. */
+ * Returns bytes written to `out` (always > 0) on success, or 0 if the
+ * check above fails. */
 unsigned int vcdiff_encode(unsigned char *out, unsigned int out_cap,
                            unsigned char *src, unsigned int src_len,
                            unsigned char *tgt, unsigned int tgt_len,
@@ -678,7 +687,16 @@ unsigned int vcdiff_encode(unsigned char *out, unsigned int out_cap,
 {
     struct sections_t s;
 
+    /* Upfront arithmetic check; the tgt_len bound comes first so that
+     * every sum below is overflow-free. */
+    if (tgt_len >= 0x7FFFFFE0U) return 0U;          /* tgt_len < 2^31 - 32 */
+    if (src_len >= 0xFFFFFFFFU) return 0U;          /* src_len < NO_ENTRY  */
+    if (src_len > 0xFFFFFFFFU - tgt_len) return 0U; /* src+tgt < 2^32      */
     if (pending_cap < tgt_len) return 0U;
+    if (data_cap < tgt_len + 64U) return 0U;
+    if (inst_cap < tgt_len + 64U) return 0U;
+    if (addr_cap < tgt_len + tgt_len / 4U + 64U) return 0U;
+    if (out_cap < 2U * tgt_len + 38U) return 0U;
 
     build_index(src, src_len, head, next_arr);
 
